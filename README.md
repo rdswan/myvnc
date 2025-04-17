@@ -6,6 +6,7 @@ This is a GUI application to manage a users VNCs. It runs on MacOS, Windows, and
 - Section to support the creation of a new VNC server
   - New VNCs can be opened with a variety of options including name, site, resolution, and window manager of choice
   - LSF configuration to define the queue, number of cores, and amount of memory to reserve for submission
+- VNC commands are not executed directly, but rather submitted to LSF. Therefore no actual python-vnc-client is required.
 
 ## Installation
 
