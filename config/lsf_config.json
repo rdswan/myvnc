@@ -1,0 +1,25 @@
+{
+    "default_settings": {
+        "queue": "vnc_queue",
+        "num_cores": 2,
+        "memory_mb": 4096,
+        "time_limit": "12:00"
+    },
+    "available_queues": [
+        "vnc_queue",
+        "interactive",
+        "gpu_queue"
+    ],
+    "memory_options_mb": [
+        2048,
+        4096,
+        8192,
+        16384
+    ],
+    "core_options": [
+        1,
+        2,
+        4,
+        8
+    ]
+} 
