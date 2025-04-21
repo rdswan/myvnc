@@ -1,0 +1,2 @@
+[console_scripts]
+myvnc = myvnc.main:main

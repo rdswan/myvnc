@@ -1,0 +1,3 @@
+PyQt6>=6.4.0
+python-lsf-api>=1.0.0
+pyyaml>=6.0

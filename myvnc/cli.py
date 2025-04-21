@@ -1,72 +1,92 @@
 import click
-from .vnc_manager import VNCManager, VNCServer
+import json
+import sys
+from pathlib import Path
 from tabulate import tabulate
+from .utils.config_manager import ConfigManager
+from .utils.lsf_manager import LSFManager
 
 @click.group()
 def cli():
-    """VNC Manager CLI"""
+    """MyVNC - A CLI application to manage VNC sessions through LSF"""
     pass
 
 @cli.command()
-@click.option('--name', required=True, help='Name of the VNC server')
-@click.option('--host', required=True, help='Host to connect to')
-@click.option('--display', type=int, required=True, help='Display number')
-@click.option('--resolution', default='1024x768', help='Screen resolution')
-@click.option('--window-manager', default='gnome', help='Window manager to use')
-def start(name, host, display, resolution, window_manager):
-    """Start a new VNC server"""
-    vnc_manager = VNCManager()
-    server = VNCServer(
-        name=name,
-        host=host,
-        port=5900 + display,
-        display=display,
-        resolution=resolution,
-        window_manager=window_manager
-    )
-    
-    if vnc_manager.start_server(server):
-        click.echo(f"Successfully started VNC server {name}")
-    else:
-        click.echo(f"Failed to start VNC server {name}", err=True)
-
-@cli.command()
-@click.argument('name')
-def stop(name):
-    """Stop a VNC server by name"""
-    vnc_manager = VNCManager()
-    server = vnc_manager.get_server_by_name(name)
-    
-    if server and vnc_manager.stop_server(server):
-        click.echo(f"Successfully stopped VNC server {name}")
-    else:
-        click.echo(f"Failed to stop VNC server {name}", err=True)
-
-@cli.command()
 def list():
-    """List all VNC servers"""
-    vnc_manager = VNCManager()
-    servers = vnc_manager.list_servers()
-    
-    if not servers:
-        click.echo("No VNC servers running")
-        return
-    
-    headers = ['Name', 'Host', 'Display', 'Resolution', 'Status']
-    table_data = []
-    
-    for server in servers:
-        this_server = vnc_manager.get_server_by_name(server['name'])
-        status = 'Running' if this_server and vnc_manager.is_server_running(this_server) else 'Stopped'
-        table_data.append([
-            server['name'],
-            server['host'],
-            server['display'],
-            server['resolution'],
-            status
-        ])
-    
-    click.echo(tabulate(table_data, headers=headers, tablefmt='grid'))
+    """List all active VNC sessions"""
+    try:
+        lsf_manager = LSFManager()
+        jobs = lsf_manager.get_active_vnc_jobs()
+        
+        if not jobs:
+            click.echo("No active VNC sessions found.")
+            return
+        
+        # Prepare data for tabulate
+        headers = ["Job ID", "Name", "User", "Status", "Queue"]
+        table_data = [[job['job_id'], job['name'], job['user'], job['status'], job['queue']] for job in jobs]
+        
+        # Print table
+        click.echo(tabulate(table_data, headers=headers, tablefmt="grid"))
+        
+    except Exception as e:
+        click.echo(f"Error: {str(e)}", err=True)
+        sys.exit(1)
 
-def main():
+@cli.command()
+@click.option('--name', prompt='VNC session name', help='Name for the VNC session')
+@click.option('--resolution', type=click.Choice(['1920x1080', '2560x1440', '3840x2160', '1280x720']), 
+              default='1920x1080', help='Resolution for the VNC session')
+@click.option('--wm', type=click.Choice(['gnome', 'kde', 'xfce', 'mate']), 
+              default='gnome', help='Window manager for the VNC session')
+@click.option('--queue', type=click.Choice(['vnc_queue', 'interactive', 'gpu_queue']), 
+              default='vnc_queue', help='LSF queue to submit the job to')
+@click.option('--cores', type=int, default=2, help='Number of cores to allocate')
+@click.option('--memory', type=int, default=4096, help='Memory to allocate in MB')
+def create(name, resolution, wm, queue, cores, memory):
+    """Create a new VNC session"""
+    try:
+        lsf_manager = LSFManager()
+        
+        # Prepare configurations
+        vnc_config = {
+            'name': name,
+            'resolution': resolution,
+            'window_manager': wm,
+            'color_depth': 24
+        }
+        
+        lsf_config = {
+            'queue': queue,
+            'num_cores': cores,
+            'memory_mb': memory,
+            'time_limit': '12:00'
+        }
+        
+        # Submit job
+        job_id = lsf_manager.submit_vnc_job(vnc_config, lsf_config)
+        click.echo(f"VNC session created successfully! Job ID: {job_id}")
+        
+    except Exception as e:
+        click.echo(f"Error: {str(e)}", err=True)
+        sys.exit(1)
+
+@cli.command()
+@click.argument('job_id')
+def kill(job_id):
+    """Kill a VNC session by job ID"""
+    try:
+        lsf_manager = LSFManager()
+        
+        if lsf_manager.kill_vnc_job(job_id):
+            click.echo(f"VNC session {job_id} killed successfully.")
+        else:
+            click.echo(f"Failed to kill VNC session {job_id}.", err=True)
+            sys.exit(1)
+            
+    except Exception as e:
+        click.echo(f"Error: {str(e)}", err=True)
+        sys.exit(1)
+
+if __name__ == '__main__':
     cli() 

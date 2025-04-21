@@ -1,19 +1,62 @@
 # myvnc
-This is a python web application to manage a users VNCs. It is launchable via both a web url as well as the command line interface (CLI). The web application performs all actions, and CLI uses curl commands to replicate functionality.
+This is a GUI application to manage a users VNCs. It runs on MacOS, Windows, and Linux. It is launchable via both a graphical icon as well as the CLI
 
 ## Features
 - There is a tab with a visual listing of active VNC servers, with the ability to open or kill each one
   - Each VNC submitted to LSF by the user is listed based on its name and site
 - There is a tab to support the creation of a new VNC server
   - New VNCs can be opened with a variety of options including name, site, resolution, and window manager of choice.
-    - There are default values for these VNC settings, but the user is able to change them via the application
+    - There are default values for these VNC settings, but the user is able to change them via the GUI
     - Default VNC settings are defined in an included json file called vnc_config.json
 - VNC commands are not executed directly, but rather submitted to LSF. Therefore no actual python-vnc-client is required.
-  - LSF configuration to define the queue, number of cores, and amount of memory to reserve for submission. There are default values for these 3 LSF definitions, but the user is able to change them via the application
+  - LSF configuration to define the queue, number of cores, and amount of memory to reserve for submission. There are default values for these 3 LSF definitions, but the user is able to change them via the GUI
   - This script uses the python LSF API to make calls to an LSF cluster.
   - Default LSF settings are defined in an included json file called lsf_config.json
 
 ## Installation
+
+### Prerequisites
+- Python 3.8 or higher
+- LSF (Load Sharing Facility) installed and configured on your system
+- VNC server installed on the LSF compute nodes
+
+### Installing from source
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/myvnc.git
+   cd myvnc
+   ```
+
+2. Install the package:
+   ```bash
+   pip install -e .
+   ```
+
+## Usage
+
+### GUI Application
+To launch the graphical user interface:
+```bash
+myvnc
+```
+
+### Command Line Interface
+The application also provides a command-line interface for managing VNC sessions:
+
+1. List all active VNC sessions:
+   ```bash
+   myvnc-cli list
+   ```
+
+2. Create a new VNC session:
+   ```bash
+   myvnc-cli create --name my_session --resolution 1920x1080 --wm gnome --queue vnc_queue --cores 2 --memory 4096
+   ```
+
+3. Kill a VNC session:
+   ```bash
+   myvnc-cli kill <job_id>
+   ```
 
 ## Contributing
 We welcome contributions! To contribute:
