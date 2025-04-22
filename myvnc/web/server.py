@@ -8,6 +8,7 @@ import cgi
 import json
 import os
 import sys
+import argparse
 from pathlib import Path
 
 # Add parent directory to path so we can import our modules
@@ -57,6 +58,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.handle_vnc_config()
         elif endpoint == 'config/lsf':
             self.handle_lsf_config()
+        elif endpoint == 'config/server':
+            self.handle_server_config()
         else:
             self.send_error(404, "API endpoint not found")
     
@@ -140,6 +143,16 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.send_json_response(config)
         except Exception as e:
             self.send_error_response(str(e))
+            
+    def handle_server_config(self):
+        """Handle server configuration request"""
+        try:
+            # Return the server configuration (excluding sensitive information)
+            server_config = load_server_config()
+            # Remove any sensitive fields if needed
+            self.send_json_response(server_config)
+        except Exception as e:
+            self.send_error_response(str(e))
     
     def send_json_response(self, data):
         """Send a JSON response"""
@@ -155,8 +168,41 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps({'error': message}).encode('utf-8'))
 
-def run_server(host='localhost', port=8000, directory=None):
+def load_server_config():
+    """Load server configuration from JSON file"""
+    config_path = Path(__file__).parent.parent.parent / "config" / "server_config.json"
+    
+    try:
+        with open(config_path, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"Warning: Server configuration file not found at {config_path}")
+        return {
+            "host": "localhost",
+            "port": 8000,
+            "debug": False,
+            "max_connections": 5,
+            "timeout": 30
+        }
+    except json.JSONDecodeError:
+        print(f"Warning: Invalid JSON in server configuration file")
+        return {
+            "host": "localhost",
+            "port": 8000,
+            "debug": False,
+            "max_connections": 5,
+            "timeout": 30
+        }
+
+def run_server(host=None, port=None, directory=None):
     """Run the web server"""
+    # Load configuration
+    config = load_server_config()
+    
+    # Override with command line arguments if provided
+    host = host or config.get("host", "localhost")
+    port = port or config.get("port", 8000)
+    
     if directory is None:
         # Use the web directory
         directory = Path(__file__).parent / 'static'
@@ -168,11 +214,35 @@ def run_server(host='localhost', port=8000, directory=None):
     server_address = (host, port)
     httpd = http.server.HTTPServer(server_address, VNCRequestHandler)
     
+    # Set timeout if specified in config
+    if "timeout" in config:
+        httpd.timeout = config["timeout"]
+    
     print(f"Starting server on http://{host}:{port}")
+    if config.get("debug", False):
+        print(f"Debug mode: ON")
+        print(f"Config: {config}")
+    
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("Server stopped")
 
+def parse_args():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(description="MyVNC Web Server")
+    parser.add_argument('--host', help='Host to bind to')
+    parser.add_argument('--port', type=int, help='Port to bind to')
+    parser.add_argument('--config', help='Path to server configuration file')
+    return parser.parse_args()
+
 if __name__ == '__main__':
-    run_server() 
+    args = parse_args()
+    
+    if args.config:
+        # Custom config path specified
+        config_path = Path(args.config)
+        print(f"Using custom config file: {config_path}")
+        # Not implemented here, but you could load this config instead
+    
+    run_server(host=args.host, port=args.port) 

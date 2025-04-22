@@ -11,12 +11,24 @@ import sys
 import os
 from pathlib import Path
 
-# Default server URL
-DEFAULT_SERVER_URL = "http://localhost:8000"
+# Add parent directory to path
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+# Import server config loader
+from myvnc.web.server import load_server_config
 
 def get_server_url():
-    """Get the server URL from environment variable or use default"""
-    return os.environ.get("MYVNC_SERVER_URL", DEFAULT_SERVER_URL)
+    """Get the server URL from configuration file or environment variable"""
+    # First try environment variable
+    if "MYVNC_SERVER_URL" in os.environ:
+        return os.environ.get("MYVNC_SERVER_URL")
+    
+    # Otherwise use config file
+    config = load_server_config()
+    host = config.get("host", "localhost")
+    port = config.get("port", 8000)
+    
+    return f"http://{host}:{port}"
 
 def run_curl_command(endpoint, method="GET", data=None):
     """
@@ -132,6 +144,21 @@ def kill_vnc_session(args):
         print(f"Error killing VNC session: {str(e)}", file=sys.stderr)
         sys.exit(1)
 
+def server_info():
+    """Display server information"""
+    try:
+        # Get server configuration
+        config = run_curl_command("config/server")
+        print("Server Configuration:")
+        print(f"Host: {config.get('host', 'localhost')}")
+        print(f"Port: {config.get('port', 8000)}")
+        print(f"Debug Mode: {'Enabled' if config.get('debug', False) else 'Disabled'}")
+        print(f"Max Connections: {config.get('max_connections', 5)}")
+        print(f"Timeout: {config.get('timeout', 30)} seconds")
+    except Exception as e:
+        print(f"Error getting server information: {str(e)}", file=sys.stderr)
+        sys.exit(1)
+
 def start_server(args):
     """Start the web server"""
     try:
@@ -146,7 +173,15 @@ def start_server(args):
         if args.port:
             cmd.extend(["--port", str(args.port)])
         
-        print(f"Starting server on {args.host or 'localhost'}:{args.port or 8000}...")
+        if args.config:
+            cmd.extend(["--config", args.config])
+        
+        # Get configuration to display info
+        config = load_server_config()
+        host = args.host or config.get("host", "localhost")
+        port = args.port or config.get("port", 8000)
+        
+        print(f"Starting server on {host}:{port}...")
         subprocess.run(cmd)
     
     except KeyboardInterrupt:
@@ -183,6 +218,10 @@ def main():
     server_parser = subparsers.add_parser("server", help="Start the web server")
     server_parser.add_argument("--host", help="Host to bind to")
     server_parser.add_argument("--port", type=int, help="Port to bind to")
+    server_parser.add_argument("--config", help="Path to custom config file")
+    
+    # Info command
+    info_parser = subparsers.add_parser("info", help="Display server information")
     
     # Parse arguments
     args = parser.parse_args()
@@ -196,6 +235,8 @@ def main():
         kill_vnc_session(args)
     elif args.command == "server":
         start_server(args)
+    elif args.command == "info":
+        server_info()
     else:
         parser.print_help()
 
