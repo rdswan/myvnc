@@ -1,5 +1,10 @@
 # myvnc
-This is a GUI application to manage a users VNCs. It runs on MacOS, Windows, and Linux. It is launchable via both a graphical icon as well as the CLI
+This is a web based application to manage a users VNCs.
+There is a lightweight backend web server that supports this application via python CGI code.
+There is also an included python command line wrapper script which makes curl calls to perform all operations available via the web interface.
+It uses a minimal amount of packages to keep dependency requirements small.
+In order to reduce the amount of required packages, all calls to LSF are made by the command line rather than the LSF API
+It is fully Open Source via the Apache License 2.0
 
 ## Features
 - There is a tab with a visual listing of active VNC servers, with the ability to open or kill each one
@@ -8,7 +13,7 @@ This is a GUI application to manage a users VNCs. It runs on MacOS, Windows, and
   - New VNCs can be opened with a variety of options including name, site, resolution, and window manager of choice.
     - There are default values for these VNC settings, but the user is able to change them via the GUI
     - Default VNC settings are defined in an included json file called vnc_config.json
-- VNC commands are not executed directly, but rather submitted to LSF. Therefore no actual python-vnc-client is required.
+- VNC commands are not executed directly, but rather submitted to LSF via the command line. Therefore neither python-vnc-client nor lsf-python-api packages are required.
   - LSF configuration to define the queue, number of cores, and amount of memory to reserve for submission. There are default values for these 3 LSF definitions, but the user is able to change them via the GUI
   - This script uses the python LSF API to make calls to an LSF cluster.
   - Default LSF settings are defined in an included json file called lsf_config.json

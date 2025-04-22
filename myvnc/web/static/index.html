@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MyVNC Manager</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+</head>
+<body>
+    <header>
+        <h1>MyVNC Manager</h1>
+    </header>
+    
+    <div class="tab-container">
+        <div class="tabs">
+            <button class="tab-button active" data-tab="vnc-manager">VNC Manager</button>
+            <button class="tab-button" data-tab="vnc-creator">Create VNC</button>
+        </div>
+        
+        <div id="vnc-manager" class="tab-content active">
+            <div class="control-panel">
+                <button id="refresh-button" class="button primary">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </div>
+            
+            <div class="table-container">
+                <table id="vnc-table">
+                    <thead>
+                        <tr>
+                            <th>Job ID</th>
+                            <th>Name</th>
+                            <th>User</th>
+                            <th>Status</th>
+                            <th>Queue</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="vnc-table-body">
+                        <!-- VNC sessions will be loaded here dynamically -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <div id="no-vnc-message" class="message-container">
+                <p>No active VNC sessions found.</p>
+            </div>
+        </div>
+        
+        <div id="vnc-creator" class="tab-content">
+            <form id="create-vnc-form">
+                <div class="form-group">
+                    <label for="vnc-name">Session Name:</label>
+                    <input type="text" id="vnc-name" name="name" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="vnc-site">Site:</label>
+                    <select id="vnc-site" name="site">
+                        <!-- Options will be loaded from configuration -->
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="vnc-resolution">Resolution:</label>
+                    <select id="vnc-resolution" name="resolution">
+                        <!-- Options will be loaded from configuration -->
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="vnc-window-manager">Window Manager:</label>
+                    <select id="vnc-window-manager" name="window_manager">
+                        <!-- Options will be loaded from configuration -->
+                    </select>
+                </div>
+                
+                <h3>LSF Settings</h3>
+                
+                <div class="form-group">
+                    <label for="lsf-queue">Queue:</label>
+                    <select id="lsf-queue" name="queue">
+                        <!-- Options will be loaded from configuration -->
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="lsf-cores">Number of Cores:</label>
+                    <select id="lsf-cores" name="num_cores">
+                        <!-- Options will be loaded from configuration -->
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="lsf-memory">Memory (MB):</label>
+                    <select id="lsf-memory" name="memory_mb">
+                        <!-- Options will be loaded from configuration -->
+                    </select>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="submit" class="button primary">Create VNC Session</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <div id="message-box" class="message-box hidden">
+        <div class="message-content">
+            <span id="message-text"></span>
+            <button id="message-close" class="close-button">&times;</button>
+        </div>
+    </div>
+    
+    <footer>
+        <p>&copy; 2023 MyVNC Manager - Apache License 2.0</p>
+    </footer>
+    
+    <script src="js/app.js"></script>
+</body>
+</html> 

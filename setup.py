@@ -5,21 +5,17 @@ setup(
     version="0.1.0",
     packages=find_packages(),
     install_requires=[
-        "PyQt6>=6.4.0",
-        "python-lsf-api>=1.0.0",
-        "pyyaml>=6.0",
-        "click>=8.0.0",
-        "tabulate>=0.9.0"
+        # No GUI dependencies or LSF API required
     ],
     entry_points={
         'console_scripts': [
-            'myvnc=myvnc.main:main',
-            'myvnc-cli=myvnc.cli:cli',
+            'myvnc-server=myvnc.web.server:run_server',
+            'myvnc-cli=myvnc.cli.cli:main',
         ],
     },
     author="Your Name",
     author_email="your.email@example.com",
-    description="A GUI application to manage VNC sessions through LSF",
+    description="A web-based application to manage VNC sessions through LSF",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
     url="https://github.com/yourusername/myvnc",

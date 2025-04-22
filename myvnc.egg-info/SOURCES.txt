@@ -14,3 +14,9 @@ myvnc.egg-info/dependency_links.txt
 myvnc.egg-info/entry_points.txt
 myvnc.egg-info/requires.txt
 myvnc.egg-info/top_level.txt
+myvnc/gui/__init__.py
+myvnc/gui/vnc_creator_tab.py
+myvnc/gui/vnc_manager_tab.py
+myvnc/utils/__init__.py
+myvnc/utils/config_manager.py
+myvnc/utils/lsf_manager.py

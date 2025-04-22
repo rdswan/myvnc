@@ -1,0 +1,38 @@
+Refactor application from PyQt GUI to web-based architecture
+
+This commit transforms the application from a PyQt desktop app to a web-based 
+application with a CGI backend and CLI curl interface, as specified in the updated 
+README. Major changes include:
+
+### Configuration:
+- Updated config/vnc_config.json to include sites configuration
+- Removed external dependencies from requirements.txt
+
+### Core Architecture:
+- Switched from PyQt GUI to web-based interface
+- Removed LSF Python API dependencies, now using CLI commands
+- Created a CGI web server for handling requests
+
+### Web Components:
+- Created myvnc/web/server.py - CGI HTTP server
+- Added myvnc/web/static/index.html - Core HTML UI
+- Added myvnc/web/static/css/styles.css - Styling
+- Added myvnc/web/static/js/app.js - Frontend JavaScript
+
+### CLI Components:
+- Created myvnc/cli/cli.py - Command-line interface using curl
+- Added command-line functionality matching web capabilities
+- Implemented server management capabilities
+
+### Utilities:
+- Updated myvnc/utils/config_manager.py with improved configuration handling
+- Updated myvnc/utils/lsf_manager.py to use command line instead of API
+- Added documentation and error handling
+
+### Entry Points:
+- Added main.py as simple web server launcher
+- Updated setup.py to reflect new entry points and dependencies
+
+This refactoring aligns with the updated requirements to use minimal dependencies
+and command-line interactions with LSF rather than APIs. All functionality 
+remains intact with both web and CLI interfaces providing the same capabilities. 
