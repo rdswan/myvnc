@@ -1,13 +1,13 @@
 {
     "default_settings": {
-        "queue": "vnc_queue",
+        "queue": "interactive",
         "num_cores": 2,
         "memory_mb": 4096,
         "time_limit": "12:00"
     },
     "available_queues": [
-        "vnc_queue",
         "interactive",
+        "vnc_queue",
         "gpu_queue"
     ],
     "memory_options_mb": [
