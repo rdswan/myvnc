@@ -551,4 +551,105 @@ footer {
 /* Confirmation dialog */
 .confirm-dialog-content h3 {
   color: var(--primary-color);
+}
+
+/* Newly added styles for Debug Panel */
+.debug-section {
+  margin-bottom: 2rem;
+}
+
+.debug-info-container {
+  background-color: #f8f9fa;
+  border-radius: var(--border-radius);
+  padding: 1rem;
+  overflow: auto;
+  max-height: 400px;
+  border: 1px solid var(--border-color);
+  font-family: monospace;
+  font-size: 0.9rem;
+}
+
+.command-item {
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.command-item:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+}
+
+.command-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.command-text {
+  font-weight: bold;
+  color: var(--primary-color);
+}
+
+.command-status {
+  padding: 0.1rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+
+.command-status.success {
+  background-color: rgba(30, 185, 128, 0.15);
+  color: #1EB980;
+}
+
+.command-status.error {
+  background-color: rgba(240, 79, 94, 0.15);
+  color: #F04F5E;
+}
+
+.command-output {
+  background-color: #333;
+  color: #f8f9fa;
+  padding: 0.75rem;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow: auto;
+}
+
+.command-output .stdout {
+  color: #9AE6B4;
+}
+
+.command-output .stderr {
+  color: #FBD38D;
+}
+
+.env-item {
+  display: flex;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.env-item:last-child {
+  border-bottom: none;
+}
+
+.env-key {
+  font-weight: bold;
+  min-width: 150px;
+  color: var(--primary-color);
+}
+
+.debug-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 1rem;
+}
+
+.loading-message {
+  color: var(--text-light);
+  text-align: center;
+  padding: 1rem;
 } 

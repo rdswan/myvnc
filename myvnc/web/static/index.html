@@ -25,6 +25,9 @@
             <button class="tab-button" data-tab="vnc-creator">
                 <i class="fas fa-plus-circle"></i> Create VNC
             </button>
+            <button class="tab-button" data-tab="debug-panel" id="debug-tab">
+                <i class="fas fa-bug"></i> Debug
+            </button>
         </div>
         
         <div id="vnc-manager" class="tab-content active">
@@ -156,6 +159,31 @@
                         </button>
                     </div>
                 </form>
+            </div>
+        </div>
+        
+        <div id="debug-panel" class="tab-content">
+            <div class="form-card">
+                <h2 class="form-title">Debug Information</h2>
+                
+                <div class="debug-section">
+                    <h3>Environment Information</h3>
+                    <div class="debug-info-container" id="debug-environment">
+                        <p class="loading-message">Loading environment information...</p>
+                    </div>
+                </div>
+                
+                <div class="debug-section">
+                    <h3>Command History</h3>
+                    <div class="debug-actions">
+                        <button id="refresh-debug" class="button primary">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
+                    </div>
+                    <div class="debug-info-container" id="debug-commands">
+                        <p class="loading-message">Loading command history...</p>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

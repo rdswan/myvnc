@@ -61,6 +61,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.handle_lsf_config()
         elif endpoint == 'config/server':
             self.handle_server_config()
+        elif endpoint == 'debug/commands':
+            self.handle_debug_commands()
         else:
             self.send_error(404, "API endpoint not found")
     
@@ -156,6 +158,35 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         except Exception as e:
             self.send_error_response(str(e))
     
+    def handle_debug_commands(self):
+        """Handle debug command history request"""
+        try:
+            # Add test commands to the history
+            try:
+                # Run LSF test commands to populate history
+                self.lsf_manager.run_test_commands()
+            except Exception as e:
+                print(f"Error running test commands: {str(e)}")
+            
+            # Get command history from LSF manager
+            commands = self.lsf_manager.get_command_history()
+            
+            # Get server environment info
+            env_info = {
+                'python_version': sys.version,
+                'path': os.environ.get('PATH', 'Not set'),
+                'lsf_profile': load_lsf_config().get('env_file', 'Not configured'),
+                'lsf_available': 'bjobs' in os.environ.get('PATH', '')
+            }
+            
+            # Send both as response
+            self.send_json_response({
+                'commands': commands,
+                'environment': env_info
+            })
+        except Exception as e:
+            self.send_error_response(str(e))
+    
     def send_json_response(self, data):
         """Send a JSON response"""
         self.send_response(200)
@@ -224,6 +255,7 @@ def source_lsf_environment():
         command = f"source {env_file} && env"
         proc = subprocess.Popen(['/bin/bash', '-c', command], stdout=subprocess.PIPE)
         for line in proc.stdout:
+            # Fix for Python 3.6: Decode bytes to string
             line = line.decode('utf-8').strip()
             if line and '=' in line:
                 key, value = line.split('=', 1)

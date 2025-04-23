@@ -12,6 +12,7 @@ const noVNCMessage = document.getElementById('no-vnc-message');
 const messageBox = document.getElementById('message-box');
 const messageText = document.getElementById('message-text');
 const messageClose = document.getElementById('message-close');
+const refreshDebugButton = document.getElementById('refresh-debug');
 
 // Initialize application
 document.addEventListener('DOMContentLoaded', function() {
@@ -40,6 +41,13 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Load initial VNC list
     refreshVNCList();
+    
+    // Always load debug info 
+    if (refreshDebugButton) {
+        refreshDebugButton.addEventListener('click', loadDebugInfo);
+        // Load debug info when page loads
+        loadDebugInfo();
+    }
 });
 
 // Tab functionality
@@ -81,8 +89,11 @@ async function apiRequest(endpoint, method = 'GET', data = null) {
         
         return result;
     } catch (error) {
-        showMessage(error.message, 'error');
         console.error('API Error:', error);
+        // Don't show API errors for list requests, as they might be expected
+        if (!endpoint.includes('vnc/list')) {
+            showMessage(error.message || 'API request failed. Please try again later.', 'error');
+        }
         throw error;
     }
 }
@@ -187,6 +198,15 @@ async function refreshVNCList() {
         });
     } catch (error) {
         console.error('Failed to refresh VNC list:', error);
+        // Show no VNC message and hide table on error
+        noVNCMessage.style.display = 'block';
+        document.querySelector('.table-container').style.display = 'none';
+        
+        // Update the message to indicate that we can't access the LSF system
+        const messageElement = document.querySelector('.empty-state p');
+        if (messageElement) {
+            messageElement.textContent = 'Unable to access VNC sessions. LSF system may be unavailable.';
+        }
     }
 }
 
@@ -253,7 +273,7 @@ async function killVNCSession(jobId) {
             <h3>Confirm Action</h3>
             <p>Are you sure you want to kill VNC session ${jobId}?</p>
             <div class="confirm-actions">
-                <button class="button secondary cancel-button">Cancel</button>
+                <button class="button primary cancel-button">Cancel</button>
                 <button class="button danger confirm-button">Yes, Kill Session</button>
             </div>
         </div>
@@ -353,7 +373,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         .confirm-dialog-content h3 {
             margin-top: 0;
-            color: var(--text-color);
+            color: var(--primary-color);
             border: none;
         }
         
@@ -373,23 +393,23 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         .status-running {
-            background-color: rgba(46, 204, 113, 0.15);
-            color: #27ae60;
+            background-color: rgba(30, 185, 128, 0.15);
+            color: #1EB980; /* TT Light Green */
         }
         
         .status-pending {
-            background-color: rgba(52, 152, 219, 0.15);
-            color: #2980b9;
+            background-color: rgba(24, 196, 234, 0.15);
+            color: #18C4EA; /* TT Light Blue */
         }
         
         .status-error {
-            background-color: rgba(231, 76, 60, 0.15);
-            color: #c0392b;
+            background-color: rgba(240, 79, 94, 0.15);
+            color: #F04F5E; /* TT Light Red */
         }
         
         .status-done {
-            background-color: rgba(149, 165, 166, 0.15);
-            color: #7f8c8d;
+            background-color: rgba(51, 51, 61, 0.15);
+            color: #33333D; /* TT Blue Grey */
         }
         
         .actions-cell {
@@ -417,4 +437,98 @@ document.addEventListener('DOMContentLoaded', () => {
     `;
     
     document.head.appendChild(style);
-}); 
+});
+
+/**
+ * Load debug information from the server
+ */
+async function loadDebugInfo() {
+    console.log('Loading debug information...');
+    try {
+        const data = await apiRequest('debug/commands');
+        console.log('Debug data received:', data);
+        
+        // Display environment information
+        displayEnvironmentInfo(data.environment);
+        
+        // Display command history
+        displayCommandHistory(data.commands);
+    } catch (error) {
+        console.error('Failed to load debug information:', error);
+        document.getElementById('debug-environment').innerHTML = '<p class="error">Failed to load environment information.</p>';
+        document.getElementById('debug-commands').innerHTML = '<p class="error">Failed to load command history.</p>';
+    }
+}
+
+/**
+ * Display environment information
+ * @param {Object} environment - Environment information
+ */
+function displayEnvironmentInfo(environment) {
+    const container = document.getElementById('debug-environment');
+    
+    if (!environment || Object.keys(environment).length === 0) {
+        container.innerHTML = '<p>No environment information available.</p>';
+        return;
+    }
+    
+    let html = '';
+    
+    // Display each environment variable
+    for (const [key, value] of Object.entries(environment)) {
+        html += `
+            <div class="env-item">
+                <div class="env-key">${key}:</div>
+                <div class="env-value">${value}</div>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
+}
+
+/**
+ * Display command history
+ * @param {Array} commands - Command history
+ */
+function displayCommandHistory(commands) {
+    const container = document.getElementById('debug-commands');
+    
+    if (!commands || commands.length === 0) {
+        container.innerHTML = '<p>No commands have been executed yet.</p>';
+        return;
+    }
+    
+    let html = '';
+    
+    // Display each command in reverse order (newest first)
+    commands.reverse().forEach(cmd => {
+        html += `
+            <div class="command-item">
+                <div class="command-header">
+                    <div class="command-text">${escapeHtml(cmd.command)}</div>
+                    <div class="command-status ${cmd.success ? 'success' : 'error'}">${cmd.success ? 'Success' : 'Error'}</div>
+                </div>
+                <div class="command-output">
+                    ${cmd.stdout ? `<div class="stdout">STDOUT:\n${escapeHtml(cmd.stdout)}</div>` : ''}
+                    ${cmd.stderr ? `<div class="stderr">STDERR:\n${escapeHtml(cmd.stderr)}</div>` : ''}
+                </div>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+}
+
+/**
+ * Escape HTML special characters
+ * @param {string} html - HTML string to escape
+ * @returns {string} - Escaped HTML string
+ */
+function escapeHtml(html) {
+    if (!html) return '';
+    
+    const div = document.createElement('div');
+    div.textContent = html;
+    return div.innerHTML;
+} 

@@ -36,3 +36,19 @@ README. Major changes include:
 This refactoring aligns with the updated requirements to use minimal dependencies
 and command-line interactions with LSF rather than APIs. All functionality 
 remains intact with both web and CLI interfaces providing the same capabilities. 
+
+Improve UI styling and tab visibility
+
+- Make active tabs more visible with light purple background
+- Style header with purple gradient theme
+- Modernize header font using Outfit from Google Fonts
+- Add text effects (letter-spacing, text-shadow, etc.) to header
+- Update tab styling for better visual distinction
+
+Enhance debug panel with real LSF command information
+
+- Add run_test_commands method to LSFManager to run real LSF commands
+- Update debug endpoint in server.py to use the new method
+- Add lsf_available environment info field to check if bjobs is in PATH
+- Fix Python 3.6 compatibility issue by removing text=True parameter from subprocess calls
+- The debug panel now shows actual command history and environment information 

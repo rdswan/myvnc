@@ -1,7 +1,8 @@
 import subprocess
 import shlex
 import re
-from typing import Dict, List, Optional
+import sys
+from typing import Dict, List, Optional, Tuple
 
 class LSFManager:
     """Manages interactions with the LSF job scheduler via command line"""
@@ -13,7 +14,46 @@ class LSFManager:
         Raises:
             RuntimeError: If LSF is not available
         """
-        self._check_lsf_available()
+        # For storing command execution history for debugging
+        self.command_history = []
+        
+        try:
+            self._check_lsf_available()
+        except Exception as e:
+            print(f"Warning: LSF initialization error: {str(e)}", file=sys.stderr)
+            # Don't raise here, let individual methods handle errors
+    
+    def get_command_history(self, limit=10):
+        """Return the last N commands executed with their outputs"""
+        return self.command_history[-limit:] if limit else self.command_history
+    
+    def run_test_commands(self):
+        """Run a series of test LSF commands to populate the command history"""
+        test_commands = [
+            ['which', 'bjobs'],
+            ['bjobs', '-h'],
+            ['which', 'bsub'],
+            ['which', 'bkill'],
+            ['ls', '-la']
+        ]
+        
+        results = []
+        for cmd in test_commands:
+            try:
+                output = self._run_command(cmd)
+                results.append({
+                    'command': ' '.join(cmd),
+                    'output': output,
+                    'success': True
+                })
+            except Exception as e:
+                results.append({
+                    'command': ' '.join(cmd),
+                    'output': str(e),
+                    'success': False
+                })
+        
+        return results
     
     def _check_lsf_available(self):
         """
@@ -23,9 +63,15 @@ class LSFManager:
             RuntimeError: If LSF is not available
         """
         try:
-            subprocess.run(['which', 'bjobs'], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        except subprocess.CalledProcessError:
-            raise RuntimeError("LSF is not available on this system")
+            # Compatible with Python 3.6 - removed text=True
+            result = subprocess.run(['which', 'bjobs'], check=True, 
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout = result.stdout.decode('utf-8').strip()
+            print(f"LSF available at: {stdout}", file=sys.stderr)
+        except subprocess.CalledProcessError as e:
+            stderr = e.stderr.decode('utf-8')
+            print(f"LSF not available: {stderr}", file=sys.stderr)
+            raise RuntimeError(f"LSF is not available on this system: {stderr}")
     
     def _run_command(self, cmd: List[str]) -> str:
         """
@@ -40,12 +86,34 @@ class LSFManager:
         Raises:
             RuntimeError: If the command fails
         """
+        cmd_str = ' '.join(cmd)
         try:
-            result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
-                                   text=True, encoding='utf-8')
-            return result.stdout
+            # Compatible with Python 3.6 - removed text=True
+            result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout = result.stdout.decode('utf-8')
+            stderr = result.stderr.decode('utf-8')
+            
+            # Add to command history for debugging
+            self.command_history.append({
+                'command': cmd_str,
+                'stdout': stdout,
+                'stderr': stderr,
+                'success': True
+            })
+            
+            return stdout
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"Command failed: {e.stderr}")
+            stderr = e.stderr.decode('utf-8')
+            
+            # Add failed command to history for debugging
+            self.command_history.append({
+                'command': cmd_str,
+                'stdout': e.stdout.decode('utf-8') if e.stdout else '',
+                'stderr': stderr,
+                'success': False
+            })
+            
+            raise RuntimeError(f"Command failed: {stderr}")
     
     def submit_vnc_job(self, vnc_config: Dict, lsf_config: Dict) -> str:
         """
@@ -147,8 +215,10 @@ class LSFManager:
                         })
             
             return jobs
-        except RuntimeError:
-            # Return empty list on error
+        except Exception as e:
+            # Catch and log any exception
+            print(f"Error retrieving VNC jobs: {str(e)}", file=sys.stderr)
+            # Return empty list on any error
             return []
             
     def get_vnc_connection_details(self, job_id: str) -> Optional[Dict]:
