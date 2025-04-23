@@ -1,18 +1,25 @@
 :root {
-  --primary-color: #3498db;
-  --primary-dark: #2980b9;
-  --secondary-color: #2ecc71;
-  --secondary-dark: #27ae60;
-  --danger-color: #e74c3c;
-  --danger-dark: #c0392b;
+  /* Primary colors from Tenstorrent palette */
+  --primary-color: #7868B0;    /* TT Light Purple */
+  --primary-dark: #6F3A7F;     /* TT Dark Purple */
+  --secondary-color: #18C4EA;  /* TT Light Blue */
+  --secondary-dark: #058DAC;   /* TT Dark Blue */
+  --danger-color: #F04F5E;     /* TT Light Red */
+  --danger-dark: #A1422F;      /* TT Dark Red */
+  
+  /* Background and text colors */
   --background-color: #f8f9fa;
   --card-color: #ffffff;
-  --text-color: #333333;
-  --text-light: #666666;
+  --text-color: #33333D;       /* TT Blue Grey */
+  --text-light: #5e5e6a;
   --border-color: #e0e0e0;
-  --success-color: #2ecc71;
-  --info-color: #3498db;
-  --warning-color: #f39c12;
+  
+  /* Status colors */
+  --success-color: #1EB980;    /* TT Light Green */
+  --info-color: #18C4EA;       /* TT Light Blue */
+  --warning-color: #FFD046;    /* TT Light Yellow */
+  
+  /* UI elements */
   --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
   --border-radius: 6px;
   --transition: all 0.3s ease;
@@ -35,7 +42,7 @@ body {
 
 /* Header */
 header {
-  background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
+  background: linear-gradient(135deg, #7868B0, #6F3A7F);
   color: white;
   padding: 1.5rem 2rem;
   box-shadow: var(--shadow);
@@ -179,32 +186,32 @@ tr:hover {
 }
 
 .primary {
-  background-color: var(--primary-color);
+  background-color: #7868B0; /* TT Light Purple */
   color: white;
 }
 
 .primary:hover {
-  background-color: var(--primary-dark);
+  background-color: #6F3A7F; /* TT Dark Purple */
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .secondary {
-  background-color: var(--secondary-color);
+  background-color: #18C4EA; /* TT Light Blue */
   color: white;
 }
 
 .secondary:hover {
-  background-color: var(--secondary-dark);
+  background-color: #058DAC; /* TT Dark Blue */
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .danger {
-  background-color: var(--danger-color);
+  background-color: #F04F5E; /* TT Light Red */
   color: white;
 }
 
 .danger:hover {
-  background-color: var(--danger-dark);
+  background-color: #A1422F; /* TT Dark Red */
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
@@ -234,7 +241,7 @@ select {
 input[type="text"]:focus,
 select:focus {
   border-color: var(--primary-color);
-  box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+  box-shadow: 0 0 0 3px rgba(120, 104, 176, 0.1); /* TT Light Purple with opacity */
 }
 
 .form-actions {
@@ -318,8 +325,8 @@ h3 {
 footer {
   text-align: center;
   padding: 1.5rem;
-  background-color: #f1f1f1;
-  color: var(--text-light);
+  background-color: #33333D; /* TT Blue Grey */
+  color: #ffffff;
   font-size: 0.9rem;
   margin-top: 2rem;
 }
@@ -402,7 +409,7 @@ footer {
 
 .empty-icon {
   font-size: 3rem;
-  color: var(--text-light);
+  color: var(--primary-color);
   opacity: 0.3;
   margin-bottom: 1rem;
 }
@@ -446,4 +453,46 @@ footer {
   .form-group {
     margin-bottom: 1rem;
   }
+}
+
+/* Status badges */
+.status-running {
+  background-color: rgba(30, 185, 128, 0.15);
+  color: #1EB980; /* TT Light Green */
+}
+
+.status-pending {
+  background-color: rgba(24, 196, 234, 0.15);
+  color: #18C4EA; /* TT Light Blue */
+}
+
+.status-error {
+  background-color: rgba(240, 79, 94, 0.15);
+  color: #F04F5E; /* TT Light Red */
+}
+
+.status-done {
+  background-color: rgba(51, 51, 61, 0.15);
+  color: #33333D; /* TT Blue Grey */
+}
+
+/* Tenstorrent branding */
+.form-title {
+  color: var(--primary-color);
+}
+
+/* Update tab indicator */
+.tab-button.active::after {
+  background-color: var(--primary-color);
+}
+
+/* Empty state icon color */
+.empty-icon {
+  color: var(--primary-color);
+  opacity: 0.3;
+}
+
+/* Confirmation dialog */
+.confirm-dialog-content h3 {
+  color: var(--primary-color);
 } 
