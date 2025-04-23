@@ -72,13 +72,11 @@ class LSFManager:
         ]
         
         # Add the vncserver command with its arguments
+        # Note: Only using supported options (geometry, depth, name)
         vnc_cmd = f"vncserver -geometry {vnc_config['resolution']} -depth {vnc_config['color_depth']} " + \
-                 f"-name {vnc_config['name']} -wm {vnc_config['window_manager']}"
+                 f"-name {vnc_config['name']}"
         
-        # Add site-specific settings if available
-        if 'site' in vnc_config and vnc_config['site'] != 'default':
-            vnc_cmd += f" -site {vnc_config['site']}"
-        
+        # Note: Removed -wm and -site options as they're not supported by vncserver
         cmd.append(vnc_cmd)
         
         # Run the command
