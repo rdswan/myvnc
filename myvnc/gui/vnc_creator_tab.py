@@ -43,7 +43,7 @@ class VNCreatorTab(QWidget):
         form_layout.addRow("Window Manager:", self.wm_combo)
         form_layout.addRow("LSF Queue:", self.queue_combo)
         form_layout.addRow("Number of Cores:", self.cores_spin)
-        form_layout.addRow("Memory (MB):", self.memory_combo)
+        form_layout.addRow("Memory (GB):", self.memory_combo)
         
         # Create submit button
         self.submit_button = QPushButton("Create VNC Session")
@@ -75,7 +75,7 @@ class VNCreatorTab(QWidget):
         lsf_config = {
             'queue': self.queue_combo.currentText(),
             'num_cores': self.cores_spin.value(),
-            'memory_mb': int(self.memory_combo.currentText()),
+            'memory_gb': int(self.memory_combo.currentText()),
             'time_limit': '12:00'  # Default time limit
         }
         

@@ -78,7 +78,7 @@
                                 <label for="vnc-name">Session Name</label>
                                 <div class="input-with-icon">
                                     <i class="fas fa-tag icon-left"></i>
-                                    <input type="text" id="vnc-name" name="name" required>
+                                    <input type="text" id="vnc-name" name="name">
                                 </div>
                             </div>
                             
@@ -142,12 +142,21 @@
                         
                         <div class="form-row">
                             <div class="form-group">
-                                <label for="lsf-memory">Memory (MB)</label>
-                                <div class="select-wrapper">
-                                    <select id="lsf-memory" name="memory_mb">
-                                        <!-- Options will be loaded from configuration -->
-                                    </select>
-                                    <i class="fas fa-chevron-down"></i>
+                                <label for="lsf-memory">Memory (GB) <span id="memory-value">4</span></label>
+                                <div class="slider-container">
+                                    <input type="range" id="lsf-memory" name="memory_gb" min="2" max="128" step="4" value="4" class="slider">
+                                    <div class="slider-labels">
+                                        <span>2GB</span>
+                                        <span>128GB</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="lsf-host-filter">Host Filter (optional)</label>
+                                <div class="input-with-icon">
+                                    <i class="fas fa-server icon-left"></i>
+                                    <input type="text" id="lsf-host-filter" name="host_filter" placeholder="e.g., aus-*">
                                 </div>
                             </div>
                         </div>
@@ -170,18 +179,6 @@
                     <h3>Environment Information</h3>
                     <div class="debug-info-container" id="debug-environment">
                         <p class="loading-message">Loading environment information...</p>
-                    </div>
-                </div>
-                
-                <div class="debug-section">
-                    <h3>Command History</h3>
-                    <div class="debug-actions">
-                        <button id="refresh-debug" class="button primary">
-                            <i class="fas fa-sync-alt"></i> Refresh
-                        </button>
-                    </div>
-                    <div class="debug-info-container" id="debug-commands">
-                        <p class="loading-message">Loading command history...</p>
                     </div>
                 </div>
             </div>

@@ -104,7 +104,7 @@ class LSFManager:
             lsf_config = {
                 'queue': 'interactive',
                 'num_cores': 1,
-                'memory_mb': 2048,
+                'memory_gb': 2048,
                 'time_limit': '00:30'
             }
             
@@ -113,7 +113,7 @@ class LSFManager:
                 'bsub',
                 '-q', lsf_config['queue'],
                 '-n', str(lsf_config['num_cores']),
-                '-M', str(lsf_config['memory_mb']),
+                '-M', str(lsf_config['memory_gb']),
                 '-W', lsf_config['time_limit'],
                 '-J', vnc_config['name']
             ]
@@ -224,13 +224,8 @@ class LSFManager:
             # Use the job_name from LSF config (or default value if not set)
             job_name = lsf_config.get('job_name', 'myvnc_vncserver')
             
-            # Convert memory from MB to GB (with minimum of 1GB)
-            memory_mb = lsf_config.get('memory_mb', 4096)
-            # If memory_mb is already small enough to be in GB, use it directly
-            if memory_mb < 1000:  # If the memory value is already small, it's likely already in GB
-                memory_gb = memory_mb
-            else:
-                memory_gb = max(1, memory_mb // 1024)
+            # Use memory directly in GB (no conversion)
+            memory_gb = lsf_config.get('memory_gb', 16)
             
             # Build LSF command with -R for memory instead of -M
             bsub_cmd = [

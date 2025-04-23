@@ -50,7 +50,17 @@ class ConfigManager:
     
     def get_lsf_defaults(self):
         """Get the default LSF settings"""
-        return self.lsf_config["default_settings"]
+        defaults = self.lsf_config["default_settings"].copy()
+        
+        # Convert memory_mb to memory_gb if needed for backward compatibility
+        if "memory_mb" in defaults and "memory_gb" not in defaults:
+            defaults["memory_gb"] = max(1, defaults.get("memory_mb", 16384) // 1024)
+            
+        # Ensure memory_gb is always present
+        if "memory_gb" not in defaults:
+            defaults["memory_gb"] = 16
+            
+        return defaults
     
     def get_available_window_managers(self):
         """Get the list of available window managers"""
@@ -108,8 +118,22 @@ class ConfigManager:
         return self.lsf_config["available_queues"]
     
     def get_memory_options(self):
-        """Get the list of available memory options"""
-        return self.lsf_config["memory_options_mb"]
+        """Get the list of available memory options in GB"""
+        try:
+            # Always use GB options
+            if "memory_options_gb" in self.lsf_config:
+                return self.lsf_config["memory_options_gb"]
+            
+            # Convert MB options to GB if GB options are not available
+            if "memory_options_mb" in self.lsf_config:
+                mb_options = self.lsf_config["memory_options_mb"]
+                return [max(1, mb // 1024) for mb in mb_options]
+                
+            # Default memory options in GB if nothing is specified
+            return [2, 4, 8, 16, 32]
+        except KeyError:
+            # Default memory options in GB if none are specified
+            return [2, 4, 8, 16, 32]
     
     def get_core_options(self):
         """Get the list of available core options"""

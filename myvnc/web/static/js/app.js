@@ -12,7 +12,6 @@ const noVNCMessage = document.getElementById('no-vnc-message');
 const messageBox = document.getElementById('message-box');
 const messageText = document.getElementById('message-text');
 const messageClose = document.getElementById('message-close');
-const refreshDebugButton = document.getElementById('refresh-debug');
 
 // Initialize application
 document.addEventListener('DOMContentLoaded', function() {
@@ -32,6 +31,20 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
     
+    // Memory slider event listener
+    const memorySlider = document.getElementById('lsf-memory');
+    const memoryValue = document.getElementById('memory-value');
+    
+    if (memorySlider && memoryValue) {
+        // Initialize with default value
+        memoryValue.textContent = memorySlider.value;
+        
+        // Update the value display when slider changes
+        memorySlider.addEventListener('input', function() {
+            memoryValue.textContent = this.value;
+        });
+    }
+    
     createVNCForm.addEventListener('submit', createVNCSession);
     messageClose.addEventListener('click', hideMessage);
     
@@ -42,12 +55,8 @@ document.addEventListener('DOMContentLoaded', function() {
     // Load initial VNC list
     refreshVNCList();
     
-    // Always load debug info 
-    if (refreshDebugButton) {
-        refreshDebugButton.addEventListener('click', loadDebugInfo);
-        // Load debug info when page loads
-        loadDebugInfo();
-    }
+    // Initial load of debug info when debug tab is clicked
+    document.getElementById('debug-tab').addEventListener('click', loadDebugInfo);
 });
 
 // Tab functionality
@@ -121,10 +130,24 @@ async function loadLSFConfig() {
     try {
         lsfConfig = await apiRequest('config/lsf');
         
-        // Populate form fields
+        // Populate select fields
         populateSelect('lsf-queue', lsfConfig.queues, lsfConfig.defaults.queue);
         populateSelect('lsf-cores', lsfConfig.core_options, lsfConfig.defaults.num_cores);
-        populateSelect('lsf-memory', lsfConfig.memory_options, lsfConfig.defaults.memory_mb);
+        
+        // Set memory slider default value (directly using GB values)
+        const memorySlider = document.getElementById('lsf-memory');
+        const memoryValue = document.getElementById('memory-value');
+        if (memorySlider && memoryValue) {
+            // Get default memory in GB
+            const defaultMemoryGB = lsfConfig.defaults.memory_gb || 16;
+            // Round to nearest step value
+            const stepSize = parseInt(memorySlider.step) || 4;
+            const roundedValue = Math.max(2, Math.round(defaultMemoryGB / stepSize) * stepSize);
+            
+            // Set the slider value
+            memorySlider.value = roundedValue;
+            memoryValue.textContent = roundedValue;
+        }
     } catch (error) {
         console.error('Failed to load LSF configuration:', error);
     }
@@ -230,21 +253,26 @@ async function createVNCSession(event) {
     submitButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating...';
     submitButton.disabled = true;
     
-    // Get form data
-    const formData = new FormData(createVNCForm);
-    const data = {};
-    
-    // Use default name if not provided
-    if (!formData.get('name') || formData.get('name').trim() === '') {
-        data.name = `${vncConfig.defaults.name_prefix}_${generateRandomId()}`;
-    }
-    
-    // Convert form data to object
-    for (const [key, value] of formData.entries()) {
-        data[key] = value;
-    }
-    
     try {
+        // Get form data and convert to object
+        const formData = new FormData(createVNCForm);
+        const data = {};
+        
+        // Only include non-empty values
+        for (const [key, value] of formData.entries()) {
+            // Skip empty session names to ensure they're not sent at all
+            if (key === 'name' && (!value || value.trim() === '')) {
+                continue;
+            }
+            
+            // Include all other fields and non-empty session names
+            if (key !== 'memory_gb') { // Skip memory_gb since we'll use the default from server
+                data[key] = value;
+            }
+        }
+        
+        console.log('Submitting data:', data);
+        
         const result = await apiRequest('vnc/create', 'POST', data);
         showMessage(`VNC session created successfully. Job ID: ${result.job_id}`, 'success');
         
@@ -445,18 +473,18 @@ document.addEventListener('DOMContentLoaded', () => {
 async function loadDebugInfo() {
     console.log('Loading debug information...');
     try {
-        const data = await apiRequest('debug/commands');
+        // Show loading indicator
+        document.getElementById('debug-environment').innerHTML = '<p class="loading-message">Loading environment information...</p>';
+        
+        // Fetch environment data
+        const data = await apiRequest('debug/environment');
         console.log('Debug data received:', data);
         
         // Display environment information
         displayEnvironmentInfo(data.environment);
-        
-        // Display command history
-        displayCommandHistory(data.commands);
     } catch (error) {
         console.error('Failed to load debug information:', error);
         document.getElementById('debug-environment').innerHTML = '<p class="error">Failed to load environment information.</p>';
-        document.getElementById('debug-commands').innerHTML = '<p class="error">Failed to load command history.</p>';
     }
 }
 
@@ -487,48 +515,71 @@ function displayEnvironmentInfo(environment) {
     container.innerHTML = html;
 }
 
-/**
- * Display command history
- * @param {Array} commands - Command history
- */
-function displayCommandHistory(commands) {
-    const container = document.getElementById('debug-commands');
-    
-    if (!commands || commands.length === 0) {
-        container.innerHTML = '<p>No commands have been executed yet.</p>';
-        return;
-    }
-    
-    let html = '';
-    
-    // Display each command in reverse order (newest first)
-    commands.reverse().forEach(cmd => {
-        html += `
-            <div class="command-item">
-                <div class="command-header">
-                    <div class="command-text">${escapeHtml(cmd.command)}</div>
-                    <div class="command-status ${cmd.success ? 'success' : 'error'}">${cmd.success ? 'Success' : 'Error'}</div>
-                </div>
-                <div class="command-output">
-                    ${cmd.stdout ? `<div class="stdout">STDOUT:\n${escapeHtml(cmd.stdout)}</div>` : ''}
-                    ${cmd.stderr ? `<div class="stderr">STDERR:\n${escapeHtml(cmd.stderr)}</div>` : ''}
-                </div>
-            </div>
-        `;
-    });
-    
-    container.innerHTML = html;
+// Function to load debug data
+function loadDebugData() {
+    fetch('/api/debug')
+        .then(response => response.json())
+        .then(data => {
+            displayDebugData(data);
+        })
+        .catch(error => {
+            console.error('Error loading debug data:', error);
+            document.getElementById('debug-content').innerHTML = 
+                `<div class="alert alert-danger">Error loading debug data: ${error.message}</div>`;
+        });
 }
 
-/**
- * Escape HTML special characters
- * @param {string} html - HTML string to escape
- * @returns {string} - Escaped HTML string
- */
-function escapeHtml(html) {
-    if (!html) return '';
+// Function to display debug data in a nice format
+function displayDebugData(data) {
+    const debugContentElement = document.getElementById('debug-content');
     
-    const div = document.createElement('div');
-    div.textContent = html;
-    return div.innerHTML;
-} 
+    // Create HTML content for debug data
+    let html = '<div class="debug-section">';
+    
+    // Environment section
+    html += '<h3>Environment Information</h3>';
+    html += '<table class="table table-sm table-striped">';
+    html += '<thead><tr><th>Name</th><th>Value</th></tr></thead><tbody>';
+    
+    for (const [key, value] of Object.entries(data.environment)) {
+        html += `<tr><td>${key}</td><td>${value}</td></tr>`;
+    }
+    
+    html += '</tbody></table>';
+    
+    // Configuration section
+    html += '<h3>Configuration</h3>';
+    html += '<div class="accordion" id="configAccordion">';
+    
+    let configIdx = 0;
+    for (const [configType, configData] of Object.entries(data.config)) {
+        configIdx++;
+        const headerId = `heading${configIdx}`;
+        const collapseId = `collapse${configIdx}`;
+        
+        html += '<div class="accordion-item">';
+        html += `<h2 class="accordion-header" id="${headerId}">`;
+        html += `<button class="accordion-button collapsed" type="button" 
+                      data-bs-toggle="collapse" data-bs-target="#${collapseId}" 
+                      aria-expanded="false" aria-controls="${collapseId}">
+                    ${configType}
+                 </button>`;
+        html += '</h2>';
+        html += `<div id="${collapseId}" class="accordion-collapse collapse" 
+                     aria-labelledby="${headerId}" data-bs-parent="#configAccordion">`;
+        html += '<div class="accordion-body">';
+        html += `<pre>${JSON.stringify(configData, null, 2)}</pre>`;
+        html += '</div></div></div>';
+    }
+    
+    html += '</div>'; // Close accordion
+    html += '</div>'; // Close debug-section
+    
+    debugContentElement.innerHTML = html;
+}
+
+// Event listener for debug tab
+document.getElementById('debug-tab').addEventListener('click', function() {
+    // Load debug data when debug tab is clicked
+    loadDebugData();
+}); 

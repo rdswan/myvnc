@@ -134,7 +134,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             lsf_config = {
                 'queue': form_data.get('queue', lsf_defaults['queue']),
                 'num_cores': int(form_data.get('num_cores', lsf_defaults['num_cores'])),
-                'memory_mb': int(form_data.get('memory_mb', lsf_defaults['memory_mb'] // 1024)),  # Keep in GB, do not convert
+                'memory_gb': lsf_defaults.get('memory_gb', 16),  # Always use the configured default
                 'job_name': lsf_defaults.get('job_name', 'myvnc_vncserver')  # Always get from config
             }
             

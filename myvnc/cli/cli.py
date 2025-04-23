@@ -113,7 +113,7 @@ def create_vnc_session(args):
         
         data["queue"] = args.queue or lsf_config["defaults"]["queue"]
         data["num_cores"] = args.cores or lsf_config["defaults"]["num_cores"]
-        data["memory_mb"] = args.memory or lsf_config["defaults"]["memory_mb"]
+        data["memory_gb"] = args.memory or lsf_config["defaults"]["memory_gb"]
         data["time_limit"] = args.time_limit or lsf_config["defaults"]["time_limit"]
         
         # Submit job
@@ -208,7 +208,7 @@ def main():
     create_parser.add_argument("--site", help="Site for the VNC session")
     create_parser.add_argument("--queue", help="LSF queue to use")
     create_parser.add_argument("--cores", type=int, help="Number of cores to allocate")
-    create_parser.add_argument("--memory", type=int, help="Memory to allocate in MB")
+    create_parser.add_argument("--memory", type=int, help="Memory to allocate in GB")
     create_parser.add_argument("--time-limit", help="Time limit for the job")
     create_parser.add_argument("--vncserver-path", help="Path to vncserver")
     
