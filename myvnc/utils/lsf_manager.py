@@ -6,6 +6,7 @@ import time
 import os
 from typing import Dict, List, Optional, Tuple
 import datetime
+import json
 
 from myvnc.utils.config_manager import ConfigManager
 
@@ -341,14 +342,34 @@ class LSFManager:
     
     def get_active_vnc_jobs(self) -> List[Dict]:
         """
-        Get active VNC jobs
+        Get active VNC jobs for the current user with job name matching the config
         
         Returns:
             List of jobs as dictionaries
         """
         try:
-            # Get all jobs for current user
-            output = self._run_command(['bjobs', '-w'])
+            # Get job_name from config
+            config = self.config_manager.get_lsf_defaults()
+            job_name = config.get('job_name', 'myvnc_vncserver')
+            
+            # Get current username
+            current_user = os.environ.get('USER', '')
+            
+            # Use bjobs options to filter directly:
+            # -u userName: show jobs for specific user
+            # -J jobName: only show jobs with this name
+            # -w: wide format output
+            cmd = ['bjobs', '-u', current_user, '-J', job_name, '-w']
+            
+            # Log the command we're running
+            cmd_str = ' '.join(cmd)
+            print(f"Running LSF jobs command: {cmd_str}", file=sys.stderr)
+            
+            # Run the command to get basic job info
+            output = self._run_command(cmd)
+            
+            # Log the output for debugging
+            print(f"bjobs command output:\n{output}", file=sys.stderr)
             
             # Parse the output
             jobs = []
@@ -356,25 +377,66 @@ class LSFManager:
             
             # Skip if only header line is present (no jobs)
             if len(lines) <= 1:
+                print(f"No jobs found in output. Lines: {len(lines)}", file=sys.stderr)
                 return jobs
             
             # Process each job line
             for line in lines[1:]:  # Skip header line
+                print(f"Processing job line: {line}", file=sys.stderr)
                 fields = line.split()
                 if len(fields) >= 6:  # Ensure we have enough fields
                     job_id = fields[0]
-                    name = fields[3]
-                    # Only include VNC jobs
-                    if 'vnc' in name.lower():
-                        status = fields[2]
-                        queue = fields[1]
+                    
+                    # Get detailed information for this job
+                    try:
+                        # Use bjobs -l to get detailed job information including command
+                        detailed_output = self._run_command(['bjobs', '-l', job_id])
+                        
+                        # Get the display name from the command (after -name)
+                        # Try to match quoted string first (handles spaces)
+                        quoted_name_match = re.search(r'-name\s+["\']([^"\']+)["\']', detailed_output)
+                        if quoted_name_match:
+                            display_name = quoted_name_match.group(1)  # Get the captured name without quotes
+                        else:
+                            # Fallback to matching non-whitespace if not quoted
+                            simple_name_match = re.search(r'-name\s+([^\s]+)', detailed_output)
+                            display_name = simple_name_match.group(1) if simple_name_match else "VNC Session"
+                        
+                        # Get the queue from the detailed output
+                        queue_match = re.search(r'Queue <([^>]+)>', detailed_output)
+                        queue = queue_match.group(1) if queue_match else "default"
+                        
+                        # Get user and status from the first line
                         user = fields[1]
+                        status = fields[2]
+                        
+                        # Extract host information from the EXEC_HOST field
+                        host = "N/A"
+                        if len(fields) >= 6 and status == "RUN":
+                            exec_host = fields[5]
+                            if ":" in exec_host:
+                                # For multi-host jobs, take the first host
+                                host = exec_host.split(':')[0]
+                            else:
+                                host = exec_host
+                        
                         jobs.append({
                             'job_id': job_id,
-                            'name': name,
+                            'name': display_name,
                             'status': status,
                             'queue': queue,
+                            'host': host,
                             'user': user
+                        })
+                    except Exception as e:
+                        print(f"Error getting details for job {job_id}: {str(e)}", file=sys.stderr)
+                        # Add with default values if detailed lookup fails
+                        jobs.append({
+                            'job_id': job_id,
+                            'name': job_name,
+                            'status': fields[2],
+                            'queue': fields[4],
+                            'user': fields[1]
                         })
             
             return jobs
@@ -401,20 +463,34 @@ class LSFManager:
             # Try to extract host information
             host_match = re.search(r'Started on <([^>]+)>', output)
             if not host_match:
-                return None
-                
-            host = host_match.group(1)
+                # Try to get the host from the EXEC_HOST field
+                exec_hosts_match = re.search(r'(\S+)\s+\d+\s+\S+\s+\S+\s+\S+\s+(\S+)', output)
+                if exec_hosts_match:
+                    host_info = exec_hosts_match.group(2)
+                    # If it contains ":", take the first part (primary host)
+                    if ":" in host_info:
+                        host = host_info.split(':')[0]
+                    else:
+                        host = host_info
+                else:
+                    return None
+            else:
+                host = host_match.group(1)
             
-            # The display number is typically assigned by the VNC server
-            # Here we make a simplification: just use the last part of the job ID
-            # In a real implementation, this would need to be more sophisticated
-            display = job_id[-2:] if len(job_id) > 2 else job_id
+            # In a real VNC server, the display number is typically a small integer (1, 2, etc.)
+            # For demo purposes, we'll assign a fixed display number based on the job ID modulo 5
+            # to give realistic values
+            display_num = (int(job_id) % 5) + 1  # Results in 1-5
+            
+            # VNC uses port 5900+display number
+            vnc_port = 5900 + display_num
             
             return {
                 'host': host,
-                'display': display,
-                'port': 5900 + int(display),  # VNC typically uses port 5900+display
-                'connection_string': f"{host}:{display}"
+                'display': display_num,
+                'port': vnc_port,
+                'connection_string': f"{host}:{display_num}"
             }
-        except (RuntimeError, ValueError):
+        except (RuntimeError, ValueError) as e:
+            print(f"Error getting VNC connection details: {str(e)}", file=sys.stderr)
             return None 

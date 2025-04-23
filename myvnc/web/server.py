@@ -77,6 +77,17 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         """Handle VNC list request"""
         try:
             jobs = self.lsf_manager.get_active_vnc_jobs()
+            
+            # Add connection details including port to each job
+            for job in jobs:
+                try:
+                    if 'job_id' in job:
+                        conn_details = self.lsf_manager.get_vnc_connection_details(job['job_id'])
+                        if conn_details and 'port' in conn_details:
+                            job['port'] = conn_details['port']
+                except Exception as e:
+                    print(f"Error getting connection details for job {job.get('job_id', 'unknown')}: {str(e)}", file=sys.stderr)
+            
             self.send_json_response(jobs)
         except Exception as e:
             self.send_error_response(str(e))

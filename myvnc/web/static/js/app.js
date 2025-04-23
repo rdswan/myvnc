@@ -183,10 +183,11 @@ async function refreshVNCList() {
             // Create cells
             row.innerHTML = `
                 <td>${job.job_id}</td>
-                <td>${job.name}</td>
+                <td>${job.name === "VNC Session" ? "" : job.name}</td>
                 <td>${job.user}</td>
                 <td><span class="status-badge ${statusClass}">${job.status}</span></td>
                 <td>${job.queue}</td>
+                <td>${job.host || 'N/A'}</td>
                 <td class="actions-cell">
                     <button class="button secondary connect-button" data-job-id="${job.job_id}" title="Connect to VNC">
                         <i class="fas fa-plug"></i> Connect
