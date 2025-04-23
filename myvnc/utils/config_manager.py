@@ -62,9 +62,14 @@ class ConfigManager:
     
     def get_available_sites(self):
         """Get the list of available sites"""
-        sites = self.lsf_config.get("available_sites", [])
-        # Return just the site names
-        return [site["name"] for site in sites]
+        try:
+            sites = self.lsf_config.get("available_sites", [])
+            # Return just the site names
+            return [site["name"] for site in sites]
+        except (KeyError, TypeError):
+            print("Warning: available_sites not found or has invalid format in lsf_config.json")
+            # Return a default list of sites if none are found
+            return ["Toronto", "Austin", "Bangalore"]
     
     def get_site_domain(self, site_name):
         """
@@ -76,11 +81,27 @@ class ConfigManager:
         Returns:
             Domain name or None if not found
         """
-        sites = self.lsf_config.get("available_sites", [])
-        for site in sites:
-            if site["name"] == site_name:
-                return site["domain"]
-        return None
+        try:
+            sites = self.lsf_config.get("available_sites", [])
+            for site in sites:
+                if site["name"] == site_name:
+                    return site["domain"]
+            
+            # If not found in config, use default mappings
+            default_mappings = {
+                "Toronto": "yyz",
+                "Austin": "aus",
+                "Bangalore": "bglr"
+            }
+            return default_mappings.get(site_name)
+        except (KeyError, TypeError):
+            # If there's an error, use default mappings
+            default_mappings = {
+                "Toronto": "yyz",
+                "Austin": "aus",
+                "Bangalore": "bglr"
+            }
+            return default_mappings.get(site_name)
     
     def get_available_queues(self):
         """Get the list of available LSF queues"""
