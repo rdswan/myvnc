@@ -2,8 +2,9 @@
     "default_settings": {
         "queue": "interactive",
         "num_cores": 2,
-        "memory_mb": 4096,
-        "time_limit": "12:00"
+        "memory_mb": 16384,
+        "time_limit": "12:00",
+        "job_name": "myvnc_vncserver"
     },
     "available_queues": [
         "interactive",
@@ -15,6 +16,13 @@
         4096,
         8192,
         16384
+    ],
+    "memory_options_gb": [
+        2,
+        4,
+        8,
+        16,
+        32
     ],
     "core_options": [
         1,
