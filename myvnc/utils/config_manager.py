@@ -62,7 +62,25 @@ class ConfigManager:
     
     def get_available_sites(self):
         """Get the list of available sites"""
-        return self.vnc_config["available_sites"]
+        sites = self.lsf_config.get("available_sites", [])
+        # Return just the site names
+        return [site["name"] for site in sites]
+    
+    def get_site_domain(self, site_name):
+        """
+        Get the domain for a specific site
+        
+        Args:
+            site_name: Name of the site
+            
+        Returns:
+            Domain name or None if not found
+        """
+        sites = self.lsf_config.get("available_sites", [])
+        for site in sites:
+            if site["name"] == site_name:
+                return site["domain"]
+        return None
     
     def get_available_queues(self):
         """Get the list of available LSF queues"""

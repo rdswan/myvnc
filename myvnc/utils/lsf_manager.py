@@ -4,6 +4,8 @@ import re
 import sys
 from typing import Dict, List, Optional, Tuple
 
+from myvnc.utils.config_manager import ConfigManager
+
 class LSFManager:
     """Manages interactions with the LSF job scheduler via command line"""
     
@@ -16,6 +18,9 @@ class LSFManager:
         """
         # For storing command execution history for debugging
         self.command_history = []
+        
+        # Initialize config manager for site domain lookups
+        self.config_manager = ConfigManager()
         
         try:
             self._check_lsf_available()
@@ -138,6 +143,13 @@ class LSFManager:
             '-W', lsf_config['time_limit'],
             '-J', vnc_config['name']
         ]
+        
+        # Add site-specific parameters if site is specified
+        if 'site' in vnc_config and vnc_config['site']:
+            site_domain = self.config_manager.get_site_domain(vnc_config['site'])
+            if site_domain:
+                # Add site domain to job submission
+                cmd.extend(['-m', f'{site_domain}-*'])
         
         # Get the vncserver path from config or use default as fallback
         vncserver_path = vnc_config.get('vncserver_path', '/usr/bin/vncserver')

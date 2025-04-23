@@ -22,5 +22,19 @@
         4,
         8
     ],
+    "available_sites": [
+        {
+            "name": "Toronto",
+            "domain": "yyz"
+        },
+        {
+            "name": "Austin",
+            "domain": "aus"
+        },
+        {
+            "name": "Bangalore",
+            "domain": "bglr"
+        }
+    ],
     "env_file": "/site/lsf/aus-hw/conf/profile.lsf"
 } 
