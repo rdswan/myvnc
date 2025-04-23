@@ -15,8 +15,9 @@ It is fully Open Source via the Apache License 2.0
     - Default VNC settings are defined in an included json file called vnc_config.json
 - VNC commands are not executed directly, but rather submitted to LSF via the command line. Therefore neither python-vnc-client nor lsf-python-api packages are required.
   - LSF configuration to define the queue, number of cores, and amount of memory to reserve for submission. There are default values for these 3 LSF definitions, but the user is able to change them via the GUI
-  - This script uses the python LSF API to make calls to an LSF cluster.
+  - This script uses the LSF command line tools to interact with an LSF cluster.
   - Default LSF settings are defined in an included json file called lsf_config.json
+  - The LSF environment file path can be configured in lsf_config.json to ensure LSF commands are available
 
 ## Installation
 
@@ -33,12 +34,16 @@ It is fully Open Source via the Apache License 2.0
    python3 main.py
    ```
 
-2. Edit the config/server_config.json file with your webserver details
+2. Edit the configuration files:
    ```bash
+   # Edit server configuration (host, port)
    vim config/server_config.json
+   
+   # Edit LSF configuration (including env_file path)
+   vim config/lsf_config.json
    ```
 
-2. Start the server:
+3. Start the server:
    ```bash
    python3 main.py
    ```

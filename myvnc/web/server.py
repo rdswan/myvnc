@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import argparse
+import subprocess
 from pathlib import Path
 
 # Add parent directory to path so we can import our modules
@@ -195,8 +196,50 @@ def load_server_config():
             "timeout": 30
         }
 
+def load_lsf_config():
+    """Load LSF configuration from JSON file"""
+    config_path = Path(__file__).parent.parent.parent / "config" / "lsf_config.json"
+    
+    try:
+        with open(config_path, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"Warning: LSF configuration file not found at {config_path}")
+        return {}
+    except json.JSONDecodeError:
+        print(f"Warning: Invalid JSON in LSF configuration file")
+        return {}
+
+def source_lsf_environment():
+    """Source the LSF environment file"""
+    lsf_config = load_lsf_config()
+    env_file = lsf_config.get("env_file")
+    
+    if not env_file or not os.path.exists(env_file):
+        print(f"Warning: LSF environment file not found at {env_file}")
+        return False
+    
+    try:
+        # Source the environment file and capture the environment variables
+        command = f"source {env_file} && env"
+        proc = subprocess.Popen(['/bin/bash', '-c', command], stdout=subprocess.PIPE)
+        for line in proc.stdout:
+            line = line.decode('utf-8').strip()
+            if line and '=' in line:
+                key, value = line.split('=', 1)
+                os.environ[key] = value
+        proc.communicate()  # Ensure process completes
+        print(f"Successfully sourced LSF environment from {env_file}")
+        return True
+    except Exception as e:
+        print(f"Error sourcing LSF environment: {str(e)}")
+        return False
+
 def run_server(host=None, port=None, directory=None):
     """Run the web server"""
+    # Source LSF environment
+    source_lsf_environment()
+    
     # Load configuration
     config = load_server_config()
     
