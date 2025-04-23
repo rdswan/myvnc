@@ -67,7 +67,8 @@ class VNCreatorTab(QWidget):
             'name': self.name_input.text().strip(),
             'resolution': self.resolution_combo.currentText(),
             'window_manager': self.wm_combo.currentText(),
-            'color_depth': 24  # Default color depth
+            'color_depth': 24,  # Default color depth
+            'vncserver_path': self.config_manager.get_vnc_defaults().get('vncserver_path', '/usr/bin/vncserver')
         }
         
         # Prepare LSF configuration

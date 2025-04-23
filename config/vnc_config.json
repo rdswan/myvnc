@@ -4,7 +4,8 @@
         "window_manager": "gnome",
         "color_depth": 24,
         "name_prefix": "vnc_session",
-        "site": "default"
+        "site": "default",
+        "vncserver_path": "/usr/bin/vncserver"
     },
     "available_window_managers": [
         "gnome",

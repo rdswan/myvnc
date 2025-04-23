@@ -109,6 +109,7 @@ def create_vnc_session(args):
         data["window_manager"] = args.window_manager or vnc_config["defaults"]["window_manager"]
         data["color_depth"] = args.color_depth or vnc_config["defaults"]["color_depth"]
         data["site"] = args.site or vnc_config["defaults"]["site"]
+        data["vncserver_path"] = args.vncserver_path or vnc_config["defaults"].get("vncserver_path", "/usr/bin/vncserver")
         
         data["queue"] = args.queue or lsf_config["defaults"]["queue"]
         data["num_cores"] = args.cores or lsf_config["defaults"]["num_cores"]
@@ -209,6 +210,7 @@ def main():
     create_parser.add_argument("--cores", type=int, help="Number of cores to allocate")
     create_parser.add_argument("--memory", type=int, help="Memory to allocate in MB")
     create_parser.add_argument("--time-limit", help="Time limit for the job")
+    create_parser.add_argument("--vncserver-path", help="Path to vncserver")
     
     # Kill command
     kill_parser = subparsers.add_parser("kill", help="Kill a VNC session")

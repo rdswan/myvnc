@@ -43,17 +43,23 @@ def list():
               default='vnc_queue', help='LSF queue to submit the job to')
 @click.option('--cores', type=int, default=2, help='Number of cores to allocate')
 @click.option('--memory', type=int, default=4096, help='Memory to allocate in MB')
-def create(name, resolution, wm, queue, cores, memory):
+@click.option('--vncserver-path', help='Path to vncserver binary')
+def create(name, resolution, wm, queue, cores, memory, vncserver_path):
     """Create a new VNC session"""
     try:
+        config_manager = ConfigManager()
         lsf_manager = LSFManager()
+        
+        # Get default vncserver path from config
+        default_vncserver_path = config_manager.get_vnc_defaults().get('vncserver_path', '/usr/bin/vncserver')
         
         # Prepare configurations
         vnc_config = {
             'name': name,
             'resolution': resolution,
             'window_manager': wm,
-            'color_depth': 24
+            'color_depth': 24,
+            'vncserver_path': vncserver_path or default_vncserver_path
         }
         
         lsf_config = {

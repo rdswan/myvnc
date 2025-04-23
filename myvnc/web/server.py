@@ -87,7 +87,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 'resolution': form.getvalue('resolution', self.config_manager.get_vnc_defaults()['resolution']),
                 'window_manager': form.getvalue('window_manager', self.config_manager.get_vnc_defaults()['window_manager']),
                 'color_depth': int(form.getvalue('color_depth', self.config_manager.get_vnc_defaults()['color_depth'])),
-                'site': form.getvalue('site', self.config_manager.get_vnc_defaults()['site'])
+                'site': form.getvalue('site', self.config_manager.get_vnc_defaults()['site']),
+                'vncserver_path': self.config_manager.get_vnc_defaults().get('vncserver_path', '/usr/bin/vncserver')
             }
             
             # Extract LSF configuration

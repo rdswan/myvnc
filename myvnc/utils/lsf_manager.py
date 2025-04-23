@@ -71,9 +71,12 @@ class LSFManager:
             '-J', vnc_config['name']
         ]
         
+        # Get the vncserver path from config or use default as fallback
+        vncserver_path = vnc_config.get('vncserver_path', '/usr/bin/vncserver')
+        
         # Add the vncserver command with its arguments
         # Note: Only using supported options (geometry, depth, name)
-        vnc_cmd = f"vncserver -geometry {vnc_config['resolution']} -depth {vnc_config['color_depth']} " + \
+        vnc_cmd = f"{vncserver_path} -geometry {vnc_config['resolution']} -depth {vnc_config['color_depth']} " + \
                  f"-name {vnc_config['name']}"
         
         # Note: Removed -wm and -site options as they're not supported by vncserver
