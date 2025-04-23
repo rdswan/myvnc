@@ -24,7 +24,13 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     
     // Set up event listeners
-    refreshButton.addEventListener('click', refreshVNCList);
+    refreshButton.addEventListener('click', () => {
+        refreshButton.classList.add('rotating');
+        refreshVNCList().finally(() => {
+            setTimeout(() => refreshButton.classList.remove('rotating'), 500);
+        });
+    });
+    
     createVNCForm.addEventListener('submit', createVNCSession);
     messageClose.addEventListener('click', hideMessage);
     
@@ -45,6 +51,11 @@ function changeTab(tabId) {
     // Activate selected tab
     document.querySelector(`[data-tab="${tabId}"]`).classList.add('active');
     document.getElementById(tabId).classList.add('active');
+    
+    // Add animation class to fade in content
+    const activeContent = document.getElementById(tabId);
+    activeContent.classList.add('fade-in');
+    setTimeout(() => activeContent.classList.remove('fade-in'), 300);
 }
 
 // API Requests
@@ -86,8 +97,9 @@ async function loadVNCConfig() {
         populateSelect('vnc-resolution', vncConfig.resolutions, vncConfig.defaults.resolution);
         populateSelect('vnc-window-manager', vncConfig.window_managers, vncConfig.defaults.window_manager);
         
-        // Set default name prefix as placeholder
-        document.getElementById('vnc-name').placeholder = `${vncConfig.defaults.name_prefix}_${generateRandomId()}`;
+        // Set default name placeholder
+        const randomId = generateRandomId();
+        document.getElementById('vnc-name').placeholder = `${vncConfig.defaults.name_prefix}_${randomId}`;
     } catch (error) {
         console.error('Failed to load VNC configuration:', error);
     }
@@ -117,24 +129,35 @@ async function refreshVNCList() {
         
         if (jobs.length === 0) {
             noVNCMessage.style.display = 'block';
+            document.querySelector('.table-container').style.display = 'none';
             return;
         }
         
         noVNCMessage.style.display = 'none';
+        document.querySelector('.table-container').style.display = 'block';
         
         // Populate table
         jobs.forEach(job => {
             const row = document.createElement('tr');
+            
+            // Status badge class based on status
+            let statusClass = 'status-pending';
+            if (job.status === 'DONE') statusClass = 'status-done';
+            if (job.status === 'RUN') statusClass = 'status-running';
+            if (job.status === 'EXIT') statusClass = 'status-error';
             
             // Create cells
             row.innerHTML = `
                 <td>${job.job_id}</td>
                 <td>${job.name}</td>
                 <td>${job.user}</td>
-                <td>${job.status}</td>
+                <td><span class="status-badge ${statusClass}">${job.status}</span></td>
                 <td>${job.queue}</td>
-                <td>
-                    <button class="button danger kill-button" data-job-id="${job.job_id}">
+                <td class="actions-cell">
+                    <button class="button secondary connect-button" data-job-id="${job.job_id}" title="Connect to VNC">
+                        <i class="fas fa-plug"></i> Connect
+                    </button>
+                    <button class="button danger kill-button" data-job-id="${job.job_id}" title="Kill VNC Session">
                         <i class="fas fa-times"></i> Kill
                     </button>
                 </td>
@@ -144,11 +167,22 @@ async function refreshVNCList() {
             vncTableBody.appendChild(row);
         });
         
-        // Add event listeners to kill buttons
+        // Add event listeners to buttons
         document.querySelectorAll('.kill-button').forEach(button => {
             button.addEventListener('click', () => {
                 const jobId = button.getAttribute('data-job-id');
                 killVNCSession(jobId);
+            });
+        });
+        
+        document.querySelectorAll('.connect-button').forEach(button => {
+            button.addEventListener('click', () => {
+                const jobId = button.getAttribute('data-job-id');
+                // Find job info
+                const job = jobs.find(j => j.job_id === jobId);
+                if (job) {
+                    connectToVNC(job);
+                }
             });
         });
     } catch (error) {
@@ -156,9 +190,25 @@ async function refreshVNCList() {
     }
 }
 
+// Connect to VNC
+function connectToVNC(job) {
+    // This would typically open a VNC connection
+    // For now, we'll just show a message
+    showMessage(`Connecting to VNC session: ${job.name}`, 'info');
+    
+    // In a real implementation, this would redirect to the VNC client or open it in a new window
+    // window.open(`/vnc/connect/${job.job_id}`, '_blank');
+}
+
 // Create VNC Session
 async function createVNCSession(event) {
     event.preventDefault();
+    
+    // Show loading on button
+    const submitButton = createVNCForm.querySelector('button[type="submit"]');
+    const originalText = submitButton.innerHTML;
+    submitButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Creating...';
+    submitButton.disabled = true;
     
     // Get form data
     const formData = new FormData(createVNCForm);
@@ -186,25 +236,57 @@ async function createVNCSession(event) {
         refreshVNCList();
     } catch (error) {
         console.error('Failed to create VNC session:', error);
+    } finally {
+        // Restore button state
+        submitButton.innerHTML = originalText;
+        submitButton.disabled = false;
     }
 }
 
 // Kill VNC Session
 async function killVNCSession(jobId) {
-    if (!confirm(`Are you sure you want to kill VNC session ${jobId}?`)) {
-        return;
-    }
+    // Create a modal confirmation dialog
+    const confirmDialog = document.createElement('div');
+    confirmDialog.className = 'confirm-dialog';
+    confirmDialog.innerHTML = `
+        <div class="confirm-dialog-content">
+            <h3>Confirm Action</h3>
+            <p>Are you sure you want to kill VNC session ${jobId}?</p>
+            <div class="confirm-actions">
+                <button class="button secondary cancel-button">Cancel</button>
+                <button class="button danger confirm-button">Yes, Kill Session</button>
+            </div>
+        </div>
+    `;
     
-    try {
-        await apiRequest(`vnc/kill/${jobId}`, 'POST');
-        showMessage(`VNC session ${jobId} killed successfully.`, 'success');
-        refreshVNCList();
-    } catch (error) {
-        console.error(`Failed to kill VNC session ${jobId}:`, error);
-    }
+    document.body.appendChild(confirmDialog);
+    
+    // Add event listeners
+    const cancelButton = confirmDialog.querySelector('.cancel-button');
+    const confirmButton = confirmDialog.querySelector('.confirm-button');
+    
+    cancelButton.addEventListener('click', () => {
+        document.body.removeChild(confirmDialog);
+    });
+    
+    confirmButton.addEventListener('click', async () => {
+        // Show loading state
+        confirmButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Killing...';
+        confirmButton.disabled = true;
+        
+        try {
+            await apiRequest(`vnc/kill/${jobId}`, 'POST');
+            showMessage(`VNC session ${jobId} killed successfully.`, 'success');
+            refreshVNCList();
+        } catch (error) {
+            console.error('Failed to kill VNC session:', error);
+        } finally {
+            document.body.removeChild(confirmDialog);
+        }
+    });
 }
 
-// Helper function to populate select elements
+// Populate Select Options
 function populateSelect(elementId, options, defaultValue) {
     const select = document.getElementById(elementId);
     select.innerHTML = '';
@@ -214,7 +296,7 @@ function populateSelect(elementId, options, defaultValue) {
         optionElement.value = option;
         optionElement.textContent = option;
         
-        if (option == defaultValue) {
+        if (option === defaultValue) {
             optionElement.selected = true;
         }
         
@@ -222,22 +304,117 @@ function populateSelect(elementId, options, defaultValue) {
     });
 }
 
-// Show message
+// Show Message
 function showMessage(message, type = 'info') {
     messageText.textContent = message;
+    messageBox.className = `message-box ${type}`;
     messageBox.classList.remove('hidden');
-    messageBox.querySelector('.message-content').className = `message-content ${type}`;
     
     // Auto-hide after 5 seconds
     setTimeout(hideMessage, 5000);
 }
 
-// Hide message
+// Hide Message
 function hideMessage() {
     messageBox.classList.add('hidden');
 }
 
-// Generate random ID for VNC name
+// Generate Random ID for VNC session names
 function generateRandomId() {
-    return Math.floor(Math.random() * 9000 + 1000);
-} 
+    return Math.random().toString(36).substring(2, 8);
+}
+
+// Add the CSS styles for the confirmation dialog and status badges to the page
+document.addEventListener('DOMContentLoaded', () => {
+    const style = document.createElement('style');
+    style.textContent = `
+        .confirm-dialog {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            animation: fadeIn 0.2s ease;
+        }
+        
+        .confirm-dialog-content {
+            background-color: white;
+            border-radius: var(--border-radius);
+            padding: 1.5rem;
+            width: 90%;
+            max-width: 400px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        
+        .confirm-dialog-content h3 {
+            margin-top: 0;
+            color: var(--text-color);
+            border: none;
+        }
+        
+        .confirm-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.5rem;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+        
+        .status-running {
+            background-color: rgba(46, 204, 113, 0.15);
+            color: #27ae60;
+        }
+        
+        .status-pending {
+            background-color: rgba(52, 152, 219, 0.15);
+            color: #2980b9;
+        }
+        
+        .status-error {
+            background-color: rgba(231, 76, 60, 0.15);
+            color: #c0392b;
+        }
+        
+        .status-done {
+            background-color: rgba(149, 165, 166, 0.15);
+            color: #7f8c8d;
+        }
+        
+        .actions-cell {
+            display: flex;
+            gap: 0.5rem;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        
+        .rotating {
+            animation: rotate 0.8s linear infinite;
+        }
+        
+        @keyframes rotate {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.3s ease;
+        }
+    `;
+    
+    document.head.appendChild(style);
+}); 

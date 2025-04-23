@@ -6,16 +6,25 @@
     <title>MyVNC Manager</title>
     <link rel="stylesheet" href="css/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
 </head>
 <body>
     <header>
-        <h1>MyVNC Manager</h1>
+        <div class="header-content">
+            <h1><i class="fas fa-desktop"></i> MyVNC Manager</h1>
+        </div>
     </header>
     
     <div class="tab-container">
         <div class="tabs">
-            <button class="tab-button active" data-tab="vnc-manager">VNC Manager</button>
-            <button class="tab-button" data-tab="vnc-creator">Create VNC</button>
+            <button class="tab-button active" data-tab="vnc-manager">
+                <i class="fas fa-list"></i> VNC Manager
+            </button>
+            <button class="tab-button" data-tab="vnc-creator">
+                <i class="fas fa-plus-circle"></i> Create VNC
+            </button>
         </div>
         
         <div id="vnc-manager" class="tab-content active">
@@ -44,65 +53,109 @@
             </div>
             
             <div id="no-vnc-message" class="message-container">
-                <p>No active VNC sessions found.</p>
+                <div class="empty-state">
+                    <i class="fas fa-desktop empty-icon"></i>
+                    <p>No active VNC sessions found.</p>
+                    <button class="button secondary" onclick="changeTab('vnc-creator')">
+                        <i class="fas fa-plus"></i> Create New Session
+                    </button>
+                </div>
             </div>
         </div>
         
         <div id="vnc-creator" class="tab-content">
-            <form id="create-vnc-form">
-                <div class="form-group">
-                    <label for="vnc-name">Session Name:</label>
-                    <input type="text" id="vnc-name" name="name" required>
-                </div>
-                
-                <div class="form-group">
-                    <label for="vnc-site">Site:</label>
-                    <select id="vnc-site" name="site">
-                        <!-- Options will be loaded from configuration -->
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label for="vnc-resolution">Resolution:</label>
-                    <select id="vnc-resolution" name="resolution">
-                        <!-- Options will be loaded from configuration -->
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label for="vnc-window-manager">Window Manager:</label>
-                    <select id="vnc-window-manager" name="window_manager">
-                        <!-- Options will be loaded from configuration -->
-                    </select>
-                </div>
-                
-                <h3>LSF Settings</h3>
-                
-                <div class="form-group">
-                    <label for="lsf-queue">Queue:</label>
-                    <select id="lsf-queue" name="queue">
-                        <!-- Options will be loaded from configuration -->
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label for="lsf-cores">Number of Cores:</label>
-                    <select id="lsf-cores" name="num_cores">
-                        <!-- Options will be loaded from configuration -->
-                    </select>
-                </div>
-                
-                <div class="form-group">
-                    <label for="lsf-memory">Memory (MB):</label>
-                    <select id="lsf-memory" name="memory_mb">
-                        <!-- Options will be loaded from configuration -->
-                    </select>
-                </div>
-                
-                <div class="form-actions">
-                    <button type="submit" class="button primary">Create VNC Session</button>
-                </div>
-            </form>
+            <div class="form-card">
+                <h2 class="form-title">Create New VNC Session</h2>
+                <form id="create-vnc-form">
+                    <div class="form-section">
+                        <h3>Session Settings</h3>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="vnc-name">Session Name</label>
+                                <div class="input-with-icon">
+                                    <i class="fas fa-tag icon-left"></i>
+                                    <input type="text" id="vnc-name" name="name" required>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="vnc-site">Site</label>
+                                <div class="select-wrapper">
+                                    <select id="vnc-site" name="site">
+                                        <!-- Options will be loaded from configuration -->
+                                    </select>
+                                    <i class="fas fa-chevron-down"></i>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="vnc-resolution">Resolution</label>
+                                <div class="select-wrapper">
+                                    <select id="vnc-resolution" name="resolution">
+                                        <!-- Options will be loaded from configuration -->
+                                    </select>
+                                    <i class="fas fa-chevron-down"></i>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="vnc-window-manager">Window Manager</label>
+                                <div class="select-wrapper">
+                                    <select id="vnc-window-manager" name="window_manager">
+                                        <!-- Options will be loaded from configuration -->
+                                    </select>
+                                    <i class="fas fa-chevron-down"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-section">
+                        <h3>LSF Settings</h3>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="lsf-queue">Queue</label>
+                                <div class="select-wrapper">
+                                    <select id="lsf-queue" name="queue">
+                                        <!-- Options will be loaded from configuration -->
+                                    </select>
+                                    <i class="fas fa-chevron-down"></i>
+                                </div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="lsf-cores">Number of Cores</label>
+                                <div class="select-wrapper">
+                                    <select id="lsf-cores" name="num_cores">
+                                        <!-- Options will be loaded from configuration -->
+                                    </select>
+                                    <i class="fas fa-chevron-down"></i>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label for="lsf-memory">Memory (MB)</label>
+                                <div class="select-wrapper">
+                                    <select id="lsf-memory" name="memory_mb">
+                                        <!-- Options will be loaded from configuration -->
+                                    </select>
+                                    <i class="fas fa-chevron-down"></i>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-actions">
+                        <button type="submit" class="button primary">
+                            <i class="fas fa-rocket"></i> Create VNC Session
+                        </button>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
     
