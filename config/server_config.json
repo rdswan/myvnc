@@ -1,8 +1,10 @@
 {
-    "host": "rv-l-07.aus2.tenstorrent.com",
+    "host": "aus-misc",
     "port": 9123,
     "debug": false,
     "max_connections": 5,
     "timeout": 30,
+    // to enable Entra SSO - just define this
+    //"authentication": "Entra"
     "authentication": ""
 } 
