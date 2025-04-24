@@ -386,11 +386,42 @@ class LSFManager:
                 fields = line.split()
                 if len(fields) >= 6:  # Ensure we have enough fields
                     job_id = fields[0]
+                    user = fields[1]
+                    status = fields[2]
+                    queue = fields[3]
+                    
+                    # Extract host information from the EXEC_HOST field
+                    # Format is typically: JOBID USER STATUS QUEUE FROM_HOST EXEC_HOST JOB_NAME SUBMIT_TIME
+                    # For 'RUN' status jobs, EXEC_HOST is filled; for others it may be '-'
+                    host = "N/A"
+                    if status == "RUN":
+                        exec_host = fields[5]  # EXEC_HOST is the 6th field (index 5)
+                        if exec_host and exec_host != '-':
+                            if ":" in exec_host:
+                                # For multi-host jobs, take the first host
+                                host = exec_host.split(':')[0]
+                            else:
+                                host = exec_host
                     
                     # Get detailed information for this job
                     try:
                         # Use bjobs -l to get detailed job information including command
                         detailed_output = self._run_command(['bjobs', '-l', job_id])
+                        
+                        # Print a snippet of the detailed output for debugging
+                        output_snippet = detailed_output[:500] + (detailed_output[500:] and '...')  # First 500 chars
+                        print(f"Job {job_id} detailed output snippet: {output_snippet}", file=sys.stderr)
+                        
+                        # Look specifically for resource specifications
+                        resource_lines = []
+                        for line in detailed_output.split('\n'):
+                            if any(term in line.lower() for term in ['mem=', 'rusage', 'cores', 'host', 'slots']):
+                                resource_lines.append(line.strip())
+                        
+                        if resource_lines:
+                            print(f"Resource related lines for job {job_id}:", file=sys.stderr)
+                            for line in resource_lines:
+                                print(f"  - {line}", file=sys.stderr)
                         
                         # Get the display name from the command (after -name)
                         # Try to match quoted string first (handles spaces)
@@ -404,21 +435,65 @@ class LSFManager:
                         
                         # Get the queue from the detailed output
                         queue_match = re.search(r'Queue <([^>]+)>', detailed_output)
-                        queue = queue_match.group(1) if queue_match else "default"
+                        queue = queue_match.group(1) if queue_match else queue
                         
-                        # Get user and status from the first line
-                        user = fields[1]
-                        status = fields[2]
+                        # Extract resource information (cores and memory)
+                        cores = 2  # Default
+                        memory_gb = 16  # Default
                         
-                        # Extract host information from the EXEC_HOST field
-                        host = "N/A"
-                        if len(fields) >= 6 and status == "RUN":
-                            exec_host = fields[5]
-                            if ":" in exec_host:
-                                # For multi-host jobs, take the first host
-                                host = exec_host.split(':')[0]
+                        # Look for cores information (Requested/Reserved)
+                        cores_match = re.search(r'(\d+)\s+\*\s+(?:host|hosts)', detailed_output, re.IGNORECASE)
+                        if cores_match:
+                            cores = int(cores_match.group(1))
+                            print(f"Found cores from regex: {cores}", file=sys.stderr)
+                        else:
+                            # Try an alternative pattern: "Requested NNN cores"
+                            cores_alt_match = re.search(r'Requested\s+(\d+)\s+cores', detailed_output, re.IGNORECASE)
+                            if cores_alt_match:
+                                cores = int(cores_alt_match.group(1))
+                                print(f"Found cores from alternative regex: {cores}", file=sys.stderr)
                             else:
-                                host = exec_host
+                                # Try matching "N Task(s)" pattern 
+                                tasks_match = re.search(r'(\d+)\s+Task\(s\)', detailed_output, re.IGNORECASE)
+                                if tasks_match:
+                                    cores = int(tasks_match.group(1))
+                                    print(f"Found cores from tasks pattern: {cores}", file=sys.stderr)
+                        
+                        # Look for memory information
+                        # Pattern could be "mem=NNN", "rusage[mem=NNNM/G]" or similar
+                        mem_match = re.search(r'mem=(\d+(?:\.\d+)?)([MG]?)', detailed_output, re.IGNORECASE)
+                        if mem_match:
+                            mem_value = float(mem_match.group(1))
+                            mem_unit = mem_match.group(2).upper() if mem_match.group(2) else ''
+                            
+                            # Check if this comes from the rusage context
+                            is_rusage = 'rusage[mem=' in detailed_output
+                            
+                            # If no unit specified in a rusage context, LSF default is GB
+                            if not mem_unit and is_rusage:
+                                mem_unit = 'G'
+                                print(f"No unit specified in rusage context, assuming GB", file=sys.stderr)
+                            
+                            if mem_unit == 'M':
+                                memory_gb = max(1, round(mem_value / 1024))  # Convert MB to GB, minimum 1GB
+                            else:
+                                memory_gb = int(mem_value)  # Already in GB
+                            
+                            print(f"Found memory from regex pattern: {memory_gb}GB (value={mem_value}, unit={mem_unit}, rusage_context={is_rusage})", file=sys.stderr)
+                        
+                        # If the first pattern doesn't match, try an alternative pattern for "rusage[mem=NNG]"
+                        if memory_gb == 16:  # Still using default
+                            rusage_match = re.search(r'rusage\[mem=(\d+(?:\.\d+)?)([MG]?)\]', detailed_output, re.IGNORECASE)
+                            if rusage_match:
+                                mem_value = float(rusage_match.group(1))
+                                mem_unit = rusage_match.group(2).upper() if rusage_match.group(2) else 'G'  # Default to GB for rusage
+                                
+                                if mem_unit == 'M':
+                                    memory_gb = max(1, round(mem_value / 1024))  # Convert MB to GB, minimum 1GB
+                                else:
+                                    memory_gb = int(mem_value)  # Already in GB
+                                
+                                print(f"Found memory from rusage regex pattern: {memory_gb}GB (value={mem_value}, unit={mem_unit})", file=sys.stderr)
                         
                         jobs.append({
                             'job_id': job_id,
@@ -426,7 +501,9 @@ class LSFManager:
                             'status': status,
                             'queue': queue,
                             'host': host,
-                            'user': user
+                            'user': user,
+                            'num_cores': cores,
+                            'memory_gb': memory_gb
                         })
                     except Exception as e:
                         print(f"Error getting details for job {job_id}: {str(e)}", file=sys.stderr)
@@ -434,9 +511,12 @@ class LSFManager:
                         jobs.append({
                             'job_id': job_id,
                             'name': job_name,
-                            'status': fields[2],
-                            'queue': fields[4],
-                            'user': fields[1]
+                            'status': status,
+                            'queue': queue,
+                            'host': host,
+                            'user': user,
+                            'num_cores': 2,  # Default cores
+                            'memory_gb': 16   # Default memory
                         })
             
             return jobs
@@ -457,30 +537,105 @@ class LSFManager:
             Dictionary with connection details or None if not found
         """
         try:
-            # Get job details
-            output = self._run_command(['bjobs', '-l', job_id])
+            # First get basic job info to extract the host
+            basic_output = self._run_command(['bjobs', '-w', job_id])
+            basic_lines = basic_output.strip().split('\n')
             
-            # Try to extract host information
-            host_match = re.search(r'Started on <([^>]+)>', output)
-            if not host_match:
-                # Try to get the host from the EXEC_HOST field
-                exec_hosts_match = re.search(r'(\S+)\s+\d+\s+\S+\s+\S+\s+\S+\s+(\S+)', output)
-                if exec_hosts_match:
-                    host_info = exec_hosts_match.group(2)
-                    # If it contains ":", take the first part (primary host)
-                    if ":" in host_info:
-                        host = host_info.split(':')[0]
-                    else:
-                        host = host_info
+            # Initialize host
+            host = None
+            output = ""  # Initialize output to avoid reference error
+            
+            # Extract host from the basic output first (most reliable)
+            if len(basic_lines) > 1:  # Header + job line
+                job_line = basic_lines[1]
+                print(f"Basic job info: {job_line}", file=sys.stderr)
+                fields = job_line.split()
+                
+                if len(fields) >= 6 and 'RUN' in job_line:
+                    # Format: JOBID USER STATUS QUEUE FROM_HOST EXEC_HOST JOB_NAME SUBMIT_TIME
+                    exec_host = fields[5]  # EXEC_HOST is the 6th field (index 5)
+                    if exec_host and exec_host != '-':
+                        if ":" in exec_host:
+                            # For multi-host jobs, take the first host
+                            host = exec_host.split(':')[0]
+                        else:
+                            host = exec_host
+                        print(f"Found host from basic job info: {host}", file=sys.stderr)
+            
+            # If we didn't get the host from basic output, get detailed info
+            if not host:
+                # Get detailed job info
+                output = self._run_command(['bjobs', '-l', job_id])
+                
+                # Try to extract host information from detailed output
+                host_match = re.search(r'Started on <([^>]+)>', output)
+                if host_match:
+                    host = host_match.group(1)
+                    print(f"Found host from 'Started on' pattern: {host}", file=sys.stderr)
+                
+                # Look for EXEC_HOST pattern as fallback
+                if not host:
+                    exec_host_match = re.search(r'EXEC_HOST\s*:\s*(\S+)', output, re.IGNORECASE)
+                    if exec_host_match:
+                        host_info = exec_host_match.group(1)
+                        if ":" in host_info:
+                            host = host_info.split(':')[0]
+                        else:
+                            host = host_info
+                        print(f"Found host from EXEC_HOST pattern: {host}", file=sys.stderr)
+            
+            # If we still don't have a host, print error and exit
+            if not host:
+                print(f"Could not determine execution host for job {job_id}", file=sys.stderr)
+                return None
+            
+            # Get the user running the job
+            user_match = re.search(r'User <([^>]+)>', output)
+            user = user_match.group(1) if user_match else os.environ.get('USER', '')
+            
+            # Query the remote host for VNC process information
+            try:
+                # Clean up the hostname - remove any non-alphanumeric characters except for hyphens
+                host = host.strip()
+                # More aggressive cleaning - keep only alphanumeric chars, hyphens, and dots
+                host = re.sub(r'[^a-zA-Z0-9\-\.]', '', host)
+                print(f"Cleaned host name: '{host}'", file=sys.stderr)
+                
+                if not host or not re.match(r'^[a-zA-Z0-9\-\.]+$', host):
+                    print(f"Host name is invalid after cleaning: '{host}'", file=sys.stderr)
+                    raise ValueError(f"Invalid hostname: {host}")
+                
+                print(f"Attempting to query VNC information on host: {host} for user: {user}", file=sys.stderr)
+                
+                # Use SSH to run a command on the remote host to find the Xvnc process
+                ssh_cmd = ['ssh', host, f"ps -u {user} -o pid,command | grep Xvnc"]
+                print(f"Running SSH command: {' '.join(ssh_cmd)}", file=sys.stderr)
+                
+                vnc_process_output = self._run_command(ssh_cmd)
+                print(f"SSH command output: {vnc_process_output}", file=sys.stderr)
+                
+                # Look for the display number in the Xvnc process command line
+                # Format will be something like: Xvnc :1 
+                display_match = re.search(r'Xvnc\s+:(\d+)', vnc_process_output)
+                
+                if display_match:
+                    display_num = int(display_match.group(1))
+                    print(f"Found display number from Xvnc pattern: {display_num}", file=sys.stderr)
                 else:
-                    return None
-            else:
-                host = host_match.group(1)
-            
-            # In a real VNC server, the display number is typically a small integer (1, 2, etc.)
-            # For demo purposes, we'll assign a fixed display number based on the job ID modulo 5
-            # to give realistic values
-            display_num = (int(job_id) % 5) + 1  # Results in 1-5
+                    # Fallback to scanning through all command line arguments
+                    args_match = re.search(r'Xvnc.*?:(\d+)', vnc_process_output)
+                    if args_match:
+                        display_num = int(args_match.group(1))
+                        print(f"Found display number from args pattern: {display_num}", file=sys.stderr)
+                    else:
+                        # If we can't find the display number, use a fallback
+                        display_num = (int(job_id) % 5) + 1  # Results in 1-5
+                        print(f"Using fallback display number: {display_num}", file=sys.stderr)
+            except Exception as e:
+                # If we can't query the remote host, use the fallback method
+                print(f"Error querying remote host for VNC process: {str(e)}", file=sys.stderr)
+                display_num = (int(job_id) % 5) + 1  # Results in 1-5
+                print(f"Using fallback display number after error: {display_num}", file=sys.stderr)
             
             # VNC uses port 5900+display number
             vnc_port = 5900 + display_num
@@ -492,5 +647,5 @@ class LSFManager:
                 'connection_string': f"{host}:{display_num}"
             }
         except (RuntimeError, ValueError) as e:
-            print(f"Error getting VNC connection details: {str(e)}", file=sys.stderr)
+            print(f"Error getting connection details for job {job_id}: {str(e)}", file=sys.stderr)
             return None 
