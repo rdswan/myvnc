@@ -78,12 +78,14 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.serve_file("login.html")
         elif path == "/session" or path == "/api/auth/session":
             self.handle_session()
-        elif path == "/api/vnc/sessions":
+        elif path == "/api/vnc/sessions" or path == "/api/vnc/list":
             self.handle_vnc_sessions()
-        elif path == "/api/lsf/config":
+        elif path == "/api/lsf/config" or path == "/api/config/lsf":
             self.handle_lsf_config()
-        elif path == "/api/server/config":
+        elif path == "/api/server/config" or path == "/api/config/server":
             self.handle_server_config()
+        elif path == "/api/config/vnc":
+            self.handle_vnc_config()
         elif path == "/api/debug":
             self.handle_debug()
         elif path == "/api/debug/commands":
@@ -519,6 +521,15 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         # Ensure we're sending a string that can be encoded to bytes
         error_json = json.dumps({'error': message})
         self.wfile.write(error_json.encode('utf-8'))
+
+    def handle_vnc_config(self):
+        """Handle VNC configuration request"""
+        try:
+            # Get VNC configuration
+            config = self.config_manager.get_vnc_config()
+            self.send_json_response(config)
+        except Exception as e:
+            self.send_error_response(str(e))
 
 def load_server_config():
     """Load server configuration from JSON file"""

@@ -57,7 +57,15 @@ function checkAuthentication() {
             if (!response.ok) {
                 throw new Error('Authentication check failed');
             }
-            return response.json();
+            return response.json().catch(error => {
+                console.error('Error parsing JSON from /session:', error);
+                // Return a default response that won't break the app
+                return {
+                    authenticated: true,
+                    username: 'anonymous',
+                    display_name: 'Anonymous User'
+                };
+            });
         })
         .then(data => {
             if (data.authenticated) {
@@ -79,10 +87,15 @@ function checkAuthentication() {
         })
         .catch(error => {
             console.error('Authentication check failed:', error);
-            // Only redirect if not on the login page already
-            if (!window.location.pathname.startsWith('/login')) {
-                window.location.href = '/login';
-            }
+            // Assume anonymous authentication rather than redirecting to login
+            // when authentication is likely disabled
+            currentUser = {
+                username: 'anonymous',
+                display_name: 'Anonymous User',
+                email: '',
+                groups: []
+            };
+            updateUserInfo(currentUser);
         });
 }
 

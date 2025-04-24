@@ -137,4 +137,8 @@ class ConfigManager:
     
     def get_core_options(self):
         """Get the list of available core options"""
-        return self.lsf_config["core_options"] 
+        return self.lsf_config["core_options"]
+        
+    def get_vnc_config(self):
+        """Get the full VNC configuration"""
+        return self.vnc_config 
