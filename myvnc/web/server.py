@@ -128,9 +128,9 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 return
         
         # Handle generic paths (always accessible)
-        if path == "/api/vnc/start":
+        if path == "/api/vnc/start" or path == "/api/vnc/create":
             self.handle_vnc_start()
-        elif path == "/api/vnc/stop":
+        elif path == "/api/vnc/stop" or path == "/api/vnc/kill":
             self.handle_vnc_stop()
         elif path == "/api/vnc/copy":
             self.handle_vnc_copy()
@@ -402,7 +402,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 'defaults': self.config_manager.get_lsf_defaults(),
                 'queues': self.config_manager.get_available_queues(),
                 'memory_options': self.config_manager.get_memory_options(),
-                'core_options': self.config_manager.get_core_options()
+                'core_options': self.config_manager.get_core_options(),
+                'sites': self.config_manager.get_available_sites()
             }
             self.send_json_response(config)
         except Exception as e:
@@ -526,10 +527,163 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         """Handle VNC configuration request"""
         try:
             # Get VNC configuration
-            config = self.config_manager.get_vnc_config()
+            config = {
+                "available_window_managers": self.config_manager.get_available_window_managers(),
+                "available_resolutions": self.config_manager.get_available_resolutions(),
+                "default_settings": self.config_manager.get_vnc_defaults()
+            }
             self.send_json_response(config)
         except Exception as e:
             self.send_error_response(str(e))
+
+    def handle_vnc_start(self):
+        """Handle VNC start request"""
+        try:
+            # Read request body
+            content_length = int(self.headers.get("Content-Length", 0))
+            post_data = self.rfile.read(content_length).decode("utf-8")
+            print(f"Received raw post data: {post_data}")
+            
+            data = json.loads(post_data)
+            print(f"Parsed JSON data: {data}")
+            
+            # Extract VNC settings
+            vnc_settings = {
+                "resolution": data.get("resolution", "1920x1080"),
+                "window_manager": data.get("window_manager", "gnome"),
+                "color_depth": 24,  # Default color depth
+                "site": data.get("site", "Austin"),
+                "vncserver_path": "/usr/bin/vncserver",
+                "name": data.get("name", "myVNC")
+            }
+            
+            # Extract LSF settings
+            lsf_settings = {
+                "queue": data.get("queue", "interactive"),
+                "num_cores": int(data.get("num_cores", 1)),
+                "memory_gb": int(data.get("memory_gb", 16)),
+                "job_name": "myvnc_vncserver"
+            }
+            
+            print(f"Submitting VNC job with config: {vnc_settings}")
+            print(f"Using LSF settings: {lsf_settings}")
+            
+            # Submit VNC job
+            result = self.lsf_manager.submit_vnc_job(vnc_settings, lsf_settings)
+            
+            # Return result
+            self.send_json_response({
+                "success": True,
+                "message": "VNC session created successfully",
+                "job_id": result.get("job_id", "unknown"),
+                "status": result.get("status", "pending")
+            })
+        except Exception as e:
+            error_msg = f"Error creating VNC session: {str(e)}"
+            print(error_msg, file=sys.stderr)
+            traceback.print_exc()
+            self.send_json_response({
+                "success": False,
+                "message": error_msg
+            }, 500)
+    
+    def handle_vnc_stop(self):
+        """Handle VNC stop request"""
+        try:
+            # Parse path for job ID
+            job_id = None
+            path = self.path.strip("/").split("/")
+            if len(path) >= 3:
+                job_id = path[-1]  # Last part of the path should be the job ID
+            
+            if not job_id:
+                # If job ID is not in the path, try to read it from the request body
+                content_length = int(self.headers.get("Content-Length", 0))
+                if content_length > 0:
+                    post_data = self.rfile.read(content_length).decode("utf-8")
+                    data = json.loads(post_data)
+                    job_id = data.get("job_id")
+            
+            if not job_id:
+                raise ValueError("No job ID provided")
+            
+            # Kill VNC job
+            result = self.lsf_manager.kill_job(job_id)
+            
+            # Return result
+            self.send_json_response({
+                "success": result,
+                "message": "VNC session stopped successfully" if result else "Failed to stop VNC session",
+                "job_id": job_id
+            })
+        except Exception as e:
+            error_msg = f"Error stopping VNC session: {str(e)}"
+            print(error_msg, file=sys.stderr)
+            self.send_json_response({
+                "success": False,
+                "message": error_msg
+            }, 500)
+    
+    def handle_vnc_copy(self):
+        """Handle VNC copy request"""
+        try:
+            # Read request body
+            content_length = int(self.headers.get("Content-Length", 0))
+            post_data = self.rfile.read(content_length).decode("utf-8")
+            data = json.loads(post_data)
+            
+            # Extract session ID to copy
+            session_id = data.get("session_id")
+            
+            if not session_id:
+                raise ValueError("No session ID provided")
+            
+            # Get session details
+            active_sessions = self.lsf_manager.get_active_vnc_jobs()
+            session_to_copy = None
+            
+            for session in active_sessions:
+                if str(session.get("job_id")) == str(session_id):
+                    session_to_copy = session
+                    break
+            
+            if not session_to_copy:
+                raise ValueError(f"Session with ID {session_id} not found")
+            
+            # Extract and prepare settings for new session
+            vnc_settings = {
+                "resolution": session_to_copy.get("resolution", "1920x1080"),
+                "window_manager": session_to_copy.get("window_manager", "gnome"),
+                "color_depth": 24,
+                "site": session_to_copy.get("site", "Austin"),
+                "vncserver_path": "/usr/bin/vncserver",
+                "name": f"Copy of {session_to_copy.get('name', 'myVNC')}"
+            }
+            
+            lsf_settings = {
+                "queue": session_to_copy.get("queue", "interactive"),
+                "num_cores": int(session_to_copy.get("num_cores", 1)),
+                "memory_gb": int(session_to_copy.get("memory_gb", 16)),
+                "job_name": "myvnc_vncserver"
+            }
+            
+            # Submit new VNC job
+            result = self.lsf_manager.submit_vnc_job(vnc_settings, lsf_settings)
+            
+            # Return result
+            self.send_json_response({
+                "success": True,
+                "message": "VNC session copied successfully",
+                "job_id": result.get("job_id", "unknown"),
+                "status": result.get("status", "pending")
+            })
+        except Exception as e:
+            error_msg = f"Error copying VNC session: {str(e)}"
+            print(error_msg, file=sys.stderr)
+            self.send_json_response({
+                "success": False,
+                "message": error_msg
+            }, 500)
 
 def load_server_config():
     """Load server configuration from JSON file"""
