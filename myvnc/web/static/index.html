@@ -9,11 +9,32 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@300;500;700&display=swap" rel="stylesheet">
+    <style>
+        .user-info {
+            display: flex;
+            align-items: center;
+            margin-left: auto;
+            gap: 1rem;
+            color: white;
+        }
+        
+        .user-name {
+            font-weight: 500;
+        }
+        
+        .button.small {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.8rem;
+        }
+    </style>
 </head>
 <body>
     <header class="header">
         <div class="header-content">
             <h1 class="app-title"><i class="fas fa-desktop"></i> VNC Manager</h1>
+            <div id="user-info" class="user-info">
+                <!-- User info will be added here by auth.js -->
+            </div>
         </div>
     </header>
     
@@ -46,7 +67,9 @@
                             <th>User</th>
                             <th>Status</th>
                             <th>Queue</th>
+                            <th>Resources</th>
                             <th>Host</th>
+                            <th>Display</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -197,6 +220,7 @@
         <p>&copy; 2025 Tenstorrent AI ULC - Apache License 2.0</p>
     </footer>
     
+    <script src="js/auth.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html> 

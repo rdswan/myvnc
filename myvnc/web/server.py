@@ -14,12 +14,20 @@ from pathlib import Path
 import time
 import urllib.parse
 import platform
+import http.cookies
+import traceback
+from urllib.parse import parse_qs, urlparse, quote
+from datetime import datetime
+from http.server import SimpleHTTPRequestHandler
+from http.cookies import SimpleCookie
 
 # Add parent directory to path so we can import our modules
-sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from myvnc.utils.config_manager import ConfigManager
-from myvnc.utils.lsf_manager import LSFManager
+from utils.auth_manager import AuthManager
+from utils.lsf_manager import LSFManager
+from utils.config_manager import ConfigManager
+from utils.vnc_manager import VNCManager
 
 class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
     """Handler for VNC manager CGI requests"""
@@ -27,54 +35,306 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         self.config_manager = ConfigManager()
         self.lsf_manager = LSFManager()
+        self.auth_manager = AuthManager()
+        self.vnc_manager = VNCManager()
+        self.directory = os.path.join(os.path.dirname(__file__), "static")
         super().__init__(*args, **kwargs)
     
     def do_GET(self):
         """Handle GET requests"""
-        # Handle API endpoints
-        if self.path.startswith('/api/'):
-            self.handle_api_request()
+        # Parse URL path
+        parsed_path = urlparse(self.path)
+        path = parsed_path.path
+        
+        # Check authentication for all paths except login page and assets
+        if not path.startswith("/login") and not path.startswith("/auth/") and not self._is_public_asset(path):
+            is_authenticated, _ = self.check_auth()
+            if not is_authenticated:
+                # Redirect to login page
+                self.send_response(302)
+                self.send_header("Location", "/login")
+                self.end_headers()
+                return
+        
+        # Handle specific paths
+        if path == "/":
+            self.serve_file("index.html")
+        elif path == "/login":
+            self.serve_file("login.html")
+        elif path == "/session":
+            self.handle_session()
+        elif path == "/api/vnc/sessions":
+            self.handle_vnc_sessions()
+        elif path == "/api/lsf/config":
+            self.handle_lsf_config()
+        elif path == "/api/server/config":
+            self.handle_server_config()
+        elif path == "/api/debug":
+            self.handle_debug()
+        elif path == "/api/debug/commands":
+            self.handle_debug_commands()
+        elif path == "/api/debug/environment":
+            self.handle_debug_environment()
+        elif path == "/auth/entra":
+            self.handle_auth_entra()
+        elif path == "/auth/callback":
+            self.handle_auth_callback()
         else:
-            # Serve static files
+            # Try to serve static file
             super().do_GET()
     
     def do_POST(self):
         """Handle POST requests"""
-        if self.path.startswith('/api/'):
-            self.handle_api_request()
-        else:
-            self.send_error(404, "Not Found")
-    
-    def handle_api_request(self):
-        """Handle API requests"""
-        # Extract endpoint path
-        endpoint = self.path.replace('/api/', '').split('?')[0]  # Remove query parameters
+        # Parse URL path
+        path = urlparse(self.path).path
         
-        # Handle different endpoints
-        if endpoint == 'vnc/list':
-            self.handle_list_vnc()
-        elif endpoint == 'vnc/create':
-            self.handle_create_vnc()
-        elif endpoint.startswith('vnc/kill/'):
-            job_id = endpoint.replace('vnc/kill/', '')
-            self.handle_kill_vnc(job_id)
-        elif endpoint == 'config/vnc':
-            self.handle_vnc_config()
-        elif endpoint == 'config/lsf':
-            self.handle_lsf_config()
-        elif endpoint == 'config/server':
-            self.handle_server_config()
-        elif endpoint == 'debug/commands':
-            self.handle_debug_commands()
-        elif endpoint == 'debug/environment':
-            self.handle_debug_environment()
-        elif endpoint == 'debug':
-            self.handle_debug()
+        # Allow login without authentication
+        if path == "/api/auth/login" or path == "/api/login":
+            self.handle_login()
+            return
+        
+        # Check authentication for all other paths
+        if not path.startswith("/auth/"):
+            is_authenticated, _ = self.check_auth()
+            if not is_authenticated:
+                self.send_json_response({
+                    "success": False,
+                    "message": "Authentication required"
+                }, 401)
+                return
+        
+        # Handle specific paths
+        if path == "/api/logout" or path == "/api/auth/logout":
+            self.handle_logout()
+        elif path == "/api/vnc/start":
+            self.handle_vnc_start()
+        elif path == "/api/vnc/stop":
+            self.handle_vnc_stop()
+        elif path == "/api/vnc/copy":
+            self.handle_vnc_copy()
         else:
-            self.send_error(404, "API endpoint not found")
+            self.send_response(404)
+            self.end_headers()
     
-    def handle_list_vnc(self):
-        """Handle VNC list request"""
+    def serve_file(self, filename):
+        """Serve a file from the static directory"""
+        try:
+            with open(os.path.join(self.directory, filename), 'rb') as f:
+                content = f.read()
+                
+            self.send_response(200)
+            self.send_header('Content-type', 'text/html')
+            self.end_headers()
+            self.wfile.write(content)
+        except Exception as e:
+            print(f"Error serving file {filename}: {str(e)}", file=sys.stderr)
+            self.send_error(500)
+    
+    def check_auth(self):
+        """Check if user is authenticated"""
+        session_id = self.get_session_cookie()
+        if not session_id:
+            return False, None
+        
+        success, message, session = self.auth_manager.validate_session(session_id)
+        if not success:
+            return False, None
+        
+        return True, session
+    
+    def get_session_cookie(self):
+        """Get session cookie from request"""
+        cookies = {}
+        if "Cookie" in self.headers:
+            for cookie in self.headers["Cookie"].split(";"):
+                try:
+                    name, value = cookie.strip().split("=", 1)
+                    cookies[name] = value
+                except ValueError:
+                    pass
+        return cookies.get("session_id")
+    
+    def handle_login(self):
+        """Handle login requests"""
+        try:
+            # Read request body
+            content_length = int(self.headers.get("Content-Length", 0))
+            post_data = self.rfile.read(content_length).decode("utf-8")
+            data = json.loads(post_data)
+            
+            # Extract username and password
+            username = data.get("username", "")
+            password = data.get("password", "")
+            
+            # Authenticate user
+            success, message, session_id = self.auth_manager.authenticate(username, password)
+            
+            if success:
+                # Set session cookie
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Set-Cookie", f"session_id={session_id}; Path=/; HttpOnly; SameSite=Strict; Max-Age={self.auth_manager.session_expiry}")
+                self.end_headers()
+                
+                # Send success response
+                self.wfile.write(json.dumps({
+                    "success": True,
+                    "message": message
+                }).encode())
+            else:
+                # Send error response
+                self.send_json_response({
+                    "success": False,
+                    "message": message
+                }, 401)
+                
+        except Exception as e:
+            # Send error response for any exceptions
+            self.send_json_response({
+                "success": False,
+                "message": f"Login error: {str(e)}"
+            }, 500)
+    
+    def handle_logout(self):
+        """Handle logout requests"""
+        try:
+            # Get session ID from cookie
+            session_id = self.get_session_cookie()
+            
+            if session_id:
+                # Logout user
+                success, message = self.auth_manager.logout(session_id)
+                
+                # Send response
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Set-Cookie", "session_id=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0")
+                self.end_headers()
+                
+                self.wfile.write(json.dumps({
+                    "success": success,
+                    "message": message
+                }).encode())
+            else:
+                # No session to logout
+                self.send_json_response({
+                    "success": True,
+                    "message": "No active session"
+                })
+                
+        except Exception as e:
+            # Send error response for any exceptions
+            self.send_json_response({
+                "success": False,
+                "message": f"Logout error: {str(e)}"
+            }, 500)
+    
+    def handle_session(self):
+        """Handle session validation requests"""
+        try:
+            # Check if user is authenticated
+            is_authenticated, session = self.check_auth()
+            
+            if is_authenticated:
+                # Send user data
+                self.send_json_response({
+                    "authenticated": True,
+                    "username": session.get("username", ""),
+                    "display_name": session.get("display_name", ""),
+                    "email": session.get("email", ""),
+                    "groups": session.get("groups", [])
+                })
+            else:
+                # Send unauthenticated response
+                self.send_json_response({
+                    "authenticated": False
+                }, 401)
+                
+        except Exception as e:
+            # Send error response for any exceptions
+            self.send_json_response({
+                "authenticated": False,
+                "message": f"Session error: {str(e)}"
+            }, 500)
+    
+    def handle_auth_entra(self):
+        """Handle Microsoft Entra ID authentication initiation"""
+        try:
+            # Get authentication URL from auth manager
+            auth_url = self.auth_manager.get_auth_url()
+            
+            if auth_url:
+                # Redirect to Microsoft authentication page
+                self.send_response(302)
+                self.send_header("Location", auth_url)
+                self.end_headers()
+            else:
+                # Entra ID authentication not configured
+                self.send_response(500)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(b"Microsoft Entra ID authentication is not configured")
+                
+        except Exception as e:
+            # Send error response for any exceptions
+            self.send_response(500)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(f"Authentication error: {str(e)}".encode())
+    
+    def handle_auth_callback(self):
+        """Handle Microsoft Entra ID authentication callback"""
+        try:
+            # Parse query parameters
+            parsed_url = urlparse(self.path)
+            query_params = parse_qs(parsed_url.query)
+            
+            # Get authorization code
+            code = query_params.get("code", [""])[0]
+            
+            if code:
+                # Process authorization code
+                success, message, session_id = self.auth_manager.handle_auth_code(code)
+                
+                if success:
+                    # Set session cookie and redirect to home page
+                    self.send_response(302)
+                    self.send_header("Set-Cookie", f"session_id={session_id}; Path=/; HttpOnly; SameSite=Strict; Max-Age={self.auth_manager.session_expiry}")
+                    self.send_header("Location", "/")
+                    self.end_headers()
+                else:
+                    # Authentication failed
+                    self.send_response(401)
+                    self.send_header("Content-Type", "text/html")
+                    self.end_headers()
+                    self.wfile.write(f"Authentication failed: {message}".encode())
+            else:
+                # No authorization code provided
+                self.send_response(400)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(b"No authorization code provided")
+                
+        except Exception as e:
+            # Send error response for any exceptions
+            self.send_response(500)
+            self.send_header("Content-Type", "text/html")
+            self.end_headers()
+            self.wfile.write(f"Authentication callback error: {str(e)}".encode())
+    
+    def _is_public_asset(self, path):
+        """Check if a path is a public asset that doesn't require authentication"""
+        public_paths = [
+            "/css/", 
+            "/js/", 
+            "/img/", 
+            "/favicon.ico",
+            "/js/auth.js"  # Allow auth.js to be loaded without authentication
+        ]
+        return any(path.startswith(prefix) for prefix in public_paths)
+
+    def handle_vnc_sessions(self):
+        """Handle VNC sessions request"""
         try:
             jobs = self.lsf_manager.get_active_vnc_jobs()
             
@@ -82,140 +342,23 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             for job in jobs:
                 try:
                     if 'job_id' in job:
+                        # Add default resource values if not present
+                        if 'num_cores' not in job:
+                            job['num_cores'] = 2  # Default value
+                        if 'memory_gb' not in job:
+                            job['memory_gb'] = 16  # Default value
+                        
+                        # Get connection details
                         conn_details = self.lsf_manager.get_vnc_connection_details(job['job_id'])
-                        if conn_details and 'port' in conn_details:
-                            job['port'] = conn_details['port']
+                        if conn_details:
+                            if 'port' in conn_details:
+                                job['port'] = conn_details['port']
+                            if 'display' in conn_details:
+                                job['display'] = conn_details['display']
                 except Exception as e:
                     print(f"Error getting connection details for job {job.get('job_id', 'unknown')}: {str(e)}", file=sys.stderr)
             
             self.send_json_response(jobs)
-        except Exception as e:
-            self.send_error_response(str(e))
-    
-    def handle_create_vnc(self):
-        """Handle VNC create request"""
-        try:
-            # Get content length
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length).decode('utf-8')
-            
-            # Log the raw form data for debugging
-            print(f"Received raw post data: {post_data}")
-            
-            # Parse the request data
-            form_data = {}
-            
-            # Try to parse as JSON first
-            if post_data.startswith('{'):
-                try:
-                    form_data = json.loads(post_data)
-                    print(f"Parsed JSON data: {form_data}")
-                except json.JSONDecodeError as e:
-                    print(f"JSON parsing error: {str(e)}")
-            else:
-                # Fall back to form data parsing if not JSON
-                try:
-                    for field in post_data.split('&'):
-                        if '=' in field:
-                            key, value = field.split('=', 1)
-                            form_data[key] = urllib.parse.unquote_plus(value)
-                    print(f"Parsed form data: {form_data}")
-                except Exception as e:
-                    print(f"Form parsing error: {str(e)}")
-            
-            # Get default configurations
-            vnc_defaults = self.config_manager.get_vnc_defaults()
-            lsf_defaults = self.config_manager.get_lsf_defaults()
-            
-            # Extract VNC configuration
-            vnc_config = {
-                'resolution': form_data.get('resolution', vnc_defaults['resolution']),
-                'window_manager': form_data.get('window_manager', vnc_defaults['window_manager']),
-                'color_depth': int(form_data.get('color_depth', vnc_defaults['color_depth'])),
-                'site': form_data.get('site', vnc_defaults['site']),
-                'vncserver_path': vnc_defaults.get('vncserver_path', '/usr/bin/vncserver')
-            }
-            
-            # Add name only if provided and not empty
-            if 'name' in form_data and form_data['name'] and form_data['name'].strip():
-                vnc_config['name'] = form_data['name']
-            
-            # Extract LSF configuration
-            # The memory value from the UI is already in GB
-            lsf_config = {
-                'queue': form_data.get('queue', lsf_defaults['queue']),
-                'num_cores': int(form_data.get('num_cores', lsf_defaults['num_cores'])),
-                'memory_gb': lsf_defaults.get('memory_gb', 16),  # Always use the configured default
-                'job_name': lsf_defaults.get('job_name', 'myvnc_vncserver')  # Always get from config
-            }
-            
-            # Add host_filter only if provided and not empty
-            if 'host_filter' in form_data and form_data['host_filter'] and form_data['host_filter'].strip():
-                lsf_config['host_filter'] = form_data['host_filter']
-            
-            # Log the configuration being submitted for debugging
-            print(f"Submitting VNC job with config: {vnc_config}")
-            print(f"Using LSF settings: {lsf_config}")
-            
-            # Record the attempt in command history before executing
-            command_entry = {
-                'command': f"[VNC Create Request] Settings: {vnc_config}, LSF: {lsf_config}",
-                'stdout': '',
-                'stderr': '',
-                'success': True
-            }
-            self.lsf_manager.command_history.append(command_entry)
-            
-            try:
-                # Submit VNC job
-                job_id = self.lsf_manager.submit_vnc_job(vnc_config, lsf_config)
-                
-                # Send response
-                self.send_json_response({'job_id': job_id, 'status': 'submitted'})
-                
-            except Exception as e:
-                error_msg = f"Error submitting VNC job: {str(e)}"
-                print(error_msg, file=sys.stderr)
-                
-                # Update command entry with error
-                command_entry['stderr'] = error_msg
-                command_entry['success'] = False
-                
-                self.send_error_response(error_msg)
-                
-        except Exception as e:
-            error_msg = f"Error processing VNC creation request: {str(e)}"
-            print(error_msg, file=sys.stderr)
-            # Add error to command history for debugging
-            self.lsf_manager.command_history.append({
-                'command': "[VNC Form Processing Error]",
-                'stdout': '',
-                'stderr': error_msg,
-                'success': False
-            })
-            self.send_error_response(error_msg)
-    
-    def handle_kill_vnc(self, job_id):
-        """Handle VNC kill request"""
-        try:
-            success = self.lsf_manager.kill_vnc_job(job_id)
-            if success:
-                self.send_json_response({'status': 'success', 'message': f'VNC job {job_id} killed'})
-            else:
-                self.send_error_response(f'Failed to kill VNC job {job_id}')
-        except Exception as e:
-            self.send_error_response(str(e))
-    
-    def handle_vnc_config(self):
-        """Handle VNC configuration request"""
-        try:
-            config = {
-                'defaults': self.config_manager.get_vnc_defaults(),
-                'window_managers': self.config_manager.get_available_window_managers(),
-                'resolutions': self.config_manager.get_available_resolutions(),
-                'sites': self.config_manager.get_available_sites()
-            }
-            self.send_json_response(config)
         except Exception as e:
             self.send_error_response(str(e))
     
@@ -243,159 +386,94 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.send_error_response(str(e))
     
     def handle_debug_commands(self):
-        """Handle debug command history request"""
+        """Handle /debug/commands endpoint to display command history"""
         try:
-            # Check if we should run tests
-            # Parse the query string directly since FieldStorage doesn't work well with GET
-            query_string = self.path.split('?', 1)[1] if '?' in self.path else ''
-            params = {}
-            for param in query_string.split('&'):
-                if param and '=' in param:
-                    key, value = param.split('=', 1)
-                    params[key] = value
+            # Get command history from the LSF manager
+            command_history = self.lsf_manager.command_history
             
-            run_tests = params.get('run_tests') == 'true'
+            # Format command history for better display
+            formatted_history = []
+            for cmd in command_history:
+                formatted_cmd = {
+                    "command": cmd.get("command", ""),
+                    "success": cmd.get("success", False),
+                    "timestamp": cmd.get("timestamp", ""),
+                    "stdout": cmd.get("stdout", "").strip(),
+                    "stderr": cmd.get("stderr", "").strip()
+                }
+                formatted_history.append(formatted_cmd)
             
-            # Add test commands to the history only if explicitly requested
-            if run_tests:
-                try:
-                    print("Running test commands as requested")
-                    # Run LSF test commands to populate history
-                    self.lsf_manager.run_test_commands()
-                    
-                    # Run a test VNC submission
-                    self.lsf_manager.test_vnc_submission()
-                except Exception as e:
-                    print(f"Error running test commands: {str(e)}", file=sys.stderr)
-                    # Still add the error to command history
-                    self.lsf_manager.command_history.append({
-                        'command': '[Test Command Execution]',
-                        'stdout': '',
-                        'stderr': f"Error running test commands: {str(e)}",
-                        'success': False,
-                        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-                    })
-            
-            # Get command history from LSF manager
-            commands = self.lsf_manager.get_command_history()
-            
-            # If still no commands, add a placeholder
-            if not commands:
-                commands = [{
-                    'command': 'echo "Debug information"',
-                    'stdout': 'No commands have been executed yet. Try clicking "Run Tests" to populate with test commands.',
-                    'stderr': '',
-                    'success': True,
-                    'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-                }]
-            
-            # Get server environment info
-            env_info = {
-                'python_version': sys.version,
-                'path': os.environ.get('PATH', 'Not set'),
-                'lsf_profile': load_lsf_config().get('env_file', 'Not configured'),
-                'lsf_available': 'bjobs' in os.environ.get('PATH', ''),
-                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-            }
-            
-            # Check if vncserver is available
-            try:
-                vncserver_path = subprocess.run(['which', 'vncserver'], 
-                                              stdout=subprocess.PIPE, 
-                                              stderr=subprocess.PIPE)
-                env_info['vncserver_available'] = vncserver_path.stdout.decode('utf-8').strip() if vncserver_path.returncode == 0 else 'Not found'
-            except Exception:
-                env_info['vncserver_available'] = 'Error checking'
-            
-            # Send both as response
+            # Send response
             self.send_json_response({
-                'commands': commands,
-                'environment': env_info
+                "success": True,
+                "command_history": formatted_history
             })
         except Exception as e:
-            error_msg = f"Error processing debug request: {str(e)}"
-            print(error_msg, file=sys.stderr)
-            self.send_error_response(error_msg)
-    
+            print(f"Error handling debug commands: {str(e)}", file=sys.stderr)
+            traceback.print_exc()
+            self.send_json_response({
+                "success": False,
+                "message": f"Error: {str(e)}"
+            })
+            
     def handle_debug_environment(self):
-        """Returns environment information for the application"""
-        # Get environment info
-        env_info = {
-            "Python Version": platform.python_version(),
-            "Platform": platform.platform(),
-            "User": os.environ.get("USER", "Unknown"),
-            "Hostname": platform.node(),
-            "LSB_JOBID": os.environ.get("LSB_JOBID", "Not in LSF environment"),
-            "LSF_ENVDIR": os.environ.get("LSF_ENVDIR", "Not set"),
-            "PATH": os.environ.get("PATH", "Not set")
-        }
-        
-        # Check if vncserver is available
+        """Handle /debug/environment endpoint to display environment information"""
         try:
-            vncserver_path = subprocess.run(['which', 'vncserver'], 
-                                          stdout=subprocess.PIPE, 
-                                          stderr=subprocess.PIPE)
-            env_info['VNC Server'] = vncserver_path.stdout.decode('utf-8').strip() if vncserver_path.returncode == 0 else 'Not found'
-        except Exception:
-            env_info['VNC Server'] = 'Error checking'
-        
-        # Send environment info in the expected format
-        self.send_json_response({'environment': env_info})
-    
-    def handle_debug(self):
-        """Returns debug information for the application"""
-        # Get command history from the LSF manager
-        command_history = self.lsf_manager.command_history
-        
-        # Get environment info
-        env_info = {
-            "Python Version": platform.python_version(),
-            "Platform": platform.platform(),
-            "User": os.environ.get("USER", "Unknown"),
-            "Hostname": platform.node(),
-            "LSB_JOBID": os.environ.get("LSB_JOBID", "Not in LSF environment"),
-            "LSF_ENVDIR": os.environ.get("LSF_ENVDIR", "Not set")
-        }
-        
-        # Format command history for better display
-        formatted_history = []
-        for cmd in command_history:
-            formatted_cmd = {
-                "command": cmd.get("command", ""),
-                "success": cmd.get("success", False),
-                "timestamp": cmd.get("timestamp", ""),
-                "stdout": cmd.get("stdout", "").strip(),
-                "stderr": cmd.get("stderr", "").strip()
+            # Get environment info
+            env_info = {
+                "Python Version": platform.python_version(),
+                "Platform": platform.platform(),
+                "User": os.environ.get("USER", "Unknown"),
+                "Hostname": platform.node(),
+                "LSB_JOBID": os.environ.get("LSB_JOBID", "Not in LSF environment"),
+                "LSF_ENVDIR": os.environ.get("LSF_ENVDIR", "Not set")
             }
-            formatted_history.append(formatted_cmd)
-        
-        # Build debug data
-        debug_data = {
-            "command_history": formatted_history,
-            "environment": env_info,
-            "config": {
+            
+            # Include configs
+            config_info = {
                 "vnc_config": self.config_manager.vnc_config,
                 "lsf_config": self.config_manager.lsf_config
             }
-        }
-        
-        # Set response headers
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-        
-        # Send response
-        self.wfile.write(json.dumps(debug_data).encode('utf-8'))
+            
+            # Send response
+            self.send_json_response({
+                "success": True,
+                "environment": env_info,
+                "config": config_info
+            })
+        except Exception as e:
+            print(f"Error handling debug environment: {str(e)}", file=sys.stderr)
+            traceback.print_exc()
+            self.send_json_response({
+                "success": False,
+                "message": f"Error: {str(e)}"
+            })
     
-    def send_json_response(self, data):
-        """Send a JSON response"""
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
+    def handle_debug(self):
+        """Handle /debug/* requests"""
+        path_parts = self.path.strip('/').split('/')
+        if len(path_parts) < 2:
+            self.send_error(404)
+            return
+        
+        debug_command = path_parts[1]
+        
+        if debug_command == 'commands':
+            self.handle_debug_commands()
+        elif debug_command == 'environment':
+            self.handle_debug_environment()
+        else:
+            self.send_error(404)
+
+    def send_json_response(self, data, status=200):
+        """Send JSON response to client"""
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         self.end_headers()
-        self.wfile.write(json.dumps(data).encode('utf-8'))
+        self.wfile.write(json.dumps(data).encode())
     
-    def send_error_response(self, message):
+    def send_error_response(self, message, status_code=500):
         """Send an error response"""
         # Ensure message is a string, not bytes
         if isinstance(message, bytes):
@@ -403,7 +481,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         elif not isinstance(message, str):
             message = str(message)
         
-        self.send_response(500)
+        self.send_response(status_code)
         self.send_header('Content-type', 'application/json')
         self.end_headers()
         
@@ -492,6 +570,10 @@ def run_server(host=None, port=None, directory=None):
     if directory is None:
         # Use the web directory
         directory = Path(__file__).parent / 'static'
+    
+    # Ensure data directory exists
+    data_dir = Path(__file__).parent.parent / "data"
+    data_dir.mkdir(exist_ok=True)
     
     # Set serving directory
     os.chdir(directory)
