@@ -386,8 +386,9 @@ async function killVNCSession(jobId) {
                 refreshButton.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh';
             }
             
-            // Single refresh with a small delay to allow server to process kill
-            setTimeout(() => refreshVNCList(), 250);
+            // Use a 5-second delay before refreshing to allow server to fully process the kill
+            showMessage(`VNC session ${jobId} killed. Refreshing list in 5 seconds...`, 'info');
+            setTimeout(() => refreshVNCList(), 5000);
             
         } catch (error) {
             console.error('Failed to kill VNC session:', error);
