@@ -3,5 +3,6 @@
     "port": 9123,
     "debug": false,
     "max_connections": 5,
-    "timeout": 30
+    "timeout": 30,
+    "authentication": ""
 } 
