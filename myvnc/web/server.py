@@ -38,6 +38,12 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         self.auth_manager = AuthManager()
         self.vnc_manager = VNCManager()
         self.directory = os.path.join(os.path.dirname(__file__), "static")
+        
+        # Load server configuration
+        self.server_config = load_server_config()
+        # Get authentication setting
+        self.authentication_enabled = self.server_config.get("authentication", "")
+        
         super().__init__(*args, **kwargs)
     
     def do_GET(self):
@@ -46,22 +52,24 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         parsed_path = urlparse(self.path)
         path = parsed_path.path
         
-        # Check authentication for all paths except login page and assets
-        if not path.startswith("/login") and not path.startswith("/auth/") and not self._is_public_asset(path):
-            is_authenticated, _ = self.check_auth()
-            if not is_authenticated:
-                # Redirect to login page
-                self.send_response(302)
-                self.send_header("Location", "/login")
-                self.end_headers()
-                return
+        # Only check authentication if it's enabled
+        if self.authentication_enabled and self.authentication_enabled.lower() == "entra":
+            # Check authentication for all paths except login page and assets
+            if not path.startswith("/login") and not path.startswith("/auth/") and not self._is_public_asset(path):
+                is_authenticated, _ = self.check_auth()
+                if not is_authenticated:
+                    # Redirect to login page
+                    self.send_response(302)
+                    self.send_header("Location", "/login")
+                    self.end_headers()
+                    return
         
         # Handle specific paths
         if path == "/":
             self.serve_file("index.html")
-        elif path == "/login":
+        elif path == "/login" and self.authentication_enabled and self.authentication_enabled.lower() == "entra":
             self.serve_file("login.html")
-        elif path == "/session":
+        elif path == "/session" and self.authentication_enabled and self.authentication_enabled.lower() == "entra":
             self.handle_session()
         elif path == "/api/vnc/sessions":
             self.handle_vnc_sessions()
@@ -75,9 +83,9 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.handle_debug_commands()
         elif path == "/api/debug/environment":
             self.handle_debug_environment()
-        elif path == "/auth/entra":
+        elif path == "/auth/entra" and self.authentication_enabled and self.authentication_enabled.lower() == "entra":
             self.handle_auth_entra()
-        elif path == "/auth/callback":
+        elif path == "/auth/callback" and self.authentication_enabled and self.authentication_enabled.lower() == "entra":
             self.handle_auth_callback()
         else:
             # Try to serve static file
@@ -88,25 +96,30 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         # Parse URL path
         path = urlparse(self.path).path
         
-        # Allow login without authentication
-        if path == "/api/auth/login" or path == "/api/login":
-            self.handle_login()
-            return
-        
-        # Check authentication for all other paths
-        if not path.startswith("/auth/"):
-            is_authenticated, _ = self.check_auth()
-            if not is_authenticated:
-                self.send_json_response({
-                    "success": False,
-                    "message": "Authentication required"
-                }, 401)
+        # Only check authentication if it's enabled
+        if self.authentication_enabled and self.authentication_enabled.lower() == "entra":
+            # Allow login without authentication
+            if path == "/api/auth/login" or path == "/api/login":
+                self.handle_login()
+                return
+            
+            # Check authentication for all other paths
+            if not path.startswith("/auth/"):
+                is_authenticated, _ = self.check_auth()
+                if not is_authenticated:
+                    self.send_json_response({
+                        "success": False,
+                        "message": "Authentication required"
+                    }, 401)
+                    return
+            
+            # Handle specific authentication paths
+            if path == "/api/logout" or path == "/api/auth/logout":
+                self.handle_logout()
                 return
         
-        # Handle specific paths
-        if path == "/api/logout" or path == "/api/auth/logout":
-            self.handle_logout()
-        elif path == "/api/vnc/start":
+        # Handle generic paths (always accessible)
+        if path == "/api/vnc/start":
             self.handle_vnc_start()
         elif path == "/api/vnc/stop":
             self.handle_vnc_stop()
@@ -232,6 +245,14 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
     def handle_session(self):
         """Handle session validation requests"""
         try:
+            # If authentication is disabled, return unauthorized
+            if not self.authentication_enabled:
+                self.send_json_response({
+                    "authenticated": False,
+                    "message": "Authentication is disabled in server configuration"
+                }, 401)
+                return
+                
             # Check if user is authenticated
             is_authenticated, session = self.check_auth()
             
@@ -555,13 +576,14 @@ def source_lsf_environment():
         print(f"Error sourcing LSF environment: {str(e)}")
         return False
 
-def run_server(host=None, port=None, directory=None):
+def run_server(host=None, port=None, directory=None, config=None):
     """Run the web server"""
     # Source LSF environment
     source_lsf_environment()
     
-    # Load configuration
-    config = load_server_config()
+    # Load configuration if not provided
+    if config is None:
+        config = load_server_config()
     
     # Override with command line arguments if provided
     host = host or config.get("host", "localhost")

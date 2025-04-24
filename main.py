@@ -5,7 +5,7 @@ Main entry point for the MyVNC application
 This script starts the web server for the MyVNC application.
 
 Configuration:
-- server_config.json: Contains server settings (host, port, etc.)
+- server_config.json: Contains server settings (host, port, authentication, etc.)
 - lsf_config.json: LSF-related settings, including the path to the LSF environment file
                    that will be sourced before starting the server to make LSF commands available
 """
@@ -21,6 +21,8 @@ def parse_args():
     parser.add_argument('--host', help='Host to bind to (overrides config file)')
     parser.add_argument('--port', type=int, help='Port to bind to (overrides config file)')
     parser.add_argument('--config', help='Path to custom config file')
+    parser.add_argument('--auth', choices=['', 'Entra'], default=None, 
+                      help='Authentication method: empty for none, "Entra" for Microsoft Entra ID')
     return parser.parse_args()
 
 if __name__ == "__main__":
@@ -37,5 +39,12 @@ if __name__ == "__main__":
     host = args.host or config.get("host")
     port = args.port or config.get("port")
     
+    # Override authentication setting if provided
+    if args.auth is not None:
+        config["authentication"] = args.auth
+        print(f"Using authentication method: {args.auth or 'None'}")
+    else:
+        print(f"Using authentication method from config: {config.get('authentication') or 'None'}")
+    
     # Run the server
-    run_server(host=host, port=port) 
+    run_server(host=host, port=port, config=config) 

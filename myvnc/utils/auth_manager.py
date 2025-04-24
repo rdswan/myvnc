@@ -28,6 +28,15 @@ class AuthManager:
     
     def __init__(self):
         """Initialize the auth manager"""
+        # Load server configuration
+        self.server_config = self._load_server_config()
+        self.auth_enabled = self.server_config.get("authentication", "").lower() == "entra"
+        
+        # Only set up auth if enabled
+        if not self.auth_enabled:
+            print("Authentication is disabled in server configuration")
+            return
+            
         # LDAP settings
         self.ad_server = os.environ.get('AD_SERVER', 'ldap://localhost:389')
         self.ad_domain = os.environ.get('AD_DOMAIN', 'example.com')
@@ -65,6 +74,17 @@ class AuthManager:
         # Load existing sessions
         self.load_sessions()
     
+    def _load_server_config(self):
+        """Load server configuration from JSON file"""
+        config_path = Path(__file__).parent.parent.parent / "config" / "server_config.json"
+        
+        try:
+            with open(config_path, 'r') as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            print(f"Warning: Server configuration file not found or invalid at {config_path}")
+            return {}
+    
     def authenticate(self, username: str, password: str) -> Tuple[bool, str, Optional[Dict]]:
         """
         Authenticate a user with Active Directory or Microsoft Entra ID
@@ -76,6 +96,9 @@ class AuthManager:
         Returns:
             Tuple of (success, message, session_data)
         """
+        if not self.auth_enabled:
+            return False, "Authentication is disabled", None
+            
         if self.auth_method == 'entra' and self.msal_app:
             return self._authenticate_entra_id(username, password)
         else:
@@ -352,6 +375,9 @@ class AuthManager:
         Returns:
             Tuple of (is_valid, session_data)
         """
+        if not self.auth_enabled:
+            return False, None
+            
         if not session_id or session_id not in self.sessions:
             return False, None
         
