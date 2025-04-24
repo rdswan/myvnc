@@ -25,9 +25,18 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Set up event listeners
     refreshButton.addEventListener('click', () => {
+        // Save the original text before modifying
+        const originalText = refreshButton.innerHTML;
         refreshButton.classList.add('rotating');
+        refreshButton.classList.add('refreshing');
+        refreshButton.innerHTML = '<i class="fas fa-sync-alt"></i> Refreshing...';
+        
         refreshVNCList().finally(() => {
-            setTimeout(() => refreshButton.classList.remove('rotating'), 500);
+            setTimeout(() => {
+                refreshButton.classList.remove('rotating');
+                refreshButton.classList.remove('refreshing');
+                refreshButton.innerHTML = originalText;
+            }, 500);
         });
     });
     
@@ -156,13 +165,13 @@ async function loadLSFConfig() {
 // Refresh VNC List
 async function refreshVNCList(withRetries = false) {
     try {
-        refreshButton.classList.add('rotating');
+        // Only add animation classes if not already set by click handler
+        const manuallyTriggered = !refreshButton.classList.contains('refreshing');
         
-        // Check if button shows 'Refreshing...' text to avoid duplicate operations
-        const originalText = refreshButton.innerHTML;
-        const isRefreshing = refreshButton.classList.contains('refreshing');
-        
-        if (!isRefreshing) {
+        if (manuallyTriggered) {
+            // Save original text if we're going to modify it
+            const originalText = refreshButton.innerHTML;
+            refreshButton.classList.add('rotating');
             refreshButton.classList.add('refreshing');
             refreshButton.innerHTML = '<i class="fas fa-sync-alt"></i> Refreshing...';
         }
@@ -175,13 +184,6 @@ async function refreshVNCList(withRetries = false) {
         if (jobs.length === 0) {
             noVNCMessage.style.display = 'block';
             document.querySelector('.table-container').style.display = 'none';
-            
-            // Reset the button state
-            if (!isRefreshing) {
-                refreshButton.innerHTML = originalText;
-                refreshButton.classList.remove('refreshing');
-            }
-            setTimeout(() => refreshButton.classList.remove('rotating'), 500);
             return;
         }
         
@@ -260,15 +262,16 @@ async function refreshVNCList(withRetries = false) {
             messageElement.textContent = 'Unable to access VNC sessions. LSF system may be unavailable.';
         }
     } finally {
-        // Reset button state after a short delay to show animation
-        setTimeout(() => {
-            refreshButton.classList.remove('rotating');
-            // Only reset text if we set it
-            if (refreshButton.classList.contains('refreshing')) {
-                refreshButton.innerHTML = '<i class="fas fa-sync-alt"></i>';
+        // Only handle animation and text reset if we set them in this function
+        if (refreshButton.classList.contains('refreshing') && 
+            !refreshButton.innerHTML.includes('Refresh')) {
+            // Reset button after a short delay
+            setTimeout(() => {
+                refreshButton.classList.remove('rotating');
+                refreshButton.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh';
                 refreshButton.classList.remove('refreshing');
-            }
-        }, 500);
+            }, 500);
+        }
     }
 }
 
