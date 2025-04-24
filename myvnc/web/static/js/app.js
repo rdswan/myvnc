@@ -25,10 +25,9 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Set up event listeners
     refreshButton.addEventListener('click', () => {
-        // Save the original text before modifying
-        const originalText = refreshButton.innerHTML;
         refreshButton.classList.add('rotating');
         refreshButton.classList.add('refreshing');
+        const originalText = '<i class="fas fa-sync-alt"></i> Refresh';
         refreshButton.innerHTML = '<i class="fas fa-sync-alt"></i> Refreshing...';
         
         refreshVNCList().finally(() => {
@@ -164,18 +163,19 @@ async function loadLSFConfig() {
 
 // Refresh VNC List
 async function refreshVNCList(withRetries = false) {
+    // Track if this function was directly called (not via click handler)
+    const directCall = !refreshButton.classList.contains('refreshing');
+    let originalText = null;
+    
+    // Only modify the button if this is a direct call
+    if (directCall) {
+        originalText = refreshButton.innerHTML;
+        refreshButton.classList.add('rotating');
+        refreshButton.classList.add('refreshing');
+        refreshButton.innerHTML = '<i class="fas fa-sync-alt"></i> Refreshing...';
+    }
+    
     try {
-        // Only add animation classes if not already set by click handler
-        const manuallyTriggered = !refreshButton.classList.contains('refreshing');
-        
-        if (manuallyTriggered) {
-            // Save original text if we're going to modify it
-            const originalText = refreshButton.innerHTML;
-            refreshButton.classList.add('rotating');
-            refreshButton.classList.add('refreshing');
-            refreshButton.innerHTML = '<i class="fas fa-sync-alt"></i> Refreshing...';
-        }
-        
         const jobs = await apiRequest('vnc/list');
         
         // Clear table
@@ -262,14 +262,12 @@ async function refreshVNCList(withRetries = false) {
             messageElement.textContent = 'Unable to access VNC sessions. LSF system may be unavailable.';
         }
     } finally {
-        // Only handle animation and text reset if we set them in this function
-        if (refreshButton.classList.contains('refreshing') && 
-            !refreshButton.innerHTML.includes('Refresh')) {
-            // Reset button after a short delay
+        // Only reset the button if we set it in this function
+        if (directCall) {
             setTimeout(() => {
                 refreshButton.classList.remove('rotating');
-                refreshButton.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh';
                 refreshButton.classList.remove('refreshing');
+                refreshButton.innerHTML = originalText || '<i class="fas fa-sync-alt"></i> Refresh';
             }, 500);
         }
     }
@@ -380,6 +378,13 @@ async function killVNCSession(jobId) {
         try {
             await apiRequest(`vnc/kill/${jobId}`, 'POST');
             showMessage(`VNC session ${jobId} killed successfully.`, 'success');
+            
+            // Reset refresh button if it was in refreshing state
+            if (refreshButton.classList.contains('refreshing')) {
+                refreshButton.classList.remove('refreshing');
+                refreshButton.classList.remove('rotating');
+                refreshButton.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh';
+            }
             
             // Single refresh with a small delay to allow server to process kill
             setTimeout(() => refreshVNCList(), 250);
