@@ -24,10 +24,10 @@ from http.cookies import SimpleCookie
 # Add parent directory to path so we can import our modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.auth_manager import AuthManager
-from utils.lsf_manager import LSFManager
-from utils.config_manager import ConfigManager
-from utils.vnc_manager import VNCManager
+from myvnc.utils.auth_manager import AuthManager
+from myvnc.utils.lsf_manager import LSFManager
+from myvnc.utils.config_manager import ConfigManager
+from myvnc.utils.vnc_manager import VNCManager
 
 class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
     """Handler for VNC manager CGI requests"""
@@ -64,12 +64,19 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                     self.end_headers()
                     return
         
+        # Special case: redirect /login to / if authentication is disabled
+        if path == "/login" and (not self.authentication_enabled or self.authentication_enabled.lower() != "entra"):
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.end_headers()
+            return
+            
         # Handle specific paths
         if path == "/":
             self.serve_file("index.html")
         elif path == "/login" and self.authentication_enabled and self.authentication_enabled.lower() == "entra":
             self.serve_file("login.html")
-        elif path == "/session" and self.authentication_enabled and self.authentication_enabled.lower() == "entra":
+        elif path == "/session" or path == "/api/auth/session":
             self.handle_session()
         elif path == "/api/vnc/sessions":
             self.handle_vnc_sessions()
@@ -245,12 +252,15 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
     def handle_session(self):
         """Handle session validation requests"""
         try:
-            # If authentication is disabled, return unauthorized
-            if not self.authentication_enabled:
+            # If authentication is disabled, return as authenticated with a generic user
+            if not self.authentication_enabled or self.authentication_enabled.lower() != "entra":
                 self.send_json_response({
-                    "authenticated": False,
-                    "message": "Authentication is disabled in server configuration"
-                }, 401)
+                    "authenticated": True,
+                    "username": "anonymous",
+                    "display_name": "Anonymous User",
+                    "email": "",
+                    "groups": []
+                })
                 return
                 
             # Check if user is authenticated

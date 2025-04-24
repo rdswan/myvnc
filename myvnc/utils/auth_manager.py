@@ -1,13 +1,58 @@
 import os
 import sys
-import ldap
 import uuid
 import time
 import json
 from typing import Dict, Optional, Tuple, List
 from pathlib import Path
-import requests
 from urllib.parse import urlencode
+
+# Try to import requests, use mock if not available
+try:
+    import requests
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    print("Requests module not available, HTTP functionality will be limited")
+    REQUESTS_AVAILABLE = False
+    # Create a mock requests module
+    class MockResponse:
+        def __init__(self, status_code=200, text="", json_data=None):
+            self.status_code = status_code
+            self.text = text
+            self._json = json_data or {}
+        def json(self):
+            return self._json
+    
+    class MockRequests:
+        def get(self, *args, **kwargs):
+            print(f"Mock requests: GET {args[0]}")
+            return MockResponse(404, "Not found")
+        def post(self, *args, **kwargs):
+            print(f"Mock requests: POST {args[0]}")
+            return MockResponse(404, "Not found")
+    
+    requests = MockRequests()
+
+# Try to import LDAP, use mock if not available
+try:
+    import ldap
+    LDAP_AVAILABLE = True
+except ImportError:
+    print("LDAP module not available, LDAP authentication will be disabled")
+    LDAP_AVAILABLE = False
+    # Create a mock for LDAP errors
+    class MockLDAP:
+        class INVALID_CREDENTIALS(Exception): pass
+        class SERVER_DOWN(Exception): pass
+        class LDAPError(Exception): pass
+        OPT_REFERRALS = 0
+        SCOPE_SUBTREE = 0
+        def initialize(self, *args): return self
+        def set_option(self, *args): pass
+        def simple_bind_s(self, *args): raise self.INVALID_CREDENTIALS("LDAP mock")
+        def search_s(self, *args): return []
+        def unbind(self): pass
+    ldap = MockLDAP()
 
 # Try to import MSAL, use mock implementation if not available
 try:

@@ -71,12 +71,18 @@ function checkAuthentication() {
                 updateUserInfo(data);
             } else {
                 // User is not authenticated, redirect to login page
-                window.location.href = '/login';
+                // Only redirect if not on the login page already
+                if (!window.location.pathname.startsWith('/login')) {
+                    window.location.href = '/login';
+                }
             }
         })
         .catch(error => {
             console.error('Authentication check failed:', error);
-            window.location.href = '/login';
+            // Only redirect if not on the login page already
+            if (!window.location.pathname.startsWith('/login')) {
+                window.location.href = '/login';
+            }
         });
 }
 
