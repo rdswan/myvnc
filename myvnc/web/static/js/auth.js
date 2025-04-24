@@ -52,6 +52,7 @@ function showLoginError(message) {
  * Check if user is authenticated
  */
 function checkAuthentication() {
+    console.log('Checking authentication...');
     fetch('/session')
         .then(response => {
             if (!response.ok) {
@@ -68,6 +69,7 @@ function checkAuthentication() {
             });
         })
         .then(data => {
+            console.log('Authentication response:', data);
             if (data.authenticated) {
                 // User is authenticated
                 currentUser = {
@@ -103,20 +105,39 @@ function checkAuthentication() {
  * Update user information in the UI
  */
 function updateUserInfo(userData) {
+    console.log('Updating UI with user info:', userData);
     const userInfoContainer = document.getElementById('user-info');
-    if (userInfoContainer) {
-        // Create user info display
-        const displayName = userData.display_name || userData.username;
-        userInfoContainer.innerHTML = `
-            <span class="user-name">${displayName}</span>
-            <button id="logout-btn" class="btn btn-sm btn-outline-light">Logout</button>
-        `;
-
-        // Add event listener to logout button
-        const logoutBtn = document.getElementById('logout-btn');
-        if (logoutBtn) {
-            logoutBtn.addEventListener('click', handleLogout);
-        }
+    if (!userInfoContainer) return;
+    
+    // Clear any existing content
+    userInfoContainer.innerHTML = '';
+    
+    // Create user info display
+    const displayName = userData.display_name || userData.username;
+    
+    // Add user name span
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'user-name';
+    nameSpan.textContent = displayName;
+    userInfoContainer.appendChild(nameSpan);
+    
+    // Only add logout button if NOT anonymous user
+    if (userData.username && userData.username !== 'anonymous') {
+        console.log('Showing logout button for authenticated user:', userData.username);
+        
+        // Create small space between name and button
+        userInfoContainer.appendChild(document.createTextNode(' '));
+        
+        // Create logout button
+        const logoutBtn = document.createElement('button');
+        logoutBtn.id = 'logout-btn';
+        logoutBtn.className = 'button small';
+        logoutBtn.textContent = 'Logout';
+        logoutBtn.addEventListener('click', handleLogout);
+        
+        userInfoContainer.appendChild(logoutBtn);
+    } else {
+        console.log('Not showing logout button for anonymous user');
     }
 }
 

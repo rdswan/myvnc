@@ -318,10 +318,14 @@ async function createVNCSession(event) {
                 continue;
             }
             
-            // Include all other fields and non-empty session names
-            if (key !== 'memory_gb') { // Skip memory_gb since we'll use the default from server
-                data[key] = value;
-            }
+            // Include all fields including memory_gb
+            data[key] = value;
+        }
+        
+        // Make sure memory_gb is included from the slider
+        const memorySlider = document.getElementById('lsf-memory');
+        if (memorySlider) {
+            data['memory_gb'] = memorySlider.value;
         }
         
         console.log('Submitting data:', data);
@@ -337,6 +341,7 @@ async function createVNCSession(event) {
         refreshVNCList();
     } catch (error) {
         console.error('Failed to create VNC session:', error);
+        showMessage(`Failed to create VNC session: ${error.message || 'Unknown error'}`, 'error');
     } finally {
         // Restore button state
         submitButton.innerHTML = originalText;

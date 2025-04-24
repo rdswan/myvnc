@@ -130,7 +130,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         # Handle generic paths (always accessible)
         if path == "/api/vnc/start" or path == "/api/vnc/create":
             self.handle_vnc_start()
-        elif path == "/api/vnc/stop" or path == "/api/vnc/kill":
+        elif path.startswith("/api/vnc/stop") or path.startswith("/api/vnc/kill"):
             self.handle_vnc_stop()
         elif path == "/api/vnc/copy":
             self.handle_vnc_copy()
@@ -528,9 +528,10 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         try:
             # Get VNC configuration
             config = {
-                "available_window_managers": self.config_manager.get_available_window_managers(),
-                "available_resolutions": self.config_manager.get_available_resolutions(),
-                "default_settings": self.config_manager.get_vnc_defaults()
+                "window_managers": self.config_manager.get_available_window_managers(),
+                "resolutions": self.config_manager.get_available_resolutions(),
+                "defaults": self.config_manager.get_vnc_defaults(),
+                "sites": self.config_manager.get_available_sites()
             }
             self.send_json_response(config)
         except Exception as e:
@@ -569,14 +570,14 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             print(f"Using LSF settings: {lsf_settings}")
             
             # Submit VNC job
-            result = self.lsf_manager.submit_vnc_job(vnc_settings, lsf_settings)
+            job_id = self.lsf_manager.submit_vnc_job(vnc_settings, lsf_settings)
             
-            # Return result
+            # Return result - job_id is a string, not a dictionary
             self.send_json_response({
                 "success": True,
                 "message": "VNC session created successfully",
-                "job_id": result.get("job_id", "unknown"),
-                "status": result.get("status", "pending")
+                "job_id": job_id,
+                "status": "pending"
             })
         except Exception as e:
             error_msg = f"Error creating VNC session: {str(e)}"
@@ -607,8 +608,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             if not job_id:
                 raise ValueError("No job ID provided")
             
-            # Kill VNC job
-            result = self.lsf_manager.kill_job(job_id)
+            # Kill VNC job using the correct method name
+            result = self.lsf_manager.kill_vnc_job(job_id)
             
             # Return result
             self.send_json_response({
