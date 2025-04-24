@@ -154,8 +154,19 @@ async function loadLSFConfig() {
 }
 
 // Refresh VNC List
-async function refreshVNCList() {
+async function refreshVNCList(withRetries = false) {
     try {
+        refreshButton.classList.add('rotating');
+        
+        // Check if button shows 'Refreshing...' text to avoid duplicate operations
+        const originalText = refreshButton.innerHTML;
+        const isRefreshing = refreshButton.classList.contains('refreshing');
+        
+        if (!isRefreshing) {
+            refreshButton.classList.add('refreshing');
+            refreshButton.innerHTML = '<i class="fas fa-sync-alt"></i> Refreshing...';
+        }
+        
         const jobs = await apiRequest('vnc/list');
         
         // Clear table
@@ -164,6 +175,13 @@ async function refreshVNCList() {
         if (jobs.length === 0) {
             noVNCMessage.style.display = 'block';
             document.querySelector('.table-container').style.display = 'none';
+            
+            // Reset the button state
+            if (!isRefreshing) {
+                refreshButton.innerHTML = originalText;
+                refreshButton.classList.remove('refreshing');
+            }
+            setTimeout(() => refreshButton.classList.remove('rotating'), 500);
             return;
         }
         
@@ -180,16 +198,26 @@ async function refreshVNCList() {
             if (job.status === 'RUN') statusClass = 'status-running';
             if (job.status === 'EXIT') statusClass = 'status-error';
             
+            // Connection information (display port if available)
+            const connectionInfo = job.port ? 
+                `${job.host}:${job.port}` : 
+                (job.host || 'N/A');
+            
             // Create cells
             row.innerHTML = `
                 <td>${job.job_id}</td>
                 <td>${job.name === "VNC Session" ? "" : job.name}</td>
                 <td>${job.user}</td>
-                <td><span class="status-badge ${statusClass}">${job.status}</span></td>
+                <td>${job.status === "RUN" ? 
+                    `<span class="status-badge ${statusClass}">${job.status}</span>` : 
+                    `<span class="status-badge ${statusClass}">${job.status}</span>`}
+                </td>
                 <td>${job.queue}</td>
-                <td>${job.host || 'N/A'}</td>
+                <td>${job.num_cores || '-'} cores, ${job.memory_gb || '-'} GB</td>
+                <td title="VNC Connection: ${connectionInfo}">${job.host || 'N/A'}</td>
+                <td>:${job.display || 'N/A'}</td>
                 <td class="actions-cell">
-                    <button class="button secondary connect-button" data-job-id="${job.job_id}" title="Connect to VNC">
+                    <button class="button secondary connect-button" data-job-id="${job.job_id}" title="Connect to VNC (${connectionInfo})">
                         <i class="fas fa-plug"></i> Connect
                     </button>
                     <button class="button danger kill-button" data-job-id="${job.job_id}" title="Kill VNC Session">
@@ -231,17 +259,40 @@ async function refreshVNCList() {
         if (messageElement) {
             messageElement.textContent = 'Unable to access VNC sessions. LSF system may be unavailable.';
         }
+    } finally {
+        // Reset button state after a short delay to show animation
+        setTimeout(() => {
+            refreshButton.classList.remove('rotating');
+            // Only reset text if we set it
+            if (refreshButton.classList.contains('refreshing')) {
+                refreshButton.innerHTML = '<i class="fas fa-sync-alt"></i>';
+                refreshButton.classList.remove('refreshing');
+            }
+        }, 500);
     }
 }
 
 // Connect to VNC
 function connectToVNC(job) {
-    // This would typically open a VNC connection
-    // For now, we'll just show a message
-    showMessage(`Connecting to VNC session: ${job.name}`, 'info');
+    // Format a proper VNC connection message with host and port information
+    let connectionString = job.host || 'unknown host';
     
-    // In a real implementation, this would redirect to the VNC client or open it in a new window
-    // window.open(`/vnc/connect/${job.job_id}`, '_blank');
+    if (job.port) {
+        connectionString = `${job.host}:${job.port}`;
+        showMessage(`Connecting to VNC session on ${connectionString}. Use a VNC client to connect.`, 'info');
+    } else {
+        showMessage(`VNC connection details unavailable for ${job.name || 'session'} on ${connectionString}.`, 'warning');
+    }
+    
+    // In a production environment, you might:
+    // 1. Redirect to a built-in web VNC client
+    // 2. Launch a VNC client via a custom protocol handler
+    // 3. Show detailed connection instructions for external VNC clients
+    
+    // Example of how you might implement #1:
+    // if (job.port) {
+    //     window.open(`/vnc/client?host=${job.host}&port=${job.port}`, '_blank');
+    // }
 }
 
 // Create VNC Session
@@ -326,7 +377,10 @@ async function killVNCSession(jobId) {
         try {
             await apiRequest(`vnc/kill/${jobId}`, 'POST');
             showMessage(`VNC session ${jobId} killed successfully.`, 'success');
-            refreshVNCList();
+            
+            // Single refresh with a small delay to allow server to process kill
+            setTimeout(() => refreshVNCList(), 250);
+            
         } catch (error) {
             console.error('Failed to kill VNC session:', error);
         } finally {
