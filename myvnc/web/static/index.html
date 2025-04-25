@@ -31,12 +31,7 @@
 <body>
     <header class="header">
         <div class="header-content">
-            <div class="logo-container">
-                <a href="https://tenstorrent.com/" target="_blank" title="Visit Tenstorrent.com">
-                    <img src="img/tt-logo.png" alt="Tenstorrent Logo" class="tt-logo">
-                </a>
-                <h1 class="app-title">MyVNC</h1>
-            </div>
+            <h1 class="app-title"><i class="fas fa-desktop"></i> MyVNC</h1>
             <div id="user-info" class="user-info">
                 <!-- User info will be added here by auth.js -->
             </div>
@@ -171,12 +166,12 @@
                         
                         <div class="form-row">
                             <div class="form-group">
-                                <label for="lsf-memory">Memory (GB) <span id="memory-value">4</span></label>
+                                <label for="lsf-memory">Memory (GB) <span id="memory-value">-</span></label>
                                 <div class="slider-container">
-                                    <input type="range" id="lsf-memory" name="memory_gb" min="2" max="128" step="4" value="4" class="slider">
+                                    <input type="range" id="lsf-memory" name="memory_gb" min="2" max="32" value="16" class="slider">
                                     <div class="slider-labels">
                                         <span>2GB</span>
-                                        <span>128GB</span>
+                                        <span>32GB</span>
                                     </div>
                                 </div>
                             </div>

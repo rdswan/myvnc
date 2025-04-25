@@ -149,14 +149,24 @@ async function loadLSFConfig() {
             // Sort memory options to ensure they're in ascending order
             const memoryOptions = [...lsfConfig.memory_options_gb].sort((a, b) => a - b);
             
-            // Set slider min, max and step based on available options
+            // Only update if we have memory options
             if (memoryOptions.length > 0) {
                 // Update slider attributes
                 memorySlider.min = memoryOptions[0];
                 memorySlider.max = memoryOptions[memoryOptions.length - 1];
                 
-                // Get default memory in GB
+                // Get default memory in GB from config
                 const defaultMemoryGB = lsfConfig.defaults.memory_gb || 16;
+                
+                // Get slider labels for min and max display
+                const sliderLabels = document.querySelector('.slider-labels');
+                if (sliderLabels) {
+                    const labelSpans = sliderLabels.querySelectorAll('span');
+                    if (labelSpans.length >= 2) {
+                        labelSpans[0].textContent = `${memoryOptions[0]}GB`;
+                        labelSpans[1].textContent = `${memoryOptions[memoryOptions.length - 1]}GB`;
+                    }
+                }
                 
                 // Find the closest memory option to default
                 let closestOption = memoryOptions[0];
@@ -177,53 +187,77 @@ async function loadLSFConfig() {
                 // Store memory options as a data attribute for later use
                 memorySlider.dataset.memoryOptions = JSON.stringify(memoryOptions);
                 
-                // Update memory value event listener to snap to valid options
-                memorySlider.addEventListener('input', function() {
-                    const options = JSON.parse(this.dataset.memoryOptions);
-                    const currentValue = parseInt(this.value);
-                    
-                    // Find the closest memory option
-                    let closestOption = options[0];
-                    let minDiff = Math.abs(currentValue - options[0]);
-                    
-                    for (let i = 1; i < options.length; i++) {
-                        const diff = Math.abs(currentValue - options[i]);
-                        if (diff < minDiff) {
-                            minDiff = diff;
-                            closestOption = options[i];
-                        }
-                    }
-                    
-                    // Update display value with the closest option
-                    memoryValue.textContent = closestOption;
-                });
+                // Clear existing event listeners (to avoid duplicates)
+                memorySlider.removeEventListener('input', handleMemorySliderInput);
+                memorySlider.removeEventListener('change', handleMemorySliderChange);
+                
+                // Add input event listener to snap to valid options during sliding
+                memorySlider.addEventListener('input', handleMemorySliderInput);
                 
                 // Add change event to snap to valid value when done sliding
-                memorySlider.addEventListener('change', function() {
-                    const options = JSON.parse(this.dataset.memoryOptions);
-                    const currentValue = parseInt(this.value);
-                    
-                    // Find the closest memory option
-                    let closestOption = options[0];
-                    let minDiff = Math.abs(currentValue - options[0]);
-                    
-                    for (let i = 1; i < options.length; i++) {
-                        const diff = Math.abs(currentValue - options[i]);
-                        if (diff < minDiff) {
-                            minDiff = diff;
-                            closestOption = options[i];
-                        }
-                    }
-                    
-                    // Update the actual slider value to snap to the valid option
-                    this.value = closestOption;
-                    memoryValue.textContent = closestOption;
-                });
+                memorySlider.addEventListener('change', handleMemorySliderChange);
             }
         }
     } catch (error) {
         console.error('Failed to load LSF configuration:', error);
     }
+}
+
+// Handler for memory slider input events
+function handleMemorySliderInput() {
+    try {
+        const options = JSON.parse(this.dataset.memoryOptions);
+        const currentValue = parseInt(this.value);
+        const memoryValue = document.getElementById('memory-value');
+        
+        // Find the closest memory option
+        let closestOption = findClosestMemoryOption(options, currentValue);
+        
+        // Update display value with the closest option
+        if (memoryValue) {
+            memoryValue.textContent = closestOption;
+        }
+    } catch (e) {
+        console.error('Error handling memory slider input:', e);
+    }
+}
+
+// Handler for memory slider change events
+function handleMemorySliderChange() {
+    try {
+        const options = JSON.parse(this.dataset.memoryOptions);
+        const currentValue = parseInt(this.value);
+        const memoryValue = document.getElementById('memory-value');
+        
+        // Find the closest memory option
+        let closestOption = findClosestMemoryOption(options, currentValue);
+        
+        // Update the actual slider value to snap to the valid option
+        this.value = closestOption;
+        if (memoryValue) {
+            memoryValue.textContent = closestOption;
+        }
+    } catch (e) {
+        console.error('Error handling memory slider change:', e);
+    }
+}
+
+// Helper function to find closest memory option
+function findClosestMemoryOption(options, currentValue) {
+    if (!options || !options.length) return currentValue;
+    
+    let closestOption = options[0];
+    let minDiff = Math.abs(currentValue - options[0]);
+    
+    for (let i = 1; i < options.length; i++) {
+        const diff = Math.abs(currentValue - options[i]);
+        if (diff < minDiff) {
+            minDiff = diff;
+            closestOption = options[i];
+        }
+    }
+    
+    return closestOption;
 }
 
 // Refresh VNC List
