@@ -389,6 +389,10 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                                 job['port'] = conn_details['port']
                             if 'display' in conn_details:
                                 job['display'] = conn_details['display']
+                            
+                            # Use the actual submit_time instead of hardcoding
+                            if 'submit_time' in job:
+                                job['submit_time_raw'] = job['submit_time']
                 except Exception as e:
                     print(f"Error getting connection details for job {job.get('job_id', 'unknown')}: {str(e)}", file=sys.stderr)
             
