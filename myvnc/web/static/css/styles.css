@@ -807,4 +807,25 @@ footer {
     color: var(--primary-color);
     font-weight: 600;
     margin-left: 5px;
+}
+
+/* Logo styling */
+.logo-container {
+    display: flex;
+    align-items: center;
+}
+
+.logo-container a {
+    display: flex;
+    align-items: center;
+    text-decoration: none;
+}
+
+.logo-container a:hover {
+    opacity: 0.9;
+}
+
+.tt-logo {
+    height: 32px;
+    margin-right: 12px;
 } 

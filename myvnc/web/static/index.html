@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tenstorrent VNC Manager</title>
+    <title>MyVNC</title>
     <link rel="stylesheet" href="css/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -31,7 +31,12 @@
 <body>
     <header class="header">
         <div class="header-content">
-            <h1 class="app-title"><i class="fas fa-desktop"></i> VNC Manager</h1>
+            <div class="logo-container">
+                <a href="https://tenstorrent.com/" target="_blank" title="Visit Tenstorrent.com">
+                    <img src="img/tt-logo.png" alt="Tenstorrent Logo" class="tt-logo">
+                </a>
+                <h1 class="app-title">MyVNC</h1>
+            </div>
             <div id="user-info" class="user-info">
                 <!-- User info will be added here by auth.js -->
             </div>
@@ -168,7 +173,7 @@
                             <div class="form-group">
                                 <label for="lsf-memory">Memory (GB) <span id="memory-value">4</span></label>
                                 <div class="slider-container">
-                                    <input type="range" id="lsf-memory" name="memory_gb" min="2" max="128" value="4" class="slider">
+                                    <input type="range" id="lsf-memory" name="memory_gb" min="2" max="128" step="4" value="4" class="slider">
                                     <div class="slider-labels">
                                         <span>2GB</span>
                                         <span>128GB</span>
