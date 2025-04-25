@@ -283,6 +283,7 @@ async function refreshVNCList(withRetries = false) {
                 <td>${job.num_cores || '-'} cores, ${job.memory_gb || '-'} GB</td>
                 <td title="VNC Connection: ${connectionInfo}">${job.host || 'N/A'}</td>
                 <td>:${job.display || 'N/A'}</td>
+                <td>${calculateRunningTime(job.submit_time)}</td>
                 <td class="actions-cell">
                     <button class="button secondary connect-button" data-job-id="${job.job_id}" title="Connect to VNC (${connectionInfo})">
                         <i class="fas fa-plug"></i> Connect
@@ -338,27 +339,119 @@ async function refreshVNCList(withRetries = false) {
     }
 }
 
+// Function to copy text to clipboard
+function copyToClipboard(text) {
+    // Create a temporary input element
+    const tempInput = document.createElement('input');
+    tempInput.value = text;
+    document.body.appendChild(tempInput);
+    
+    // Select and copy the text
+    tempInput.select();
+    document.execCommand('copy');
+    
+    // Remove the temporary element
+    document.body.removeChild(tempInput);
+    
+    // Show feedback
+    showMessage(`Copied to clipboard: ${text}`, 'success');
+}
+
 // Connect to VNC
 function connectToVNC(job) {
-    // Format a proper VNC connection message with host and port information
-    let connectionString = job.host || 'unknown host';
-    
-    if (job.port) {
-        connectionString = `${job.host}:${job.port}`;
-        showMessage(`Connecting to VNC session on ${connectionString}. Use a VNC client to connect.`, 'info');
-    } else {
-        showMessage(`VNC connection details unavailable for ${job.name || 'session'} on ${connectionString}.`, 'warning');
+    // Check if we have both host and display information
+    if (!job.host || !job.display) {
+        showMessage(`Connection details unavailable for ${job.name || 'VNC session'}. Host or display number missing.`, 'error');
+        return;
     }
     
-    // In a production environment, you might:
-    // 1. Redirect to a built-in web VNC client
-    // 2. Launch a VNC client via a custom protocol handler
-    // 3. Show detailed connection instructions for external VNC clients
+    // Calculate the VNC port (5900 + display number)
+    const vncPort = 5900 + parseInt(job.display);
     
-    // Example of how you might implement #1:
-    // if (job.port) {
-    //     window.open(`/vnc/client?host=${job.host}&port=${job.port}`, '_blank');
-    // }
+    // Format the connection string using port instead of display
+    const connectionString = `${job.host}:${vncPort}`;
+    
+    // Launch VNC viewer using the vnc:// protocol with port
+    console.log(`Connecting to VNC using vnc://${connectionString}`);
+    window.location.href = `vnc://${connectionString}`;
+}
+
+// Show detailed VNC connection instructions with application-specific info
+function showDetailedInstructions(job) {
+    const hostname = job.host;
+    const displayNum = job.display;
+    const connectionString = `${hostname}:${displayNum}`;
+    const rfbPort = 5900 + parseInt(displayNum);
+    
+    const messageContent = `
+        <div class="connection-info">
+            <h3>VNC Connection Details</h3>
+            <div class="connection-detail-item">
+                <span class="detail-label">Host:</span>
+                <span class="detail-value">${hostname}</span>
+                <button class="button mini copy-button" onclick="copyToClipboard('${hostname}')">
+                    <i class="fas fa-copy"></i>
+                </button>
+            </div>
+            <div class="connection-detail-item">
+                <span class="detail-label">Port:</span>
+                <span class="detail-value">${rfbPort}</span>
+                <button class="button mini copy-button" onclick="copyToClipboard('${rfbPort}')">
+                    <i class="fas fa-copy"></i>
+                </button>
+            </div>
+            <div class="connection-detail-item">
+                <span class="detail-label">Display:</span>
+                <span class="detail-value">:${displayNum}</span>
+            </div>
+            
+            <div class="connection-methods">
+                <h4>Connect using VNC Viewer</h4>
+                
+                <div class="connection-method">
+                    <h5>For RealVNC Viewer:</h5>
+                    <ol>
+                        <li>Open RealVNC Viewer</li>
+                        <li>Enter <code>${hostname}:${rfbPort}</code> in the address bar</li>
+                        <li>Click Connect</li>
+                    </ol>
+                    <div class="connection-actions">
+                        <button class="button primary" onclick="window.location.href='realvnc://${hostname}:${rfbPort}'">
+                            <i class="fas fa-external-link-alt"></i> Launch RealVNC
+                        </button>
+                        <button class="button secondary copy-button" onclick="copyToClipboard('${hostname}:${rfbPort}')">
+                            <i class="fas fa-copy"></i> Copy address
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="connection-method">
+                    <h5>For TigerVNC Viewer:</h5>
+                    <div class="command-box">
+                        <code>vncviewer ${connectionString}</code>
+                        <button class="button mini copy-button" onclick="copyToClipboard('vncviewer ${connectionString}')">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="connection-method">
+                    <h5>For any VNC Viewer:</h5>
+                    <p>Host: <code>${hostname}</code></p>
+                    <p>Port: <code>${rfbPort}</code></p>
+                </div>
+                
+                <div class="connection-method">
+                    <h5>To use macOS Screen Sharing:</h5>
+                    <button class="button secondary" onclick="window.location.href='vnc://${hostname}:${rfbPort}'">
+                        <i class="fas fa-desktop"></i> Open in Screen Sharing
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    showMessage(messageContent, 'info');
 }
 
 // Create VNC Session
@@ -511,12 +604,18 @@ function populateSelect(elementId, options, defaultValue) {
 
 // Show Message
 function showMessage(message, type = 'info') {
-    messageText.textContent = message;
+    // Set HTML content if it contains HTML tags, otherwise set as text
+    if (message.includes('<') && message.includes('>')) {
+        messageText.innerHTML = message;
+    } else {
+        messageText.textContent = message;
+    }
+    
     messageBox.className = `message-box ${type}`;
     messageBox.classList.remove('hidden');
     
-    // Auto-hide after 5 seconds
-    setTimeout(hideMessage, 5000);
+    // Auto-hide after 8 seconds for longer messages
+    setTimeout(hideMessage, 8000);
 }
 
 // Hide Message
@@ -572,33 +671,31 @@ document.addEventListener('DOMContentLoaded', () => {
         .status-badge {
             display: inline-block;
             padding: 0.25rem 0.5rem;
-            border-radius: 12px;
-            font-size: 0.8rem;
+            border-radius: 2rem;
+            font-size: 0.75rem;
             font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         
         .status-running {
-            background-color: rgba(30, 185, 128, 0.15);
-            color: #1EB980; /* TT Light Green */
+            background-color: var(--success-color);
+            color: white;
         }
         
         .status-pending {
-            background-color: rgba(24, 196, 234, 0.15);
-            color: #18C4EA; /* TT Light Blue */
+            background-color: var(--warning-color);
+            color: #333;
         }
         
         .status-error {
-            background-color: rgba(240, 79, 94, 0.15);
-            color: #F04F5E; /* TT Light Red */
-        }
-        
-        .status-done {
-            background-color: rgba(51, 51, 61, 0.15);
-            color: #33333D; /* TT Blue Grey */
+            background-color: var(--danger-color);
+            color: white;
         }
         
         .actions-cell {
             display: flex;
+            flex-direction: column;
             gap: 0.5rem;
         }
         
@@ -739,4 +836,30 @@ function displayDebugData(data) {
 document.getElementById('debug-tab').addEventListener('click', function() {
     // Load debug data when debug tab is clicked
     loadDebugData();
-}); 
+});
+
+// Calculate job running time
+function calculateRunningTime(submitTime) {
+    if (!submitTime) {
+        return 'N/A';
+    }
+    
+    try {
+        // Parse the submit time
+        const submitDate = new Date(submitTime);
+        const now = new Date();
+        
+        // Calculate time difference in milliseconds
+        const diff = now - submitDate;
+        
+        // Convert to days and hours
+        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        
+        // Always display in days and hours format
+        return `${days}d ${hours}h`;
+    } catch (e) {
+        console.error('Error calculating running time:', e);
+        return 'N/A';
+    }
+} 
