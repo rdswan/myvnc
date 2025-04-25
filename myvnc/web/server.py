@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, urlparse, quote
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler
 from http.cookies import SimpleCookie
+import socket
 
 # Add parent directory to path so we can import our modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -776,23 +777,46 @@ def run_server(host=None, port=None, directory=None, config=None):
     # Set serving directory
     os.chdir(directory)
     
+    # Check if the address and port are available
+    try:
+        # Create a test socket to check availability
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.bind((host, port))
+        sock.close()
+    except OSError as e:
+        if e.errno == 99:  # Cannot assign requested address
+            print(f"Error: Cannot bind to address {host}:{port} - Address not available")
+            print(f"       Verify that the host address is correct and exists on this machine")
+            return
+        elif e.errno == 98:  # Address already in use
+            print(f"Error: Cannot bind to address {host}:{port} - Port is already in use")
+            print(f"       Check if another instance of the server is already running")
+            return
+        else:
+            print(f"Error: Cannot bind to address {host}:{port} - {e}")
+            return
+    
     # Create server
     server_address = (host, port)
-    httpd = http.server.HTTPServer(server_address, VNCRequestHandler)
-    
-    # Set timeout if specified in config
-    if "timeout" in config:
-        httpd.timeout = config["timeout"]
-    
-    print(f"Starting server on http://{host}:{port}")
-    if config.get("debug", False):
-        print(f"Debug mode: ON")
-        print(f"Config: {config}")
-    
     try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        print("Server stopped")
+        httpd = http.server.HTTPServer(server_address, VNCRequestHandler)
+        
+        # Set timeout if specified in config
+        if "timeout" in config:
+            httpd.timeout = config["timeout"]
+        
+        print(f"Starting server on http://{host}:{port}")
+        if config.get("debug", False):
+            print(f"Debug mode: ON")
+            print(f"Config: {config}")
+        
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            print("Server stopped")
+    except Exception as e:
+        print(f"Error starting server: {str(e)}")
+        return
 
 def parse_args():
     """Parse command line arguments"""
