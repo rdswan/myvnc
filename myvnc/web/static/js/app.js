@@ -337,7 +337,7 @@ async function refreshVNCList(withRetries = false) {
                 <td>${job.num_cores || '-'} cores, ${job.memory_gb || '-'} GB</td>
                 <td title="VNC Connection: ${connectionInfo}">${job.host || 'N/A'}</td>
                 <td>:${job.display || 'N/A'}</td>
-                <td>${calculateRunningTime(job.submit_time)}</td>
+                <td>${job.runtime_display || 'N/A'}</td>
                 <td class="actions-cell">
                     <button class="button secondary connect-button" data-job-id="${job.job_id}" title="Connect to VNC (${connectionInfo})">
                         <i class="fas fa-plug"></i> Connect
@@ -900,18 +900,55 @@ function calculateRunningTime(submitTime) {
     
     try {
         // Parse the submit time
-        const submitDate = new Date(submitTime);
+        let submitDate;
+        
+        // Try to parse in standard ISO format
+        if (submitTime.includes('-')) {
+            // Assuming ISO format 'YYYY-MM-DD HH:MM:SS'
+            submitDate = new Date(submitTime);
+        } else {
+            // For other formats, try a more tolerant parser
+            const parts = submitTime.split(/[\s:\/]/);
+            if (parts.length >= 5) { // At least year, month, day, hour, minute
+                // Different date formats depending on the parts
+                const month = isNaN(parts[1]) ? parts[1] : parts[1] - 1; // JS months are 0-based
+                submitDate = new Date(
+                    parts[0], // year or month name
+                    isNaN(parts[0]) ? new Date().getFullYear() : month, // month or year
+                    parts[2], // day
+                    parts[3], // hour
+                    parts[4]  // minute
+                );
+            } else {
+                // Fallback: try the default JS date parser
+                submitDate = new Date(submitTime);
+            }
+        }
+        
+        // If parsing failed or the date is invalid, return N/A
+        if (isNaN(submitDate.getTime())) {
+            console.error('Unable to parse date:', submitTime);
+            return 'N/A';
+        }
+        
         const now = new Date();
         
         // Calculate time difference in milliseconds
         const diff = now - submitDate;
         
-        // Convert to days and hours
+        // Convert to days, hours, minutes
         const days = Math.floor(diff / (1000 * 60 * 60 * 24));
         const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
         
-        // Always display in days and hours format
-        return `${days}d ${hours}h`;
+        // Format the output based on the duration
+        if (days > 0) {
+            return `${days}d ${hours}h`;
+        } else if (hours > 0) {
+            return `${hours}h ${minutes}m`;
+        } else {
+            return `${minutes}m`;
+        }
     } catch (e) {
         console.error('Error calculating running time:', e);
         return 'N/A';
