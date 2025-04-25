@@ -454,15 +454,17 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
     def handle_debug_environment(self):
         """Handle /debug/environment endpoint to display environment information"""
         try:
-            # Get environment info
+            # Get basic environment info
             env_info = {
                 "Python Version": platform.python_version(),
                 "Platform": platform.platform(),
                 "User": os.environ.get("USER", "Unknown"),
                 "Hostname": platform.node(),
-                "LSB_JOBID": os.environ.get("LSB_JOBID", "Not in LSF environment"),
-                "LSF_ENVDIR": os.environ.get("LSF_ENVDIR", "Not set")
             }
+            
+            # Add all environment variables
+            for key, value in os.environ.items():
+                env_info[key] = value
             
             # Include configs
             config_info = {
