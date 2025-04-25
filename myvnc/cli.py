@@ -65,8 +65,7 @@ def create(name, resolution, wm, queue, cores, memory, vncserver_path):
         lsf_config = {
             'queue': queue,
             'num_cores': cores,
-            'memory_mb': memory,
-            'time_limit': '12:00'
+            'memory_mb': memory
         }
         
         # Submit job

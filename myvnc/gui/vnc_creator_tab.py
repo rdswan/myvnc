@@ -75,8 +75,7 @@ class VNCreatorTab(QWidget):
         lsf_config = {
             'queue': self.queue_combo.currentText(),
             'num_cores': self.cores_spin.value(),
-            'memory_gb': int(self.memory_combo.currentText()),
-            'time_limit': '12:00'  # Default time limit
+            'memory_gb': int(self.memory_combo.currentText())
         }
         
         try:

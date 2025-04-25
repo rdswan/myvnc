@@ -105,8 +105,7 @@ class LSFManager:
             lsf_config = {
                 'queue': 'interactive',
                 'num_cores': 1,
-                'memory_gb': 2048,
-                'time_limit': '00:30'
+                'memory_gb': 2048
             }
             
             # Build the command but don't execute it (dry run)
@@ -115,7 +114,6 @@ class LSFManager:
                 '-q', lsf_config['queue'],
                 '-n', str(lsf_config['num_cores']),
                 '-M', str(lsf_config['memory_gb']),
-                '-W', lsf_config['time_limit'],
                 '-J', vnc_config['name']
             ]
             

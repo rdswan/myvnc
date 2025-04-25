@@ -3,7 +3,6 @@
         "queue": "interactive",
         "num_cores": 2,
         "memory_gb": 16,
-        "time_limit": "12:00",
         "job_name": "myvnc_vncserver"
     },
     "available_queues": [
@@ -16,7 +15,9 @@
         4,
         8,
         16,
-        32
+        32,
+        64,
+        128
     ],
     "core_options": [
         1,
