@@ -137,6 +137,7 @@ async function loadVNCConfig() {
 async function loadLSFConfig() {
     try {
         lsfConfig = await apiRequest('config/lsf');
+        console.log("LSF config received:", lsfConfig);
         
         // Populate select fields
         populateSelect('lsf-queue', lsfConfig.queues, lsfConfig.defaults.queue);
@@ -145,9 +146,13 @@ async function loadLSFConfig() {
         // Set memory slider based on memory options from config
         const memorySlider = document.getElementById('lsf-memory');
         const memoryValue = document.getElementById('memory-value');
-        if (memorySlider && memoryValue && lsfConfig.memory_options_gb) {
+        
+        // Get memory options from config (could be memory_options or memory_options_gb)
+        const memoryOptionsData = lsfConfig.memory_options_gb || lsfConfig.memory_options;
+        
+        if (memorySlider && memoryValue && memoryOptionsData) {
             // Sort memory options to ensure they're in ascending order
-            const memoryOptions = [...lsfConfig.memory_options_gb].sort((a, b) => a - b);
+            const memoryOptions = [...memoryOptionsData].sort((a, b) => a - b);
             
             // Only update if we have memory options
             if (memoryOptions.length > 0) {
@@ -156,7 +161,8 @@ async function loadLSFConfig() {
                 memorySlider.max = memoryOptions[memoryOptions.length - 1];
                 
                 // Get default memory in GB from config
-                const defaultMemoryGB = lsfConfig.defaults.memory_gb || 16;
+                const defaultMemoryGB = lsfConfig.defaults.memory_gb;
+                console.log("Default memory from config:", defaultMemoryGB);
                 
                 // Get slider labels for min and max display
                 const sliderLabels = document.querySelector('.slider-labels');
@@ -183,6 +189,20 @@ async function loadLSFConfig() {
                 // Set the slider to the closest option
                 memorySlider.value = closestOption;
                 memoryValue.textContent = closestOption;
+                
+                // Ensure the step attribute is properly set
+                const step = memoryOptions.length > 1 ? memoryOptions[1] - memoryOptions[0] : 1;
+                memorySlider.step = step;
+                
+                console.log("Memory slider initialization:", {
+                    min: memorySlider.min,
+                    max: memorySlider.max,
+                    value: memorySlider.value,
+                    step: memorySlider.step,
+                    defaultMemoryGB,
+                    closestOption,
+                    memoryOptions
+                });
                 
                 // Store memory options as a data attribute for later use
                 memorySlider.dataset.memoryOptions = JSON.stringify(memoryOptions);

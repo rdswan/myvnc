@@ -1,0 +1,9 @@
+{
+    "host": "localhost",
+    "port": 8000,
+    "debug": false,
+    "max_connections": 5,
+    "timeout": 30,
+    "authentication": "",
+    "auth_notes": "To enable Entra SSO, set authentication to 'Entra'"
+} 

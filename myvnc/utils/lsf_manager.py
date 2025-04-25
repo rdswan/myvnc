@@ -5,7 +5,7 @@ import sys
 import time
 import os
 from typing import Dict, List, Optional, Tuple
-from datetime import datetime
+import datetime
 import json
 
 from myvnc.utils.config_manager import ConfigManager
@@ -266,7 +266,7 @@ class LSFManager:
                 'stdout': '',
                 'stderr': '',
                 'success': False,  # Will update after execution
-                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                'timestamp': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             self.command_history.append(cmd_entry)
             
@@ -318,7 +318,7 @@ class LSFManager:
                     'stdout': '',
                     'stderr': str(e),
                     'success': False,
-                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    'timestamp': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 })
             raise
     
@@ -502,20 +502,25 @@ class LSFManager:
                             submit_time_raw = fields[-1]  # Last column is SUBMIT_TIME
                             
                             try:
-                                current_year = datetime.now().year
+                                current_year = datetime.datetime.now().year
                                 
                                 # Format can be either "Mon DD HH:MM" or "Mon DD YYYY"
                                 if re.match(r'^[A-Za-z]{3}\s+\d{1,2}\s+\d{1,2}:\d{2}$', submit_time_raw):
                                     # Format: "Apr 25 10:09"
-                                    dt = datetime.strptime(f"{submit_time_raw} {current_year}", "%b %d %H:%M %Y")
+                                    dt = datetime.datetime.strptime(f"{submit_time_raw} {current_year}", "%b %d %H:%M %Y")
                                     
                                     # If the date is in the future, it's probably from last year
-                                    if dt > datetime.now():
+                                    if dt > datetime.datetime.now():
                                         dt = dt.replace(year=current_year - 1)
                                         
                                 elif re.match(r'^[A-Za-z]{3}\s+\d{1,2}\s+\d{4}$', submit_time_raw):
                                     # Format: "Apr 25 2025"
-                                    dt = datetime.strptime(submit_time_raw, "%b %d %Y")
+                                    dt = datetime.datetime.strptime(submit_time_raw, "%b %d %Y")
+                                elif re.match(r'^\d{1,2}:\d{2}$', submit_time_raw):
+                                    # Format: "13:04" (just time, assume today)
+                                    today = datetime.datetime.now().date()
+                                    time_obj = datetime.datetime.strptime(submit_time_raw, "%H:%M").time()
+                                    dt = datetime.datetime.combine(today, time_obj)
                                 else:
                                     # Unknown format, use current time
                                     raise ValueError(f"Unknown submit time format: {submit_time_raw}")
@@ -526,7 +531,7 @@ class LSFManager:
                             except Exception as e:
                                 print(f"Error parsing submit time '{submit_time_raw}': {str(e)}", file=sys.stderr)
                                 # On failure, use current time
-                                submit_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                submit_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         
                         jobs.append({
                             'job_id': job_id,
@@ -551,20 +556,25 @@ class LSFManager:
                             submit_time_raw = fields[-1]  # Last column is SUBMIT_TIME
                             
                             try:
-                                current_year = datetime.now().year
+                                current_year = datetime.datetime.now().year
                                 
                                 # Format can be either "Mon DD HH:MM" or "Mon DD YYYY"
                                 if re.match(r'^[A-Za-z]{3}\s+\d{1,2}\s+\d{1,2}:\d{2}$', submit_time_raw):
                                     # Format: "Apr 25 10:09"
-                                    dt = datetime.strptime(f"{submit_time_raw} {current_year}", "%b %d %H:%M %Y")
+                                    dt = datetime.datetime.strptime(f"{submit_time_raw} {current_year}", "%b %d %H:%M %Y")
                                     
                                     # If the date is in the future, it's probably from last year
-                                    if dt > datetime.now():
+                                    if dt > datetime.datetime.now():
                                         dt = dt.replace(year=current_year - 1)
                                         
                                 elif re.match(r'^[A-Za-z]{3}\s+\d{1,2}\s+\d{4}$', submit_time_raw):
                                     # Format: "Apr 25 2025"
-                                    dt = datetime.strptime(submit_time_raw, "%b %d %Y")
+                                    dt = datetime.datetime.strptime(submit_time_raw, "%b %d %Y")
+                                elif re.match(r'^\d{1,2}:\d{2}$', submit_time_raw):
+                                    # Format: "13:04" (just time, assume today)
+                                    today = datetime.datetime.now().date()
+                                    time_obj = datetime.datetime.strptime(submit_time_raw, "%H:%M").time()
+                                    dt = datetime.datetime.combine(today, time_obj)
                                 else:
                                     # Unknown format, use current time
                                     raise ValueError(f"Unknown submit time format: {submit_time_raw}")
@@ -575,7 +585,7 @@ class LSFManager:
                             except Exception as e:
                                 print(f"Error parsing submit time '{submit_time_raw}': {str(e)}", file=sys.stderr)
                                 # On failure, use current time
-                                submit_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                submit_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                         
                         jobs.append({
                             'job_id': job_id,

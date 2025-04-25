@@ -555,22 +555,26 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             data = json.loads(post_data)
             print(f"Parsed JSON data: {data}")
             
+            # Get default settings from config
+            vnc_defaults = self.config_manager.get_vnc_defaults()
+            lsf_defaults = self.config_manager.get_lsf_defaults()
+            
             # Extract VNC settings
             vnc_settings = {
-                "resolution": data.get("resolution", "1920x1080"),
-                "window_manager": data.get("window_manager", "gnome"),
-                "color_depth": 24,  # Default color depth
-                "site": data.get("site", "Austin"),
-                "vncserver_path": "/usr/bin/vncserver",
-                "name": data.get("name", "myVNC")
+                "resolution": data.get("resolution", vnc_defaults.get("resolution")),
+                "window_manager": data.get("window_manager", vnc_defaults.get("window_manager")),
+                "color_depth": vnc_defaults.get("color_depth", 24),
+                "site": data.get("site", vnc_defaults.get("site")),
+                "vncserver_path": vnc_defaults.get("vncserver_path", "/usr/bin/vncserver"),
+                "name": data.get("name", vnc_defaults.get("name_prefix", "vnc_session"))
             }
             
             # Extract LSF settings
             lsf_settings = {
-                "queue": data.get("queue", "interactive"),
-                "num_cores": int(data.get("num_cores", 1)),
-                "memory_gb": int(data.get("memory_gb", 16)),
-                "job_name": "myvnc_vncserver"
+                "queue": data.get("queue", lsf_defaults.get("queue")),
+                "num_cores": int(data.get("num_cores", lsf_defaults.get("num_cores"))),
+                "memory_gb": int(data.get("memory_gb", lsf_defaults.get("memory_gb"))),
+                "job_name": lsf_defaults.get("job_name", "myvnc_vncserver")
             }
             
             print(f"Submitting VNC job with config: {vnc_settings}")
@@ -658,21 +662,25 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             if not session_to_copy:
                 raise ValueError(f"Session with ID {session_id} not found")
             
+            # Get default settings from config
+            vnc_defaults = self.config_manager.get_vnc_defaults()
+            lsf_defaults = self.config_manager.get_lsf_defaults()
+            
             # Extract and prepare settings for new session
             vnc_settings = {
-                "resolution": session_to_copy.get("resolution", "1920x1080"),
-                "window_manager": session_to_copy.get("window_manager", "gnome"),
-                "color_depth": 24,
-                "site": session_to_copy.get("site", "Austin"),
-                "vncserver_path": "/usr/bin/vncserver",
-                "name": f"Copy of {session_to_copy.get('name', 'myVNC')}"
+                "resolution": session_to_copy.get("resolution", vnc_defaults.get("resolution")),
+                "window_manager": session_to_copy.get("window_manager", vnc_defaults.get("window_manager")),
+                "color_depth": vnc_defaults.get("color_depth", 24),
+                "site": session_to_copy.get("site", vnc_defaults.get("site")),
+                "vncserver_path": vnc_defaults.get("vncserver_path", "/usr/bin/vncserver"),
+                "name": f"Copy of {session_to_copy.get('name', vnc_defaults.get('name_prefix', 'vnc_session'))}"
             }
             
             lsf_settings = {
-                "queue": session_to_copy.get("queue", "interactive"),
-                "num_cores": int(session_to_copy.get("num_cores", 1)),
-                "memory_gb": int(session_to_copy.get("memory_gb", 16)),
-                "job_name": "myvnc_vncserver"
+                "queue": session_to_copy.get("queue", lsf_defaults.get("queue")),
+                "num_cores": int(session_to_copy.get("num_cores", lsf_defaults.get("num_cores"))),
+                "memory_gb": int(session_to_copy.get("memory_gb", lsf_defaults.get("memory_gb"))),
+                "job_name": lsf_defaults.get("job_name", "myvnc_vncserver")
             }
             
             # Submit new VNC job
@@ -696,42 +704,92 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
 def load_server_config():
     """Load server configuration from JSON file"""
     config_path = Path(__file__).parent.parent.parent / "config" / "server_config.json"
+    default_config_path = Path(__file__).parent.parent.parent / "config" / "default_server_config.json"
     
     try:
         with open(config_path, 'r') as f:
             return json.load(f)
     except FileNotFoundError:
         print(f"Warning: Server configuration file not found at {config_path}")
-        return {
-            "host": "localhost",
-            "port": 8000,
-            "debug": False,
-            "max_connections": 5,
-            "timeout": 30
-        }
+        # Try to load default config
+        try:
+            with open(default_config_path, 'r') as f:
+                print(f"Using default server configuration from {default_config_path}")
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            print(f"Warning: Default server configuration file not found or invalid at {default_config_path}")
+            return {
+                "host": "localhost",
+                "port": 8000,
+                "debug": False,
+                "max_connections": 5,
+                "timeout": 30
+            }
     except json.JSONDecodeError:
         print(f"Warning: Invalid JSON in server configuration file")
-        return {
-            "host": "localhost",
-            "port": 8000,
-            "debug": False,
-            "max_connections": 5,
-            "timeout": 30
-        }
+        # Try to load default config
+        try:
+            with open(default_config_path, 'r') as f:
+                print(f"Using default server configuration from {default_config_path}")
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            print(f"Warning: Default server configuration file not found or invalid at {default_config_path}")
+            return {
+                "host": "localhost",
+                "port": 8000,
+                "debug": False,
+                "max_connections": 5,
+                "timeout": 30
+            }
 
 def load_lsf_config():
     """Load LSF configuration from JSON file"""
     config_path = Path(__file__).parent.parent.parent / "config" / "lsf_config.json"
+    default_config_path = Path(__file__).parent.parent.parent / "config" / "default_lsf_config.json"
     
     try:
         with open(config_path, 'r') as f:
             return json.load(f)
     except FileNotFoundError:
         print(f"Warning: LSF configuration file not found at {config_path}")
-        return {}
+        # Try to load default config
+        try:
+            with open(default_config_path, 'r') as f:
+                print(f"Using default LSF configuration from {default_config_path}")
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            print(f"Warning: Default LSF configuration file not found or invalid at {default_config_path}")
+            return {
+                "default_settings": {
+                    "queue": "interactive",
+                    "num_cores": 2,
+                    "memory_gb": 16,
+                    "job_name": "myvnc_vncserver"
+                },
+                "available_queues": ["interactive"],
+                "memory_options_gb": [2, 4, 8, 16, 32, 64],
+                "core_options": [1, 2, 4, 8]
+            }
     except json.JSONDecodeError:
         print(f"Warning: Invalid JSON in LSF configuration file")
-        return {}
+        # Try to load default config
+        try:
+            with open(default_config_path, 'r') as f:
+                print(f"Using default LSF configuration from {default_config_path}")
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            print(f"Warning: Default LSF configuration file not found or invalid at {default_config_path}")
+            return {
+                "default_settings": {
+                    "queue": "interactive",
+                    "num_cores": 2,
+                    "memory_gb": 16,
+                    "job_name": "myvnc_vncserver"
+                },
+                "available_queues": ["interactive"],
+                "memory_options_gb": [2, 4, 8, 16, 32, 64],
+                "core_options": [1, 2, 4, 8]
+            }
 
 def source_lsf_environment():
     """Source the LSF environment file"""
