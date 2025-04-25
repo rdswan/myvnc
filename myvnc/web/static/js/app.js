@@ -142,19 +142,84 @@ async function loadLSFConfig() {
         populateSelect('lsf-queue', lsfConfig.queues, lsfConfig.defaults.queue);
         populateSelect('lsf-cores', lsfConfig.core_options, lsfConfig.defaults.num_cores);
         
-        // Set memory slider default value (directly using GB values)
+        // Set memory slider based on memory options from config
         const memorySlider = document.getElementById('lsf-memory');
         const memoryValue = document.getElementById('memory-value');
-        if (memorySlider && memoryValue) {
-            // Get default memory in GB
-            const defaultMemoryGB = lsfConfig.defaults.memory_gb || 16;
-            // Round to nearest step value
-            const stepSize = parseInt(memorySlider.step) || 4;
-            const roundedValue = Math.max(2, Math.round(defaultMemoryGB / stepSize) * stepSize);
+        if (memorySlider && memoryValue && lsfConfig.memory_options_gb) {
+            // Sort memory options to ensure they're in ascending order
+            const memoryOptions = [...lsfConfig.memory_options_gb].sort((a, b) => a - b);
             
-            // Set the slider value
-            memorySlider.value = roundedValue;
-            memoryValue.textContent = roundedValue;
+            // Set slider min, max and step based on available options
+            if (memoryOptions.length > 0) {
+                // Update slider attributes
+                memorySlider.min = memoryOptions[0];
+                memorySlider.max = memoryOptions[memoryOptions.length - 1];
+                
+                // Get default memory in GB
+                const defaultMemoryGB = lsfConfig.defaults.memory_gb || 16;
+                
+                // Find the closest memory option to default
+                let closestOption = memoryOptions[0];
+                let minDiff = Math.abs(defaultMemoryGB - memoryOptions[0]);
+                
+                for (let i = 1; i < memoryOptions.length; i++) {
+                    const diff = Math.abs(defaultMemoryGB - memoryOptions[i]);
+                    if (diff < minDiff) {
+                        minDiff = diff;
+                        closestOption = memoryOptions[i];
+                    }
+                }
+                
+                // Set the slider to the closest option
+                memorySlider.value = closestOption;
+                memoryValue.textContent = closestOption;
+                
+                // Store memory options as a data attribute for later use
+                memorySlider.dataset.memoryOptions = JSON.stringify(memoryOptions);
+                
+                // Update memory value event listener to snap to valid options
+                memorySlider.addEventListener('input', function() {
+                    const options = JSON.parse(this.dataset.memoryOptions);
+                    const currentValue = parseInt(this.value);
+                    
+                    // Find the closest memory option
+                    let closestOption = options[0];
+                    let minDiff = Math.abs(currentValue - options[0]);
+                    
+                    for (let i = 1; i < options.length; i++) {
+                        const diff = Math.abs(currentValue - options[i]);
+                        if (diff < minDiff) {
+                            minDiff = diff;
+                            closestOption = options[i];
+                        }
+                    }
+                    
+                    // Update display value with the closest option
+                    memoryValue.textContent = closestOption;
+                });
+                
+                // Add change event to snap to valid value when done sliding
+                memorySlider.addEventListener('change', function() {
+                    const options = JSON.parse(this.dataset.memoryOptions);
+                    const currentValue = parseInt(this.value);
+                    
+                    // Find the closest memory option
+                    let closestOption = options[0];
+                    let minDiff = Math.abs(currentValue - options[0]);
+                    
+                    for (let i = 1; i < options.length; i++) {
+                        const diff = Math.abs(currentValue - options[i]);
+                        if (diff < minDiff) {
+                            minDiff = diff;
+                            closestOption = options[i];
+                        }
+                    }
+                    
+                    // Update the actual slider value to snap to the valid option
+                    this.value = closestOption;
+                    memoryValue.textContent = closestOption;
+                });
+            }
         }
     } catch (error) {
         console.error('Failed to load LSF configuration:', error);
@@ -325,7 +390,30 @@ async function createVNCSession(event) {
         // Make sure memory_gb is included from the slider
         const memorySlider = document.getElementById('lsf-memory');
         if (memorySlider) {
-            data['memory_gb'] = memorySlider.value;
+            // Get the current value
+            const currentValue = parseInt(memorySlider.value);
+            
+            // If we have memory options stored, ensure we use a valid option
+            if (memorySlider.dataset.memoryOptions) {
+                const options = JSON.parse(memorySlider.dataset.memoryOptions);
+                
+                // Find the closest memory option
+                let closestOption = options[0];
+                let minDiff = Math.abs(currentValue - options[0]);
+                
+                for (let i = 1; i < options.length; i++) {
+                    const diff = Math.abs(currentValue - options[i]);
+                    if (diff < minDiff) {
+                        minDiff = diff;
+                        closestOption = options[i];
+                    }
+                }
+                
+                data['memory_gb'] = closestOption.toString();
+            } else {
+                // Fallback if no memory options are available
+                data['memory_gb'] = currentValue.toString();
+            }
         }
         
         console.log('Submitting data:', data);
