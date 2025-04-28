@@ -29,6 +29,7 @@ from myvnc.utils.auth_manager import AuthManager
 from myvnc.utils.lsf_manager import LSFManager
 from myvnc.utils.config_manager import ConfigManager
 from myvnc.utils.vnc_manager import VNCManager
+from myvnc.utils.log_manager import setup_logging, get_logger, get_current_log_file
 
 class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
     """Handler for VNC manager CGI requests"""
@@ -39,6 +40,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         self.auth_manager = AuthManager()
         self.vnc_manager = VNCManager()
         self.directory = os.path.join(os.path.dirname(__file__), "static")
+        self.logger = get_logger()
         
         # Load server configuration
         self.server_config = load_server_config()
@@ -150,7 +152,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(content)
         except Exception as e:
-            print(f"Error serving file {filename}: {str(e)}", file=sys.stderr)
+            self.logger.error(f"Error serving file {filename}: {str(e)}")
             self.send_error(500)
     
     def check_auth(self):
@@ -382,22 +384,26 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                         if 'memory_gb' not in job:
                             job['memory_gb'] = 16  # Default value
                         
-                        # Get connection details
-                        conn_details = self.lsf_manager.get_vnc_connection_details(job['job_id'])
-                        if conn_details:
-                            if 'port' in conn_details:
-                                job['port'] = conn_details['port']
-                            if 'display' in conn_details:
-                                job['display'] = conn_details['display']
-                            
-                            # Use the actual submit_time instead of hardcoding
-                            if 'submit_time' in job:
-                                job['submit_time_raw'] = job['submit_time']
+                        # Ensure host is present
+                        if 'exec_host' not in job or not job['exec_host'] or job['exec_host'] == 'N/A':
+                            self.logger.warning(f"Job {job['job_id']} has no exec_host specified")
+                        else:
+                            job['host'] = job['exec_host']  # Duplicate for backward compatibility
+                                                
+                        # Get connection details if needed
+                        if ('display' not in job or 'port' not in job) and job.get('host') and job.get('host') != 'N/A':
+                            conn_details = self.lsf_manager.get_vnc_connection_details(job['job_id'])
+                            if conn_details:
+                                if 'port' in conn_details and 'port' not in job:
+                                    job['port'] = conn_details['port']
+                                if 'display' in conn_details and 'display' not in job:
+                                    job['display'] = conn_details['display']
                 except Exception as e:
-                    print(f"Error getting connection details for job {job.get('job_id', 'unknown')}: {str(e)}", file=sys.stderr)
+                    self.logger.error(f"Error processing job {job.get('job_id', 'unknown')}: {str(e)}")
             
             self.send_json_response(jobs)
         except Exception as e:
+            self.logger.error(f"Error handling VNC sessions: {str(e)}")
             self.send_error_response(str(e))
     
     def handle_lsf_config(self):
@@ -448,7 +454,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 "command_history": formatted_history
             })
         except Exception as e:
-            print(f"Error handling debug commands: {str(e)}", file=sys.stderr)
+            self.logger.error(f"Error handling debug commands: {str(e)}")
             traceback.print_exc()
             self.send_json_response({
                 "success": False,
@@ -483,7 +489,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 "config": config_info
             })
         except Exception as e:
-            print(f"Error handling debug environment: {str(e)}", file=sys.stderr)
+            self.logger.error(f"Error handling debug environment: {str(e)}")
             traceback.print_exc()
             self.send_json_response({
                 "success": False,
@@ -550,10 +556,10 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             # Read request body
             content_length = int(self.headers.get("Content-Length", 0))
             post_data = self.rfile.read(content_length).decode("utf-8")
-            print(f"Received raw post data: {post_data}")
+            self.logger.debug(f"Received raw post data: {post_data}")
             
             data = json.loads(post_data)
-            print(f"Parsed JSON data: {data}")
+            self.logger.debug(f"Parsed JSON data: {data}")
             
             # Get default settings from config
             vnc_defaults = self.config_manager.get_vnc_defaults()
@@ -577,8 +583,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 "job_name": lsf_defaults.get("job_name", "myvnc_vncserver")
             }
             
-            print(f"Submitting VNC job with config: {vnc_settings}")
-            print(f"Using LSF settings: {lsf_settings}")
+            self.logger.info(f"Submitting VNC job with config: {vnc_settings}")
+            self.logger.info(f"Using LSF settings: {lsf_settings}")
             
             # Submit VNC job
             job_id = self.lsf_manager.submit_vnc_job(vnc_settings, lsf_settings)
@@ -592,7 +598,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             })
         except Exception as e:
             error_msg = f"Error creating VNC session: {str(e)}"
-            print(error_msg, file=sys.stderr)
+            self.logger.error(error_msg)
             traceback.print_exc()
             self.send_json_response({
                 "success": False,
@@ -620,6 +626,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 raise ValueError("No job ID provided")
             
             # Kill VNC job using the correct method name
+            self.logger.info(f"Stopping VNC job: {job_id}")
             result = self.lsf_manager.kill_vnc_job(job_id)
             
             # Return result
@@ -630,7 +637,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             })
         except Exception as e:
             error_msg = f"Error stopping VNC session: {str(e)}"
-            print(error_msg, file=sys.stderr)
+            self.logger.error(error_msg)
             self.send_json_response({
                 "success": False,
                 "message": error_msg
@@ -649,6 +656,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             
             if not session_id:
                 raise ValueError("No session ID provided")
+            
+            self.logger.info(f"Copying VNC session: {session_id}")
             
             # Get session details
             active_sessions = self.lsf_manager.get_active_vnc_jobs()
@@ -695,7 +704,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             })
         except Exception as e:
             error_msg = f"Error copying VNC session: {str(e)}"
-            print(error_msg, file=sys.stderr)
+            self.logger.error(error_msg)
             self.send_json_response({
                 "success": False,
                 "message": error_msg
@@ -703,102 +712,78 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
 
 def load_server_config():
     """Load server configuration from JSON file"""
-    config_path = Path(__file__).parent.parent.parent / "config" / "server_config.json"
-    default_config_path = Path(__file__).parent.parent.parent / "config" / "default_server_config.json"
+    config_path = Path(__file__).parent.parent.parent / "config" / "default_server_config.json"
     
     try:
         with open(config_path, 'r') as f:
             return json.load(f)
     except FileNotFoundError:
         print(f"Warning: Server configuration file not found at {config_path}")
-        # Try to load default config
-        try:
-            with open(default_config_path, 'r') as f:
-                print(f"Using default server configuration from {default_config_path}")
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            print(f"Warning: Default server configuration file not found or invalid at {default_config_path}")
-            return {
-                "host": "localhost",
-                "port": 8000,
-                "debug": False,
-                "max_connections": 5,
-                "timeout": 30
-            }
+        return {
+            "host": "aus-misc",
+            "port": 9143,
+            "debug": False,
+            "max_connections": 5,
+            "timeout": 30
+        }
     except json.JSONDecodeError:
         print(f"Warning: Invalid JSON in server configuration file")
-        # Try to load default config
-        try:
-            with open(default_config_path, 'r') as f:
-                print(f"Using default server configuration from {default_config_path}")
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            print(f"Warning: Default server configuration file not found or invalid at {default_config_path}")
-            return {
-                "host": "localhost",
-                "port": 8000,
-                "debug": False,
-                "max_connections": 5,
-                "timeout": 30
-            }
+        return {
+            "host": "aus-misc",
+            "port": 9143,
+            "debug": False,
+            "max_connections": 5,
+            "timeout": 30
+        }
 
 def load_lsf_config():
     """Load LSF configuration from JSON file"""
-    config_path = Path(__file__).parent.parent.parent / "config" / "lsf_config.json"
+    # Use a basic console logger until the full logging system is set up
+    logger = get_logger()
     default_config_path = Path(__file__).parent.parent.parent / "config" / "default_lsf_config.json"
     
     try:
-        with open(config_path, 'r') as f:
+        with open(default_config_path, 'r') as f:
             return json.load(f)
-    except FileNotFoundError:
-        print(f"Warning: LSF configuration file not found at {config_path}")
-        # Try to load default config
-        try:
-            with open(default_config_path, 'r') as f:
-                print(f"Using default LSF configuration from {default_config_path}")
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            print(f"Warning: Default LSF configuration file not found or invalid at {default_config_path}")
-            return {
-                "default_settings": {
-                    "queue": "interactive",
-                    "num_cores": 2,
-                    "memory_gb": 16,
-                    "job_name": "myvnc_vncserver"
-                },
-                "available_queues": ["interactive"],
-                "memory_options_gb": [2, 4, 8, 16, 32, 64],
-                "core_options": [1, 2, 4, 8]
-            }
-    except json.JSONDecodeError:
-        print(f"Warning: Invalid JSON in LSF configuration file")
-        # Try to load default config
-        try:
-            with open(default_config_path, 'r') as f:
-                print(f"Using default LSF configuration from {default_config_path}")
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            print(f"Warning: Default LSF configuration file not found or invalid at {default_config_path}")
-            return {
-                "default_settings": {
-                    "queue": "interactive",
-                    "num_cores": 2,
-                    "memory_gb": 16,
-                    "job_name": "myvnc_vncserver"
-                },
-                "available_queues": ["interactive"],
-                "memory_options_gb": [2, 4, 8, 16, 32, 64],
-                "core_options": [1, 2, 4, 8]
-            }
+    except (FileNotFoundError, json.JSONDecodeError):
+        logger.warning(f"Warning: Default LSF configuration file not found or invalid at {default_config_path}")
+        return {
+            "default_settings": {
+                "queue": "interactive",
+                "num_cores": 2,
+                "memory_gb": 16,
+                "job_name": "myvnc_vncserver"
+            },
+            "available_queues": ["interactive"],
+            "memory_options_gb": [2, 4, 8, 16, 32, 64],
+            "core_options": [1, 2, 4, 8]
+        }
 
 def source_lsf_environment():
     """Source the LSF environment file"""
+    logger = get_logger()
     lsf_config = load_lsf_config()
     env_file = lsf_config.get("env_file")
     
     if not env_file or not os.path.exists(env_file):
-        print(f"Warning: LSF environment file not found at {env_file}")
-        return False
+        # Try common LSF environment file locations
+        common_locations = [
+            "/site/lsf/aus-hw/conf/profile.lsf",
+            "/etc/lsf/conf/profile.lsf",
+            "/opt/lsf/conf/profile.lsf"
+        ]
+        
+        for location in common_locations:
+            if os.path.exists(location):
+                env_file = location
+                logger.info(f"Using LSF environment file: {env_file}")
+                break
+        else:
+            # No LSF environment file found
+            logger.warning("No LSF environment file found")
+            return False
+    else:
+        logger.info(f"Using LSF environment file: {env_file}")
     
     try:
         # Source the environment file and capture the environment variables
@@ -811,10 +796,10 @@ def source_lsf_environment():
                 key, value = line.split('=', 1)
                 os.environ[key] = value
         proc.communicate()  # Ensure process completes
-        print(f"Successfully sourced LSF environment from {env_file}")
+        logger.info(f"Successfully sourced LSF environment from {env_file}")
         return True
     except Exception as e:
-        print(f"Error sourcing LSF environment: {str(e)}")
+        logger.error(f"Error sourcing LSF environment: {str(e)}")
         return False
 
 def run_server(host=None, port=None, directory=None, config=None):
@@ -827,8 +812,21 @@ def run_server(host=None, port=None, directory=None, config=None):
         config = load_server_config()
     
     # Override with command line arguments if provided
-    host = host or config.get("host", "localhost")
-    port = port or config.get("port", 8000)
+    host = host or config.get("host", "aus-misc")
+    port = port or config.get("port", 9143)
+    
+    # If host is 'localhost' or '127.0.0.1', replace it with the fully qualified domain name 
+    # for better remote access
+    if host == "localhost" or host == "127.0.0.1":
+        try:
+            fqdn = socket.getfqdn()
+            if fqdn != "localhost" and fqdn != "127.0.0.1":
+                print(f"Converting localhost to fully qualified domain name: {fqdn}")
+                host = fqdn
+                # Also update the config for other parts of the application
+                config["host"] = fqdn
+        except Exception as e:
+            print(f"Could not determine fully qualified domain name: {str(e)}")
     
     if directory is None:
         # Use the web directory
@@ -869,7 +867,21 @@ def run_server(host=None, port=None, directory=None, config=None):
         if "timeout" in config:
             httpd.timeout = config["timeout"]
         
-        print(f"Starting server on http://{host}:{port}")
+        # Get fully qualified hostname for display
+        display_host = host
+        if host == "localhost" or host == "127.0.0.1":
+            try:
+                display_host = socket.getfqdn()
+            except:
+                pass
+        
+        print(f"Starting server on http://{display_host}:{port}")
+        
+        # Display log file path
+        log_file = get_current_log_file()
+        if log_file:
+            print(f"Log file: {log_file.absolute()}")
+        
         if config.get("debug", False):
             print(f"Debug mode: ON")
             print(f"Config: {config}")

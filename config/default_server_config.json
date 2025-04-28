@@ -1,9 +1,10 @@
 {
-    "host": "localhost",
-    "port": 8000,
-    "debug": false,
+    "host": "aus-misc",
+    "port": 9143,
+    "debug": true,
     "max_connections": 5,
     "timeout": 30,
     "authentication": "",
-    "auth_notes": "To enable Entra SSO, set authentication to 'Entra'"
-} 
+    "auth_notes": "To enable Entra SSO, set authentication to 'Entra'",
+    "logdir": "logs"
+}

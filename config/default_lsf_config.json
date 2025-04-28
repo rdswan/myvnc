@@ -27,9 +27,17 @@
     ],
     "available_sites": [
         {
-            "name": "Default",
-            "domain": "local"
+            "name": "Toronto",
+            "domain": "yyz"
+        },
+        {
+            "name": "Austin",
+            "domain": "aus"
+        },
+        {
+            "name": "Bangalore",
+            "domain": "bglr"
         }
     ],
-    "env_file": "/etc/lsf/conf/profile.lsf"
+    "env_file": "/site/lsf/aus-hw/conf/profile.lsf"
 } 
