@@ -6,5 +6,5 @@
     "timeout": 30,
     "authentication": "",
     "auth_notes": "To enable Entra SSO, set authentication to 'Entra'",
-    "logdir": "logs"
+    "logdir": "/localdev/myvnc/logs"
 }
