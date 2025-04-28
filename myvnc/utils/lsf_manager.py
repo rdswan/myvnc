@@ -9,7 +9,7 @@ import sys
 import time
 import os
 from typing import Dict, List, Optional, Tuple
-import datetime
+from datetime import datetime
 import json
 from pathlib import Path
 import signal
@@ -197,11 +197,23 @@ class LSFManager:
             RuntimeError: If the command fails
         """
         cmd_str = ' '.join(cmd)
+        # Log the command being executed to stdout and logger with the specified format
+        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - INFO - Executing command: {cmd_str}")
+        self.logger.info(f"Executing command: {cmd_str}")
+        
         try:
             # Compatible with Python 3.6 - removed text=True
             result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout = result.stdout.decode('utf-8')
             stderr = result.stderr.decode('utf-8')
+            
+            # Log the command output
+            if stdout:
+                print(f"COMMAND OUTPUT: {stdout}")
+                self.logger.info(f"Command output: {stdout}")
+            if stderr:
+                print(f"COMMAND STDERR: {stderr}")
+                self.logger.info(f"Command stderr: {stderr}")
             
             # Add to command history for debugging
             self.command_history.append({
@@ -214,11 +226,21 @@ class LSFManager:
             return stdout
         except subprocess.CalledProcessError as e:
             stderr = e.stderr.decode('utf-8')
+            stdout = e.stdout.decode('utf-8') if e.stdout else ''
+            
+            # Log the error
+            error_msg = f"Command failed: {stderr}"
+            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - ERROR - Command failed: {cmd_str}")
+            print(f"COMMAND STDOUT: {stdout}")
+            print(f"COMMAND STDERR: {stderr}")
+            self.logger.error(f"Command failed: {cmd_str}")
+            self.logger.error(f"Command stdout: {stdout}")
+            self.logger.error(f"Command stderr: {stderr}")
             
             # Add failed command to history for debugging
             self.command_history.append({
                 'command': cmd_str,
-                'stdout': e.stdout.decode('utf-8') if e.stdout else '',
+                'stdout': stdout,
                 'stderr': stderr,
                 'success': False
             })
@@ -272,7 +294,8 @@ class LSFManager:
             
             # Convert command list to string for logging
             cmd_str = ' '.join(str(arg) for arg in bsub_cmd)
-            print(f"About to execute LSF command: {cmd_str}")
+            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - INFO - Executing command: {cmd_str}")
+            self.logger.info(f"Executing command: {cmd_str}")
             
             # Add to command history before execution
             cmd_entry = {
@@ -332,7 +355,7 @@ class LSFManager:
                     'stdout': '',
                     'stderr': str(e),
                     'success': False,
-                    'timestamp': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 })
             raise
     
@@ -346,10 +369,17 @@ class LSFManager:
         Returns:
             True if successful, False otherwise
         """
+        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - INFO - Executing command: bkill {job_id}")
+        self.logger.info(f"Killing VNC job: {job_id}")
+        
         try:
-            self._run_command(['bkill', job_id])
+            result = self._run_command(['bkill', job_id])
+            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - INFO - Command result: {result}")
+            self.logger.info(f"Kill result: Job {job_id} killed successfully: {result}")
             return True
-        except RuntimeError:
+        except RuntimeError as e:
+            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - ERROR - Failed to kill job {job_id}: {str(e)}")
+            self.logger.error(f"Kill failed: Failed to kill job {job_id}: {str(e)}")
             return False
     
     def get_active_vnc_jobs(self) -> List[Dict]:
@@ -367,7 +397,8 @@ class LSFManager:
             
             # Use bjobs with the exact format specified by the user
             cmd = f'bjobs -o "jobid stat user queue first_host run_time command delimiter=\';\'" -noheader -u {user} -J myvnc_vncserver'
-            self.logger.debug(f"Running LSF jobs command: {cmd}")
+            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - INFO - Executing command: {cmd}")
+            self.logger.info(f"Executing command: {cmd}")
             
             proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             output, error = proc.communicate()
@@ -556,15 +587,15 @@ class LSFManager:
                                 month = month_map.get(month_str, 1)
                                 
                                 # Use current year, but check if date is in future
-                                current_date = datetime.datetime.now()
+                                current_date = datetime.now()
                                 year = current_date.year
                                 
                                 # Create the date with the current year
-                                submit_date = datetime.datetime(year, month, int(day), int(hour), int(minute))
+                                submit_date = datetime(year, month, int(day), int(hour), int(minute))
                                 
                                 # If the date is in the future, it's likely from the previous year
                                 if submit_date > current_date:
-                                    submit_date = datetime.datetime(year - 1, month, int(day), int(hour), int(minute))
+                                    submit_date = datetime(year - 1, month, int(day), int(hour), int(minute))
                                 
                                 # Format the date as string
                                 submit_time = submit_date.strftime("%Y-%m-%d %H:%M:%S")
@@ -578,7 +609,7 @@ class LSFManager:
                                 month = month_map.get(month_str, 1)
                                 
                                 # Create the date
-                                submit_date = datetime.datetime(int(year), month, int(day), 0, 0)
+                                submit_date = datetime(int(year), month, int(day), 0, 0)
                                 
                                 # Format the date as string
                                 submit_time = submit_date.strftime("%Y-%m-%d %H:%M:%S")
@@ -589,10 +620,10 @@ class LSFManager:
                                 hour, minute = hhmm_match.groups()
                                 
                                 # Use current date
-                                current_date = datetime.datetime.now()
+                                current_date = datetime.now()
                                 
                                 # Create datetime with today's date and the given time
-                                submit_date = datetime.datetime(
+                                submit_date = datetime(
                                     current_date.year, 
                                     current_date.month, 
                                     current_date.day,
@@ -663,7 +694,8 @@ class LSFManager:
             
             # Use simple bjobs command to get job list
             cmd = ['bjobs', '-u', user, '-J', 'myvnc_vncserver', '-w']
-            self.logger.debug(f"Running fallback LSF jobs command: {' '.join(cmd)}")
+            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - INFO - Executing command: {' '.join(cmd)}")
+            self.logger.info(f"Executing command: {' '.join(cmd)}")
             
             output = self._run_command(cmd)
             
@@ -712,15 +744,15 @@ class LSFManager:
                                 month = month_map.get(month_str, 1)
                                 
                                 # Use current year, but check if date is in future
-                                current_date = datetime.datetime.now()
+                                current_date = datetime.now()
                                 year = current_date.year
                                 
                                 # Create the date with the current year
-                                submit_date = datetime.datetime(year, month, int(day), int(hour), int(minute))
+                                submit_date = datetime(year, month, int(day), int(hour), int(minute))
                                 
                                 # If the date is in the future, it's likely from the previous year
                                 if submit_date > current_date:
-                                    submit_date = datetime.datetime(year - 1, month, int(day), int(hour), int(minute))
+                                    submit_date = datetime(year - 1, month, int(day), int(hour), int(minute))
                                 
                                 # Format the date as string
                                 submit_time = submit_date.strftime("%Y-%m-%d %H:%M:%S")
@@ -734,7 +766,7 @@ class LSFManager:
                                 month = month_map.get(month_str, 1)
                                 
                                 # Create the date
-                                submit_date = datetime.datetime(int(year), month, int(day), 0, 0)
+                                submit_date = datetime(int(year), month, int(day), 0, 0)
                                 
                                 # Format the date as string
                                 submit_time = submit_date.strftime("%Y-%m-%d %H:%M:%S")
@@ -745,10 +777,10 @@ class LSFManager:
                                 hour, minute = hhmm_match.groups()
                                 
                                 # Use current date
-                                current_date = datetime.datetime.now()
+                                current_date = datetime.now()
                                 
                                 # Create datetime with today's date and the given time
-                                submit_date = datetime.datetime(
+                                submit_date = datetime(
                                     current_date.year, 
                                     current_date.month, 
                                     current_date.day,
