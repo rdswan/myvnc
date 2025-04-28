@@ -86,6 +86,17 @@ The `manage.py` script provides several commands to control the server:
    ./manage.py status
    ```
 
+The management script uses the Python interpreter from the virtual environment (`.venv_py3`). If you encounter a "ModuleNotFoundError: No module named 'psutil'" error, make sure you have activated the virtual environment or installed psutil in your system Python:
+
+```bash
+# Using the virtual environment
+source .venv_py3/bin/activate
+pip install psutil
+
+# OR system-wide installation
+pip3 install psutil --user
+```
+
 The status command displays information about the running server, including:
 - PID (Process ID)
 - Host and port
