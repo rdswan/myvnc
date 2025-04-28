@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/proj_risc/user_dev/bswan/tools_src/myvnc/.venv_py3/bin/python3
 """
 Management script for the MyVNC server
 
