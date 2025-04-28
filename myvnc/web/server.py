@@ -716,7 +716,9 @@ def load_server_config():
     
     try:
         with open(config_path, 'r') as f:
-            return json.load(f)
+            config = json.load(f)
+            print(f"DEBUG: Loaded server config: {config}")
+            return config
     except FileNotFoundError:
         print(f"Warning: Server configuration file not found at {config_path}")
         return {
@@ -724,7 +726,8 @@ def load_server_config():
             "port": 9143,
             "debug": False,
             "max_connections": 5,
-            "timeout": 30
+            "timeout": 30,
+            "logdir": "logs"  # Ensure logdir is set in the default config
         }
     except json.JSONDecodeError:
         print(f"Warning: Invalid JSON in server configuration file")
@@ -733,7 +736,8 @@ def load_server_config():
             "port": 9143,
             "debug": False,
             "max_connections": 5,
-            "timeout": 30
+            "timeout": 30,
+            "logdir": "logs"  # Ensure logdir is set in the default config
         }
 
 def load_lsf_config():
@@ -804,13 +808,30 @@ def source_lsf_environment():
 
 def run_server(host=None, port=None, directory=None, config=None):
     """Run the web server"""
-    # Source LSF environment
-    source_lsf_environment()
-    
     # Load configuration if not provided
     if config is None:
         config = load_server_config()
     
+    # Print the configuration for debugging
+    print(f"DEBUG: Config passed to run_server: {config}")
+    
+    # Just get the existing logger rather than setting up logging again
+    logger = get_logger()
+    
+    # Get log file path and display it clearly
+    log_file = get_current_log_file()
+    if log_file:
+        log_path = log_file.absolute()
+        # Print this message to both console and log file
+        logger.info(f"Server logs are being written to: {log_path}")
+        # Also print to stdout for visibility
+        print(f"\nINFO: Full log file path: {log_path}\n")
+    else:
+        print("\nWARNING: No log file is being used. Logs are only being written to console.\n")
+    
+    # Source LSF environment after logging is set up
+    source_lsf_environment()
+
     # Override with command line arguments if provided
     host = host or config.get("host", "aus-misc")
     port = port or config.get("port", 9143)
@@ -821,12 +842,12 @@ def run_server(host=None, port=None, directory=None, config=None):
         try:
             fqdn = socket.getfqdn()
             if fqdn != "localhost" and fqdn != "127.0.0.1":
-                print(f"Converting localhost to fully qualified domain name: {fqdn}")
+                logger.info(f"Converting localhost to fully qualified domain name: {fqdn}")
                 host = fqdn
                 # Also update the config for other parts of the application
                 config["host"] = fqdn
         except Exception as e:
-            print(f"Could not determine fully qualified domain name: {str(e)}")
+            logger.warning(f"Could not determine fully qualified domain name: {str(e)}")
     
     if directory is None:
         # Use the web directory
@@ -847,15 +868,15 @@ def run_server(host=None, port=None, directory=None, config=None):
         sock.close()
     except OSError as e:
         if e.errno == 99:  # Cannot assign requested address
-            print(f"Error: Cannot bind to address {host}:{port} - Address not available")
-            print(f"       Verify that the host address is correct and exists on this machine")
+            logger.error(f"Error: Cannot bind to address {host}:{port} - Address not available")
+            logger.error(f"       Verify that the host address is correct and exists on this machine")
             return
         elif e.errno == 98:  # Address already in use
-            print(f"Error: Cannot bind to address {host}:{port} - Port is already in use")
-            print(f"       Check if another instance of the server is already running")
+            logger.error(f"Error: Cannot bind to address {host}:{port} - Port is already in use")
+            logger.error(f"       Check if another instance of the server is already running")
             return
         else:
-            print(f"Error: Cannot bind to address {host}:{port} - {e}")
+            logger.error(f"Error: Cannot bind to address {host}:{port} - {e}")
             return
     
     # Create server
@@ -875,23 +896,27 @@ def run_server(host=None, port=None, directory=None, config=None):
             except:
                 pass
         
-        print(f"Starting server on http://{display_host}:{port}")
+        # Log server startup
+        logger.info(f"Starting server on http://{display_host}:{port}")
         
-        # Display log file path
+        # Get log file path and log it clearly
         log_file = get_current_log_file()
         if log_file:
-            print(f"Log file: {log_file.absolute()}")
+            log_path = log_file.absolute()
+            logger.info(f"All server logs will be written to: {log_path}")
+            # Also print to stdout for visibility
+            print(f"INFO: Server logs are being written to: {log_path}")
         
         if config.get("debug", False):
-            print(f"Debug mode: ON")
-            print(f"Config: {config}")
+            logger.info(f"Debug mode: ON")
+            logger.debug(f"Config: {config}")
         
         try:
             httpd.serve_forever()
         except KeyboardInterrupt:
-            print("Server stopped")
+            logger.info("Server stopped")
     except Exception as e:
-        print(f"Error starting server: {str(e)}")
+        logger.error(f"Error starting server: {str(e)}")
         return
 
 def parse_args():
