@@ -1,3 +1,7 @@
+"""
+LSF Manager for submitting and monitoring LSF jobs
+"""
+
 import subprocess
 import shlex
 import re
@@ -8,8 +12,10 @@ from typing import Dict, List, Optional, Tuple
 import datetime
 import json
 from pathlib import Path
+import signal
 
 from myvnc.utils.config_manager import ConfigManager
+from myvnc.utils.log_manager import get_logger
 
 class LSFManager:
     """Manages interactions with the LSF job scheduler via command line"""
@@ -26,6 +32,10 @@ class LSFManager:
         
         # Initialize config manager for site domain lookups
         self.config_manager = ConfigManager()
+        
+        # Initialize environment and logger
+        self.environment = os.environ.copy()
+        self.logger = get_logger()
         
         try:
             self._check_lsf_available()
@@ -167,6 +177,7 @@ class LSFManager:
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout = result.stdout.decode('utf-8').strip()
             print(f"LSF available at: {stdout}", file=sys.stderr)
+            self.bjobs_path = stdout
         except subprocess.CalledProcessError as e:
             stderr = e.stderr.decode('utf-8')
             print(f"LSF not available: {stderr}", file=sys.stderr)
@@ -231,7 +242,7 @@ class LSFManager:
             
             # Build LSF command with -R for memory instead of -M
             bsub_cmd = [
-                'bsub',
+            'bsub',
                 '-q', lsf_config.get('queue', 'interactive'),
                 '-n', str(lsf_config.get('num_cores', 2)),
                 '-R', f"rusage[mem={memory_gb}G]",
@@ -321,7 +332,7 @@ class LSFManager:
                     'stdout': '',
                     'stderr': str(e),
                     'success': False,
-                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    'timestamp': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 })
             raise
     
@@ -354,33 +365,39 @@ class LSFManager:
             # Get current user
             user = os.environ.get('USER', '')
             
-            # Use bjobs with output formatting and delimiter for easier parsing
-            # Format includes the delimiter in quotes as part of the -o option
-            cmd = f'bjobs -o "jobid stat user queue first_host run_time submit_time command delimiter=\';\'" -noheader -u {user} -J myvnc_vncserver'
-            print(f"Running LSF jobs command: {cmd}", file=sys.stderr)
+            # Use bjobs with the exact format specified by the user
+            cmd = f'bjobs -o "jobid stat user queue first_host run_time command delimiter=\';\'" -noheader -u {user} -J myvnc_vncserver'
+            self.logger.debug(f"Running LSF jobs command: {cmd}")
             
             proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             output, error = proc.communicate()
             
             if error:
-                print(f"Error in bjobs command: {error.decode('utf-8')}", file=sys.stderr)
-                return jobs
+                error_text = error.decode('utf-8').strip()
+                if "delimiter" in error_text and "Illegal job ID" in error_text:
+                    # Older LSF versions don't support the delimiter parameter
+                    # Fall back to standard bjobs command
+                    self.logger.warning(f"LSF version doesn't support delimiter: {error_text}")
+                    return self._get_active_vnc_jobs_standard()
+                else:
+                    self.logger.error(f"Error in bjobs command: {error_text}")
+                    return jobs
             
             lines = output.decode('utf-8').strip().split('\n')
-            print(f"bjobs command output:", file=sys.stderr)
-            print(f"{len(lines)} line(s) in output.", file=sys.stderr)
+            self.logger.debug(f"bjobs command output: {len(lines)} line(s)")
+            
             if not lines or (len(lines) == 1 and not lines[0].strip()):
-                print(f"No jobs found in output.", file=sys.stderr)
+                self.logger.info(f"No jobs found in output.")
                 return jobs
-                
+            
             # Process each job line
             for line in lines:
-                print(f"Processing job line: {line}", file=sys.stderr)
+                self.logger.debug(f"Processing job line: {line}")
                 
                 # Split the line by the delimiter
                 fields = line.split(';')
-                if len(fields) < 7:  # Need at least 7 fields
-                    print(f"Incomplete fields in line, expected at least 7, got {len(fields)}", file=sys.stderr)
+                if len(fields) < 6:  # Need at least jobid, status, user, queue, first_host, run_time
+                    self.logger.warning(f"Incomplete fields in line, expected at least 6, got {len(fields)}")
                     continue
                     
                 # Extract job information from fields
@@ -389,108 +406,96 @@ class LSFManager:
                     status = fields[1].strip()
                     user = fields[2].strip()
                     queue = fields[3].strip()
-                    host = fields[4].strip()  # Extract first_host
-                    run_time_str = fields[5].strip()
-                    submit_time_str = fields[6].strip()
-                    command = ';'.join(fields[7:]).strip()  # Command might contain semicolons itself
+                    first_host = fields[4].strip()
+                    run_time_raw = fields[5].strip()
+                    command = ';'.join(fields[6:]).strip() if len(fields) > 6 else ""
                     
-                    print(f"Extracted fields: job_id={job_id}, status={status}, user={user}, queue={queue}, host={host}", file=sys.stderr)
-                    print(f"Runtime field: '{run_time_str}'", file=sys.stderr)
-                    
-                    # Parse runtime in seconds
-                    run_time_seconds = 0
+                    # Format runtime from the run_time_raw field
+                    runtime_display = "N/A"
                     try:
-                        # Extract just the numeric part from the run_time string
-                        run_time_match = re.search(r'(\d+)', run_time_str)
+                        # Extract seconds from the run_time string (format: "2580 second(s)")
+                        run_time_match = re.search(r'(\d+)', run_time_raw)
                         if run_time_match:
                             run_time_seconds = int(run_time_match.group(1))
-                            print(f"Parsed runtime: {run_time_seconds} seconds", file=sys.stderr)
+                            
+                            # Calculate days, hours, minutes
+                            days = run_time_seconds // 86400  # 86400 seconds in a day
+                            hours = (run_time_seconds % 86400) // 3600  # 3600 seconds in an hour
+                            minutes = (run_time_seconds % 3600) // 60  # 60 seconds in a minute
+                            
+                            # Format runtime string
+                            if days > 0:
+                                runtime_display = f"{days}d {hours}h"
+                            elif hours > 0:
+                                runtime_display = f"{hours}h {minutes}m"
+                            else:
+                                runtime_display = f"{minutes}m"
+                                
+                            self.logger.debug(f"Parsed runtime: {runtime_display} from {run_time_seconds} seconds")
                         else:
-                            print(f"No numeric runtime found in '{run_time_str}'", file=sys.stderr)
+                            self.logger.debug(f"No numeric runtime found in '{run_time_raw}'")
                     except (ValueError, TypeError, IndexError) as e:
-                        print(f"Error parsing runtime '{run_time_str}': {e}", file=sys.stderr)
+                        self.logger.error(f"Error parsing runtime '{run_time_raw}': {e}")
                     
-                    # Get detailed job information for display name, cores and memory information
-                    display_name = "VNC Session"  # Default fallback name
-                    num_cores = None
-                    memory_gb = None
-                    
+                    # Get detailed job information
                     try:
-                        job_detail_cmd = f'bjobs -l {job_id}'
-                        job_detail_result = subprocess.run(job_detail_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                        job_detail_output = job_detail_result.stdout.decode('utf-8')
-                        print(f"Job {job_id} detailed output snippet: \n{job_detail_output[:300]}...", file=sys.stderr)
+                        # Get detailed job info for host, cores, memory
+                        detailed_cmd = ['bjobs', '-l', job_id]
+                        detailed_output = self._run_command(detailed_cmd)
                         
-                        # Try to extract the host from detailed output
-                        host_match = re.search(r'Started on <([^>]+)>', job_detail_output)
+                        # Extract host information
+                        host_match = re.search(r'Started on <([^>]+)>', detailed_output)
                         if host_match:
-                            host = host_match.group(1)
-                            print(f"Found host from started on pattern: {host}", file=sys.stderr)
+                            exec_host = host_match.group(1)
+                            self.logger.debug(f"Found exec_host: {exec_host}")
                         else:
-                            # Second attempt to get the host
-                            host_match = re.search(r'EXEC_HOST\s*:\s*(\S+)', job_detail_output, re.IGNORECASE)
-                            if host_match:
-                                host = host_match.group(1).split(':')[0]  # Take first host if multiple
-                                print(f"Found host from EXEC_HOST pattern: {host}", file=sys.stderr)
+                            exec_host = first_host
+                            self.logger.debug(f"Using first_host as exec_host: {exec_host}")
+                        
+                        # Clean up hostname for display
+                        host = exec_host
+                        if '*' in host:
+                            host = host.split('*')[0]
+                        if ':' in host:  # Handle multiple hosts (like rv-c-35:rv-c-57)
+                            host = host.split(':')[0]
+                        if '.' in host:  # Remove domain name
+                            host = host.split('.')[0]
+                            
+                        self.logger.debug(f"Cleaned host name: '{host}'")
+                        
+                        # Default values
+                        display_name = "VNC Session"
+                        num_cores = 2  # Default
+                        memory_gb = 16  # Default in GB
                         
                         # Extract display name from command
                         name_match = re.search(r'-name\s+([^\s"]+|"([^"]+)")', command)
+                        if not name_match:
+                            name_match = re.search(r'-name\s+([^\s"]+|"([^"]+)")', detailed_output)
+                            
                         if name_match:
                             if name_match.group(2):  # If captured in quotes
                                 display_name = name_match.group(2)
                             else:
                                 display_name = name_match.group(1)
-                            print(f"Found display name from command: {display_name}", file=sys.stderr)
-                        else:
-                            # Try to extract from the detailed job output
-                            command_match = re.search(r'Command <([^>]+)>', job_detail_output)
-                            if command_match:
-                                command_detail = command_match.group(1)
-                                name_flag_match = re.search(r'-name\s+([^\s"]+|"([^"]+)")', command_detail)
-                                if name_flag_match:
-                                    if name_flag_match.group(2):  # If captured in quotes
-                                        display_name = name_flag_match.group(2)
-                                    else:
-                                        display_name = name_flag_match.group(1)
-                                    print(f"Found display name from detailed command: {display_name}", file=sys.stderr)
-                                else:
-                                    # If no -name parameter, try to use the last directory component in the CWD
-                                    cwd_match = re.search(r'CWD <([^>]+)>', job_detail_output)
-                                    if cwd_match:
-                                        cwd = cwd_match.group(1)
-                                        # Extract the last directory component
-                                        display_name = os.path.basename(cwd)
-                                        print(f"Using CWD as display name: {display_name}", file=sys.stderr)
-                        
-                        # Find resource-related lines for cores and memory
-                        resource_lines = []
-                        for line in job_detail_output.split('\n'):
-                            if 'Task(s)' in line or 'rusage[mem=' in line:
-                                resource_lines.append(line)
-                        
-                        if resource_lines:
-                            print(f"Resource related lines for job {job_id}:", file=sys.stderr)
-                            for rl in resource_lines:
-                                print(f"  - {rl}", file=sys.stderr)
-                        
-                        # Try to extract cores from Tasks pattern, e.g., "2 Task(s)"
-                        tasks_match = re.search(r'(\d+)\s+Task\(s\)', job_detail_output)
+                            self.logger.debug(f"Found display name: {display_name}")
+                            
+                        # Extract cores and memory
+                        tasks_match = re.search(r'(\d+)\s+Task\(s\)', detailed_output)
                         if tasks_match:
                             num_cores = int(tasks_match.group(1))
-                            print(f"Found cores from tasks pattern: {num_cores}", file=sys.stderr)
-                        
-                        # Try to extract memory from rusage pattern
-                        mem_match = re.search(r'rusage\[mem=(\d+(\.\d+)?)([KMG]?)\]', job_detail_output)
+                            self.logger.debug(f"Found cores: {num_cores}")
+                            
+                        mem_match = re.search(r'rusage\[mem=(\d+(\.\d+)?)([KMG]?)\]', detailed_output)
                         if mem_match:
                             mem_value = float(mem_match.group(1))
                             mem_unit = mem_match.group(3)
                             
-                            # If no unit is provided in the rusage context, assume GB
+                            # Convert to GB
                             if not mem_unit:
-                                print(f"No unit specified in rusage context, assuming GB", file=sys.stderr)
+                                self.logger.debug("No unit specified in rusage context, assuming GB")
                                 mem_unit = 'G'
                             
-                            # Convert to GB
                             if mem_unit == 'K':
                                 memory_gb = mem_value / (1024 * 1024)
                             elif mem_unit == 'M':
@@ -498,68 +503,299 @@ class LSFManager:
                             elif mem_unit == 'G':
                                 memory_gb = mem_value
                             
-                            # Round to 2 decimal places
                             memory_gb = round(memory_gb, 2)
-                            print(f"Found memory from rusage regex pattern: {memory_gb}GB (value={mem_value}, unit={mem_unit})", file=sys.stderr)
-                        
+                            self.logger.debug(f"Found memory: {memory_gb}GB")
+                            
                     except Exception as e:
-                        print(f"Error getting detailed job info: {e}", file=sys.stderr)
+                        self.logger.error(f"Error getting detailed job info: {str(e)}")
+                        host = first_host
+                        exec_host = first_host
                     
-                    # Get connection details for display and port
+                    # Get VNC connection details
                     display = None
                     port = None
                     
                     if host and host != "N/A":
-                        # Try to get connection details
                         try:
-                            conn_details = self.get_vnc_connection_details(job_id)
-                            if conn_details:
-                                display = conn_details.get('display')
-                                port = conn_details.get('port')
+                            self.logger.info(f"Attempting to query VNC information on host: {host} for user: {user}")
+                            # Use SSH to find the VNC display number on the remote host
+                            ssh_cmd = f"ssh {host} ps -u {user} -o pid,command | grep Xvnc"
+                            ssh_result = subprocess.run(ssh_cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                            ssh_output = ssh_result.stdout.decode('utf-8')
+                            self.logger.debug(f"SSH command output: {ssh_output}")
+                            
+                            # Extract display number from the Xvnc process
+                            display_match = re.search(r'Xvnc :\s*(\d+)', ssh_output)
+                            if display_match:
+                                display = int(display_match.group(1))
+                                port = 5900 + display
+                                self.logger.info(f"Found display number: {display}, port: {port}")
                         except Exception as e:
-                            print(f"Error getting connection details: {e}", file=sys.stderr)
+                            self.logger.error(f"Error getting connection details: {str(e)}")
                     
-                    # Format runtime in days and hours
-                    if run_time_seconds > 0:
-                        days = run_time_seconds // 86400  # 86400 seconds in a day
-                        hours = (run_time_seconds % 86400) // 3600  # 3600 seconds in an hour
-                        minutes = (run_time_seconds % 3600) // 60  # 60 seconds in a minute
-                        
-                        # Format runtime string
-                        if days > 0:
-                            runtime_display = f"{days}d {hours}h"
-                        elif hours > 0:
-                            runtime_display = f"{hours}h {minutes}m"
-                        else:
-                            runtime_display = f"{minutes}m"
-                    else:
-                        runtime_display = "N/A"
+                    # Extract submission time from the last two columns if there are at least 7 fields
+                    submit_time = "2025-04-25 00:00:00"  # Default value
+                    submit_time_raw = "Unknown"
                     
-                    # Create job entry
-                    job_entry = {
-                        'job_id': job_id,
+                    if len(fields) >= 7:
+                        try:
+                            # Try to extract the submit time from fields
+                            # The format may be "Mon DD HH:MM" or "Mon DD YYYY" or just "HH:MM"
+                            submit_time_raw = ' '.join(fields[-2:])  # Last two fields
+                            
+                            # Parse different possible formats
+                            # The format may be "Mon DD HH:MM" or "Mon DD YYYY" or just "HH:MM"
+                            
+                            # Format: "Mon DD HH:MM"
+                            mon_dd_hhmm_match = re.match(r'([A-Za-z]{3})\s+(\d{1,2})\s+(\d{1,2}):(\d{2})', submit_time_raw)
+                            if mon_dd_hhmm_match:
+                                month_str, day, hour, minute = mon_dd_hhmm_match.groups()
+                                # Convert month string to number
+                                month_map = {'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6, 
+                                            'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12}
+                                month = month_map.get(month_str, 1)
+                                
+                                # Use current year, but check if date is in future
+                                current_date = datetime.datetime.now()
+                                year = current_date.year
+                                
+                                # Create the date with the current year
+                                submit_date = datetime.datetime(year, month, int(day), int(hour), int(minute))
+                                
+                                # If the date is in the future, it's likely from the previous year
+                                if submit_date > current_date:
+                                    submit_date = datetime.datetime(year - 1, month, int(day), int(hour), int(minute))
+                                
+                                # Format the date as string
+                                submit_time = submit_date.strftime("%Y-%m-%d %H:%M:%S")
+                                
+                            # Format: "Mon DD YYYY"
+                            elif re.match(r'([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})', submit_time_raw):
+                                mon_dd_yyyy_match = re.match(r'([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})', submit_time_raw)
+                                month_str, day, year = mon_dd_yyyy_match.groups()
+                                month_map = {'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6, 
+                                            'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12}
+                                month = month_map.get(month_str, 1)
+                                
+                                # Create the date
+                                submit_date = datetime.datetime(int(year), month, int(day), 0, 0)
+                                
+                                # Format the date as string
+                                submit_time = submit_date.strftime("%Y-%m-%d %H:%M:%S")
+                            
+                            # Format: "HH:MM" (just time, assume today's date)
+                            elif re.match(r'(\d{1,2}):(\d{2})', submit_time_raw):
+                                hhmm_match = re.match(r'(\d{1,2}):(\d{2})', submit_time_raw)
+                                hour, minute = hhmm_match.groups()
+                                
+                                # Use current date
+                                current_date = datetime.datetime.now()
+                                
+                                # Create datetime with today's date and the given time
+                                submit_date = datetime.datetime(
+                                    current_date.year, 
+                                    current_date.month, 
+                                    current_date.day,
+                                    int(hour), 
+                                    int(minute)
+                                )
+                                
+                                # If the time is in the future (which is unlikely for a submission time),
+                                # assume it was from yesterday
+                                if submit_date > current_date:
+                                    submit_date = submit_date - datetime.timedelta(days=1)
+                                
+                                # Format the date as string
+                                submit_time = submit_date.strftime("%Y-%m-%d %H:%M:%S")
+                            
+                            # Unknown format: use default
+                            else:
+                                # Keep the default value and print a warning
+                                print(f"Warning: Unknown submit time format: '{submit_time_raw}'", file=sys.stderr)
+                                
+                        except Exception as e:
+                            # Keep the default value and print the error
+                            print(f"Error parsing submit time '{submit_time_raw}': {str(e)}", file=sys.stderr)
+                    
+                    # Create job entry with all required fields
+                    job = {
+                            'job_id': job_id,
                         'name': display_name,
-                        'status': status,
-                        'queue': queue,
-                        'host': host,
+                            'status': status,
+                            'queue': queue,
+                        'from_host': first_host,
+                        'exec_host': exec_host,
+                        'host': host,  # Use the cleaned host name for display
                         'user': user,
-                        'display': display,
-                        'port': port,
-                        'runtime_seconds': run_time_seconds,
-                        'runtime_display': runtime_display,
-                        'num_cores': num_cores,
-                        'memory_gb': memory_gb,
-                        'command': command
+                        'cores': num_cores,
+                        'mem_gb': memory_gb,
+                        'submit_time': submit_time,
+                        'submit_time_raw': submit_time_raw,
+                        'runtime': runtime_display,  # Explicitly include runtime
+                        'run_time_seconds': run_time_seconds if 'run_time_seconds' in locals() else 0
                     }
                     
-                    jobs.append(job_entry)
+                    # Add connection details if available
+                    if display is not None:
+                        job['display'] = display
+                    if port is not None:
+                        job['port'] = port
+                    
+                    jobs.append(job)
+                    self.logger.debug(f"Added job to list: {job}")
+                    
                 except Exception as e:
-                    print(f"Error processing job {job_id if 'job_id' in locals() else 'unknown'}: {e}", file=sys.stderr)
+                    self.logger.error(f"Error processing job: {str(e)}")
         except Exception as e:
-            print(f"Error retrieving VNC jobs: {e}", file=sys.stderr)
+            self.logger.error(f"Error retrieving VNC jobs: {str(e)}")
         
         return jobs
     
+    def _get_active_vnc_jobs_standard(self) -> List[Dict]:
+        """
+        Fallback method using standard bjobs command (no delimiter)
+        """
+        jobs = []
+        
+        try:
+            # Get current user
+            user = os.environ.get('USER', '')
+            
+            # Use simple bjobs command to get job list
+            cmd = ['bjobs', '-u', user, '-J', 'myvnc_vncserver', '-w']
+            self.logger.debug(f"Running fallback LSF jobs command: {' '.join(cmd)}")
+            
+            output = self._run_command(cmd)
+            
+            lines = output.strip().split('\n')
+            self.logger.debug(f"bjobs command output: {len(lines)} lines")
+            
+            if len(lines) <= 1:  # Only header or no output
+                self.logger.info("No jobs found in output. Lines: {}".format(len(lines)))
+                return jobs
+                
+            # Skip header line and process each job line
+            for line in lines[1:]:
+                self.logger.debug(f"Processing job line: {line}")
+                
+                # Skip empty lines
+                if not line.strip():
+                    continue
+                
+                # Process job
+                try:
+                    # Split the line by whitespace
+                    fields = line.split()
+                    if len(fields) < 7:
+                        continue
+                        
+                    # Extract submission time from the last two columns if there are at least 7 fields
+                    submit_time = "2025-04-25 00:00:00"  # Default value
+                    submit_time_raw = "Unknown"
+                    
+                    if len(fields) >= 7:
+                        try:
+                            # Try to extract the submit time from fields
+                            # The format may be "Mon DD HH:MM" or "Mon DD YYYY" or just "HH:MM"
+                            submit_time_raw = ' '.join(fields[-2:])  # Last two fields
+                            
+                            # Parse different possible formats
+                            # Note: re and datetime are already imported at the top level
+                            
+                            # Format: "Mon DD HH:MM"
+                            mon_dd_hhmm_match = re.match(r'([A-Za-z]{3})\s+(\d{1,2})\s+(\d{1,2}):(\d{2})', submit_time_raw)
+                            if mon_dd_hhmm_match:
+                                month_str, day, hour, minute = mon_dd_hhmm_match.groups()
+                                # Convert month string to number
+                                month_map = {'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6, 
+                                            'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12}
+                                month = month_map.get(month_str, 1)
+                                
+                                # Use current year, but check if date is in future
+                                current_date = datetime.datetime.now()
+                                year = current_date.year
+                                
+                                # Create the date with the current year
+                                submit_date = datetime.datetime(year, month, int(day), int(hour), int(minute))
+                                
+                                # If the date is in the future, it's likely from the previous year
+                                if submit_date > current_date:
+                                    submit_date = datetime.datetime(year - 1, month, int(day), int(hour), int(minute))
+                                
+                                # Format the date as string
+                                submit_time = submit_date.strftime("%Y-%m-%d %H:%M:%S")
+                                
+                            # Format: "Mon DD YYYY"
+                            elif re.match(r'([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})', submit_time_raw):
+                                mon_dd_yyyy_match = re.match(r'([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})', submit_time_raw)
+                                month_str, day, year = mon_dd_yyyy_match.groups()
+                                month_map = {'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6, 
+                                            'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12}
+                                month = month_map.get(month_str, 1)
+                                
+                                # Create the date
+                                submit_date = datetime.datetime(int(year), month, int(day), 0, 0)
+                                
+                                # Format the date as string
+                                submit_time = submit_date.strftime("%Y-%m-%d %H:%M:%S")
+                            
+                            # Format: "HH:MM" (just time, assume today's date)
+                            elif re.match(r'(\d{1,2}):(\d{2})', submit_time_raw):
+                                hhmm_match = re.match(r'(\d{1,2}):(\d{2})', submit_time_raw)
+                                hour, minute = hhmm_match.groups()
+                                
+                                # Use current date
+                                current_date = datetime.datetime.now()
+                                
+                                # Create datetime with today's date and the given time
+                                submit_date = datetime.datetime(
+                                    current_date.year, 
+                                    current_date.month, 
+                                    current_date.day,
+                                    int(hour), 
+                                    int(minute)
+                                )
+                                
+                                # If the time is in the future (which is unlikely for a submission time),
+                                # assume it was from yesterday
+                                if submit_date > current_date:
+                                    submit_date = submit_date - datetime.timedelta(days=1)
+                                
+                                # Format the date as string
+                                submit_time = submit_date.strftime("%Y-%m-%d %H:%M:%S")
+                            
+                            # Unknown format: use default
+                            else:
+                                # Keep the default value and print a warning
+                                print(f"Warning: Unknown submit time format: '{submit_time_raw}'", file=sys.stderr)
+                                
+                        except Exception as e:
+                            # Keep the default value and print the error
+                            print(f"Error parsing submit time '{submit_time_raw}': {str(e)}", file=sys.stderr)
+                    
+                    # Create basic job info
+                    job = {
+                        'job_id': fields[0].strip(),
+                        'user': fields[1].strip(),
+                        'status': fields[2].strip(),
+                        'queue': fields[3].strip(),
+                        'from_host': fields[4].strip(),
+                        'exec_host': fields[5].strip(),
+                        'host': fields[5].strip(),
+                        'runtime': 'N/A',  # Default runtime
+                        'submit_time': submit_time,
+                        'submit_time_raw': submit_time_raw
+                    }
+                    
+                    # Add to jobs list
+                    jobs.append(job)
+                except Exception as e:
+                    self.logger.error(f"Error processing job in fallback method: {str(e)}")
+        except Exception as e:
+            self.logger.error(f"Error in fallback job retrieval: {str(e)}")
+        
+        return jobs
+            
     def get_vnc_connection_details(self, job_id: str) -> Optional[Dict]:
         """
         Get connection details for a VNC job
