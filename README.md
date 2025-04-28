@@ -18,6 +18,10 @@ It is fully Open Source via the Apache License 2.0
   - This script uses the LSF command line tools to interact with an LSF cluster.
   - Default LSF settings are defined in an included json file called lsf_config.json
   - The LSF environment file path can be configured in lsf_config.json to ensure LSF commands are available
+- Server management functionality with start, stop, restart, and status operations
+  - Provides a robust way to control the server process
+  - Includes status reporting with uptime and connection details
+  - Handles process management safely with proper cleanup
 
 ## Installation
 
@@ -25,13 +29,13 @@ It is fully Open Source via the Apache License 2.0
 - Python 3.8 or higher
 - LSF (Load Sharing Facility) installed and configured on your system
 - VNC server installed on the LSF compute nodes
+- psutil package for server management (install with `pip install psutil`)
 
 ### Installing from source
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/myvnc.git
+   git clone https://github.com/rdswan/myvnc.git
    cd myvnc
-   python3 main.py
    ```
 
 2. Edit the configuration files:
@@ -43,22 +47,58 @@ It is fully Open Source via the Apache License 2.0
    vim config/lsf_config.json
    ```
 
-3. Start the server:
+3. Start the server using the management script:
+   ```bash
+   ./manage.py start
+   ```
+
+   Alternately you can start the server directly:
    ```bash
    python3 main.py
    ```
 
-   Alternately you can start the server on a different host than specified in the server_config.json file
+   Or specify different host/port parameters:
    ```bash
-   python3 main.py rv-l-07.aus2.tenstorrent.com 9123
+   python3 main.py --host custom-host --port 8080
    ```
+
+## Server Management
+
+The `manage.py` script provides several commands to control the server:
+
+1. Start the server:
+   ```bash
+   ./manage.py start
+   ```
+
+2. Stop the server:
+   ```bash
+   ./manage.py stop
+   ```
+
+3. Restart the server:
+   ```bash
+   ./manage.py restart
+   ```
+
+4. Get server status:
+   ```bash
+   ./manage.py status
+   ```
+
+The status command displays information about the running server, including:
+- PID (Process ID)
+- Host and port
+- URL to access the application
+- Log directory and current log file
+- Uptime information
 
 ## Usage
 
 ### GUI Application
 To launch the graphical user interface, navigate your webpage to the url
 ```url
-http://rv-l-07.aus2.tenstorrent.com:9123/
+http://aus-misc:9143/
 ```
 
 ### Command Line Interface
@@ -71,13 +111,18 @@ The application also provides a command-line interface for managing VNC sessions
 
 2. Create a new VNC session:
    ```bash
-   myvnc-cli create --name my_session --resolution 1920x1080 --wm gnome --queue vnc_queue --cores 2 --memory 4096
+   myvnc-cli create --name my_session --resolution 1920x1080 --wm gnome --queue interactive --cores 2 --memory 16
    ```
 
 3. Kill a VNC session:
    ```bash
    myvnc-cli kill <job_id>
    ```
+
+## Logging
+
+The server logs all activity to both stdout and log files. Log files are stored in the `logs` directory by default.
+System commands are logged with a standardized format to help with debugging and troubleshooting.
 
 ## Contributing
 We welcome contributions! To contribute:
