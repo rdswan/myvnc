@@ -62,6 +62,13 @@ It is fully Open Source via the Apache License 2.0
    python3 main.py --host custom-host --port 8080
    ```
 
+Note: If your environment does not natively support all the required python modules, a fully self-contained environment is available in this release. It is accessible by the following command:
+    ```bash
+    source .venv_py3/bin/activate
+    ```
+
+    at which point all of the referenced commands in this README should be fully enabled
+
 ## Server Management
 
 The `manage.py` script provides several commands to control the server:
