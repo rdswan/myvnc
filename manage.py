@@ -165,6 +165,51 @@ def find_server_log_file(pid):
     
     return None
 
+def get_fully_qualified_hostname(host):
+    """Get the fully qualified domain name for a host"""
+    if host == 'localhost' or host == '127.0.0.1':
+        try:
+            # Try to get the FQDN using the hostname command
+            process = subprocess.run(['hostname', '-f'], capture_output=True, text=True, check=False)
+            if process.returncode == 0 and process.stdout.strip():
+                return process.stdout.strip()
+            
+            # Fall back to socket.getfqdn()
+            fqdn = socket.getfqdn()
+            if fqdn != 'localhost' and fqdn != '127.0.0.1':
+                return fqdn
+        except Exception as e:
+            logger = get_logger()
+            if logger:
+                logger.warning(f"Could not get FQDN: {e}")
+    elif host.count('.') == 0:  # If host is a simple hostname without domain
+        try:
+            # Try to get full domain by running hostname -f command
+            process = subprocess.run(['hostname', '-f'], capture_output=True, text=True, check=False)
+            if process.returncode == 0 and process.stdout.strip():
+                return process.stdout.strip()
+            
+            # Try socket.getfqdn
+            fqdn = socket.getfqdn(host)
+            if fqdn != host:
+                return fqdn
+            
+            # If hostname command didn't work and socket.getfqdn returned the same,
+            # try to detect domain from the current hostname
+            current_host = socket.getfqdn()
+            if '.' in current_host:
+                # Extract domain from current hostname
+                domain = '.'.join(current_host.split('.')[1:])
+                if domain:
+                    return f"{host}.{domain}"
+        except Exception as e:
+            logger = get_logger()
+            if logger:
+                logger.warning(f"Could not get FQDN for {host}: {e}")
+    
+    # Return the original host if no FQDN could be determined
+    return host
+
 def start_server():
     """Start the server if it's not already running"""
     logger = setup_logging_for_manage()
@@ -180,14 +225,7 @@ def start_server():
         port = config.get('port', '9143')
         
         # Use fully qualified domain name
-        if host != 'localhost' and host != '127.0.0.1':
-            try:
-                fqdn = socket.getfqdn(host)
-                if fqdn != host:
-                    host = fqdn
-            except Exception as e:
-                logger.warning(f"Could not get FQDN for {host}: {e}")
-        
+        host = get_fully_qualified_hostname(host)
         url = f"http://{host}:{port}"
         print(f"Server is already running at {url}")
         return
@@ -209,14 +247,7 @@ def start_server():
         port = config.get('port', '9143')
         
         # Use fully qualified domain name
-        if host != 'localhost' and host != '127.0.0.1':
-            try:
-                fqdn = socket.getfqdn(host)
-                if fqdn != host:
-                    host = fqdn
-            except Exception as e:
-                logger.warning(f"Could not get FQDN for {host}: {e}")
-        
+        host = get_fully_qualified_hostname(host)
         url = f"http://{host}:{port}"
         print(f"Server is already running at {url}")
         return
@@ -248,14 +279,7 @@ def start_server():
         port = config.get('port', '9143')
         
         # Use fully qualified domain name
-        if host != 'localhost' and host != '127.0.0.1':
-            try:
-                fqdn = socket.getfqdn(host)
-                if fqdn != host:
-                    host = fqdn
-            except Exception as e:
-                logger.warning(f"Could not get FQDN for {host}: {e}")
-        
+        host = get_fully_qualified_hostname(host)
         url = f"http://{host}:{port}"
         
         # Format timestamp
@@ -348,14 +372,7 @@ def restart_server():
         port = config.get('port', '9143')
         
         # Use fully qualified domain name
-        if host != 'localhost' and host != '127.0.0.1':
-            try:
-                fqdn = socket.getfqdn(host)
-                if fqdn != host:
-                    host = fqdn
-            except Exception as e:
-                logger.warning(f"Could not get FQDN for {host}: {e}")
-        
+        host = get_fully_qualified_hostname(host)
         url = f"http://{host}:{port}"
         
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]

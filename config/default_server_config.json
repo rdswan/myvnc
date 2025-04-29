@@ -1,5 +1,5 @@
 {
-    "host": "aus-misc",
+    "host": "localhost",
     "port": 9143,
     "debug": true,
     "max_connections": 5,

@@ -32,6 +32,51 @@ from myvnc.utils.config_manager import ConfigManager
 from myvnc.utils.vnc_manager import VNCManager
 from myvnc.utils.log_manager import setup_logging, get_logger, get_current_log_file
 
+def get_fully_qualified_hostname(host):
+    """Get the fully qualified domain name for a host"""
+    if host == 'localhost' or host == '127.0.0.1' or host == '0.0.0.0':
+        try:
+            # Try to get the FQDN using the hostname command
+            process = subprocess.run(['hostname', '-f'], capture_output=True, text=True, check=False)
+            if process.returncode == 0 and process.stdout.strip():
+                return process.stdout.strip()
+            
+            # Fall back to socket.getfqdn()
+            fqdn = socket.getfqdn()
+            if fqdn != 'localhost' and fqdn != '127.0.0.1':
+                return fqdn
+        except Exception as e:
+            logger = get_logger()
+            if logger:
+                logger.warning(f"Could not get FQDN: {e}")
+    elif host.count('.') == 0:  # If host is a simple hostname without domain
+        try:
+            # Try to get full domain by running hostname -f command
+            process = subprocess.run(['hostname', '-f'], capture_output=True, text=True, check=False)
+            if process.returncode == 0 and process.stdout.strip():
+                return process.stdout.strip()
+            
+            # Try socket.getfqdn
+            fqdn = socket.getfqdn(host)
+            if fqdn != host:
+                return fqdn
+            
+            # If hostname command didn't work and socket.getfqdn returned the same,
+            # try to detect domain from the current hostname
+            current_host = socket.getfqdn()
+            if '.' in current_host:
+                # Extract domain from current hostname
+                domain = '.'.join(current_host.split('.')[1:])
+                if domain:
+                    return f"{host}.{domain}"
+        except Exception as e:
+            logger = get_logger()
+            if logger:
+                logger.warning(f"Could not get FQDN for {host}: {e}")
+    
+    # Return the original host if no FQDN could be determined
+    return host
+
 class LoggingHTTPServer(http.server.HTTPServer):
     """HTTP Server that logs all requests"""
     
@@ -906,18 +951,14 @@ def run_server(host=None, port=None, directory=None, config=None):
     
     logger.info(f"Server configured to run on {host}:{port}")
     
-    # If host is 'localhost' or '127.0.0.1', replace it with the fully qualified domain name 
-    # for better remote access
-    if host == "localhost" or host == "127.0.0.1":
-        try:
-            fqdn = socket.getfqdn()
-            if fqdn != "localhost" and fqdn != "127.0.0.1":
-                logger.info(f"Converting localhost to fully qualified domain name: {fqdn}")
-                host = fqdn
-                # Also update the config for other parts of the application
-                config["host"] = fqdn
-        except Exception as e:
-            logger.warning(f"Could not determine fully qualified domain name: {str(e)}")
+    # Get fully qualified domain name for the host
+    if host == "localhost" or host == "127.0.0.1" or host == "0.0.0.0" or host.count('.') == 0:
+        original_host = host
+        host = get_fully_qualified_hostname(host)
+        if host != original_host:
+            logger.info(f"Converting {original_host} to fully qualified domain name: {host}")
+            # Also update the config for other parts of the application
+            config["host"] = host
     
     if directory is None:
         # Use the web directory
@@ -968,11 +1009,7 @@ def run_server(host=None, port=None, directory=None, config=None):
         
         # Get fully qualified hostname for display
         display_host = host
-        if host == "localhost" or host == "127.0.0.1":
-            try:
-                display_host = socket.getfqdn()
-            except:
-                pass
+        # No need for another lookup if we already resolved the hostname
         
         # Log server startup
         logger.info(f"Starting server on http://{display_host}:{port}")
