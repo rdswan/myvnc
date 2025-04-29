@@ -12,12 +12,12 @@ It is fully Open Source via the Apache License 2.0
 - There is a tab to support the creation of a new VNC server
   - New VNCs can be opened with a variety of options including name, site, resolution, and window manager of choice.
     - There are default values for these VNC settings, but the user is able to change them via the GUI
-    - Default VNC settings are defined in an included json file called vnc_config.json
+    - Default VNC settings are defined in an included json file called config/default_vnc_config.json
 - VNC commands are not executed directly, but rather submitted to LSF via the command line. Therefore neither python-vnc-client nor lsf-python-api packages are required.
   - LSF configuration to define the queue, number of cores, and amount of memory to reserve for submission. There are default values for these 3 LSF definitions, but the user is able to change them via the GUI
   - This script uses the LSF command line tools to interact with an LSF cluster.
-  - Default LSF settings are defined in an included json file called lsf_config.json
-  - The LSF environment file path can be configured in lsf_config.json to ensure LSF commands are available
+  - Default LSF settings are defined in an included json file called config/default_lsf_config.json
+  - The LSF environment file path can be configured in config/_defaultlsf_config.json to ensure LSF commands are available
 - Server management functionality with start, stop, restart, and status operations
   - Provides a robust way to control the server process
   - Includes status reporting with uptime and connection details
@@ -41,10 +41,10 @@ It is fully Open Source via the Apache License 2.0
 2. Edit the configuration files:
    ```bash
    # Edit server configuration (host, port)
-   vim config/server_config.json
+   vim config/default_server_config.json
    
    # Edit LSF configuration (including env_file path)
-   vim config/lsf_config.json
+   vim config/default_lsf_config.json
    ```
 
 3. Start the server using the management script:
