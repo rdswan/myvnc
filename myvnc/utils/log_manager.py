@@ -140,7 +140,17 @@ def setup_logging(config=None):
     
     # Always create a fresh logger - don't reuse
     logger = logging.getLogger('myvnc')
-    logger.setLevel(logging.DEBUG)
+    
+    # Set the logger level based on the debug configuration
+    # Default to DEBUG if no config is provided, otherwise honor the debug flag
+    if config and isinstance(config, dict) and 'debug' in config:
+        if config['debug']:
+            logger.setLevel(logging.DEBUG)
+        else:
+            logger.setLevel(logging.INFO)
+    else:
+        # Default to DEBUG if debug flag not specified
+        logger.setLevel(logging.DEBUG)
     
     # Clear any existing handlers to avoid duplicate logging
     if logger.handlers:
@@ -214,6 +224,12 @@ def setup_logging(config=None):
         # Log to both console and file
         console_msg = f"Logging to file: {full_path}"
         logger.info(console_msg)
+        
+        # Log debug status
+        if config and isinstance(config, dict) and 'debug' in config:
+            debug_status = "enabled" if config['debug'] else "disabled"
+            logger.info(f"Debug logging is {debug_status}")
+            
     except Exception as e:
         # If we can't set up file logging, log to console
         error_msg = f"Error setting up file logging: {str(e)}"
