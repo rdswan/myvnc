@@ -464,30 +464,65 @@ class LSFManager:
                     
                     # Format runtime from the run_time_raw field
                     runtime_display = "N/A"
+                    run_time_seconds = 0
                     try:
-                        # Extract seconds from the run_time string (format: "2580 second(s)")
-                        run_time_match = re.search(r'(\d+)', run_time_raw)
-                        if run_time_match:
-                            run_time_seconds = int(run_time_match.group(1))
+                        # Extract runtime value from various formats:
+                        # "2580 second(s)" or "43 minute(s) 30 second(s)" or "2:30"
+                        
+                        # Try to match HH:MM or H:MM format first
+                        time_match = re.search(r'(\d+):(\d+)', run_time_raw)
+                        if time_match:
+                            hours = int(time_match.group(1))
+                            minutes = int(time_match.group(2))
+                            run_time_seconds = hours * 3600 + minutes * 60
+                            self.logger.debug(f"Parsed HH:MM format: {hours}h {minutes}m = {run_time_seconds}s")
+                        else:
+                            # Try to match "X minute(s) Y second(s)" format
+                            minutes_match = re.search(r'(\d+)\s+minute\(s\)', run_time_raw)
+                            seconds_match = re.search(r'(\d+)\s+second\(s\)', run_time_raw)
                             
-                            # Calculate days, hours, minutes
+                            minutes = int(minutes_match.group(1)) if minutes_match else 0
+                            seconds = int(seconds_match.group(1)) if seconds_match else 0
+                            
+                            if minutes > 0 or seconds > 0:
+                                run_time_seconds = minutes * 60 + seconds
+                                self.logger.debug(f"Parsed minutes/seconds format: {minutes}m {seconds}s = {run_time_seconds}s")
+                            else:
+                                # Just look for any number as a last resort (assuming seconds)
+                                seconds_match = re.search(r'(\d+)', run_time_raw)
+                                if seconds_match:
+                                    run_time_seconds = int(seconds_match.group(1))
+                                    self.logger.debug(f"Parsed seconds format: {run_time_seconds}s")
+                        
+                        # Now format the runtime display string based on the calculated seconds
+                        if run_time_seconds > 0:
                             days = run_time_seconds // 86400  # 86400 seconds in a day
                             hours = (run_time_seconds % 86400) // 3600  # 3600 seconds in an hour
                             minutes = (run_time_seconds % 3600) // 60  # 60 seconds in a minute
+                            seconds = run_time_seconds % 60
                             
                             # Format runtime string
                             if days > 0:
-                                runtime_display = f"{days}d {hours}h"
+                                runtime_display = f"{days}d {hours}h {minutes}m"
                             elif hours > 0:
                                 runtime_display = f"{hours}h {minutes}m"
+                            elif minutes > 0:
+                                runtime_display = f"{minutes}m {seconds}s"
                             else:
-                                runtime_display = f"{minutes}m"
+                                runtime_display = f"{seconds}s"
                                 
-                            self.logger.debug(f"Parsed runtime: {runtime_display} from {run_time_seconds} seconds")
+                            self.logger.debug(f"Parsed runtime: {runtime_display} from {run_time_seconds} seconds (raw: {run_time_raw})")
                         else:
-                            self.logger.debug(f"No numeric runtime found in '{run_time_raw}'")
+                            if status == "PEND" or status == "PSUSP":
+                                # For pending jobs, display 0m instead of N/A
+                                runtime_display = "0m"
+                            else:
+                                self.logger.debug(f"No valid runtime found in '{run_time_raw}', using default")
                     except (ValueError, TypeError, IndexError) as e:
-                        self.logger.error(f"Error parsing runtime '{run_time_raw}': {e}")
+                        self.logger.warning(f"Error parsing runtime '{run_time_raw}': {e}")
+                        # Default for pending jobs should be 0m
+                        if status == "PEND" or status == "PSUSP":
+                            runtime_display = "0m"
                     
                     # Get detailed job information
                     try:
