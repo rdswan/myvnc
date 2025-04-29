@@ -198,7 +198,6 @@ class LSFManager:
         """
         cmd_str = ' '.join(cmd)
         # Log the command being executed to stdout and logger with the specified format
-        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - INFO - Executing command: {cmd_str}")
         self.logger.info(f"Executing command: {cmd_str}")
         
         try:
@@ -209,10 +208,8 @@ class LSFManager:
             
             # Log the command output
             if stdout:
-                print(f"COMMAND OUTPUT: {stdout}")
                 self.logger.info(f"Command output: {stdout}")
             if stderr:
-                print(f"COMMAND STDERR: {stderr}")
                 self.logger.info(f"Command stderr: {stderr}")
             
             # Add to command history for debugging
@@ -229,10 +226,6 @@ class LSFManager:
             stdout = e.stdout.decode('utf-8') if e.stdout else ''
             
             # Log the error
-            error_msg = f"Command failed: {stderr}"
-            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - ERROR - Command failed: {cmd_str}")
-            print(f"COMMAND STDOUT: {stdout}")
-            print(f"COMMAND STDERR: {stderr}")
             self.logger.error(f"Command failed: {cmd_str}")
             self.logger.error(f"Command stdout: {stdout}")
             self.logger.error(f"Command stderr: {stderr}")
@@ -288,14 +281,30 @@ class LSFManager:
             # Only add -name if display_name has content
             if display_name and display_name.strip():
                 vncserver_cmd.extend(['-name', display_name])
+            
+            # Add xstartup parameter if configured
+            # Check if custom xstartup is enabled and path is provided
+            use_custom_xstartup = vnc_config.get('use_custom_xstartup', False)
+            xstartup_path = vnc_config.get('xstartup_path', '')
+            
+            if use_custom_xstartup and xstartup_path and xstartup_path.strip():
+                self.logger.info(f"Using custom xstartup script: {xstartup_path}")
+                vncserver_cmd.extend(['-xstartup', xstartup_path])
+                
+                # Set window manager as an environment variable for the xstartup script
+                window_manager = vnc_config.get('window_manager', 'gnome')
+                # Get the current environment
+                env = os.environ.copy()
+                # Add the WINDOW_MANAGER environment variable
+                env['WINDOW_MANAGER'] = window_manager
+                # Make sure environment is propagated through bsub
+                bsub_cmd.extend(['-env', f'WINDOW_MANAGER={window_manager}'])
                 
             # Add vncserver command to bsub command
             bsub_cmd.extend(vncserver_cmd)
             
             # Convert command list to string for logging
             cmd_str = ' '.join(str(arg) for arg in bsub_cmd)
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]
-            print(f"{timestamp} - myvnc - INFO - SUBMIT COMMAND: {cmd_str}")
             self.logger.info(f"SUBMIT COMMAND: {cmd_str}")
             
             # Add to command history before execution
@@ -356,16 +365,13 @@ class LSFManager:
         Returns:
             True if successful, False otherwise
         """
-        print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - INFO - Executing command: bkill {job_id}")
         self.logger.info(f"Killing VNC job: {job_id}")
         
         try:
             result = self._run_command(['bkill', job_id])
-            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - INFO - Command result: {result}")
             self.logger.info(f"Kill result: Job {job_id} killed successfully: {result}")
             return True
         except RuntimeError as e:
-            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - ERROR - Failed to kill job {job_id}: {str(e)}")
             self.logger.error(f"Kill failed: Failed to kill job {job_id}: {str(e)}")
             return False
     
@@ -384,8 +390,6 @@ class LSFManager:
             
             # Use bjobs with the exact format specified by the user
             cmd = f'bjobs -o "jobid stat user queue first_host run_time command delimiter=\';\'" -noheader -u {user} -J myvnc_vncserver'
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]
-            print(f"{timestamp} - myvnc - INFO - BJOBS COMMAND: {cmd}")
             self.logger.info(f"BJOBS COMMAND: {cmd}")
             
             # Add to command history
@@ -413,13 +417,11 @@ class LSFManager:
             
             # Log the results
             if output_str:
-                print(f"{timestamp} - myvnc - INFO - BJOBS OUTPUT:\n{output_str}")
                 self.logger.info(f"BJOBS OUTPUT: {len(output_str.splitlines())} line(s)")
                 for line in output_str.splitlines():
                     self.logger.info(f"  {line}")
             
             if error_str:
-                print(f"{timestamp} - myvnc - WARNING - BJOBS STDERR:\n{error_str}")
                 self.logger.warning(f"bjobs stderr output:")
                 for line in error_str.splitlines():
                     self.logger.warning(f"  {line}")
@@ -661,11 +663,11 @@ class LSFManager:
                             # Unknown format: use default
                             else:
                                 # Keep the default value and print a warning
-                                print(f"Warning: Unknown submit time format: '{submit_time_raw}'", file=sys.stderr)
+                                self.logger.warning(f"Unknown submit time format: '{submit_time_raw}'")
                                 
                         except Exception as e:
                             # Keep the default value and print the error
-                            print(f"Error parsing submit time '{submit_time_raw}': {str(e)}", file=sys.stderr)
+                            self.logger.error(f"Error parsing submit time '{submit_time_raw}': {str(e)}")
                     
                     # Create job entry with all required fields
                     job = {
@@ -713,7 +715,6 @@ class LSFManager:
             
             # Use simple bjobs command to get job list
             cmd = ['bjobs', '-u', user, '-J', 'myvnc_vncserver', '-w']
-            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - INFO - Executing command: {' '.join(cmd)}")
             self.logger.info(f"Executing command: {' '.join(cmd)}")
             
             output = self._run_command(cmd)
@@ -818,11 +819,11 @@ class LSFManager:
                             # Unknown format: use default
                             else:
                                 # Keep the default value and print a warning
-                                print(f"Warning: Unknown submit time format: '{submit_time_raw}'", file=sys.stderr)
+                                self.logger.warning(f"Unknown submit time format: '{submit_time_raw}'")
                                 
                         except Exception as e:
                             # Keep the default value and print the error
-                            print(f"Error parsing submit time '{submit_time_raw}': {str(e)}", file=sys.stderr)
+                            self.logger.error(f"Error parsing submit time '{submit_time_raw}': {str(e)}")
                     
                     # Create basic job info
                     job = {
@@ -869,7 +870,7 @@ class LSFManager:
             # Extract host from the basic output first (most reliable)
             if len(basic_lines) > 1:  # Header + job line
                 job_line = basic_lines[1]
-                print(f"Basic job info: {job_line}", file=sys.stderr)
+                self.logger.debug(f"Basic job info: {job_line}")
                 fields = job_line.split()
                 
                 if len(fields) >= 6 and 'RUN' in job_line:
@@ -881,7 +882,7 @@ class LSFManager:
                             host = exec_host.split(':')[0]
                         else:
                             host = exec_host
-                        print(f"Found host from basic job info: {host}", file=sys.stderr)
+                        self.logger.debug(f"Found host from basic job info: {host}")
             
             # If we didn't get the host from basic output, get detailed info
             if not host:
@@ -892,7 +893,7 @@ class LSFManager:
                 host_match = re.search(r'Started on <([^>]+)>', output)
                 if host_match:
                     host = host_match.group(1)
-                    print(f"Found host from 'Started on' pattern: {host}", file=sys.stderr)
+                    self.logger.debug(f"Found host from 'Started on' pattern: {host}")
                 
                 # Look for EXEC_HOST pattern as fallback
                 if not host:
@@ -903,11 +904,11 @@ class LSFManager:
                             host = host_info.split(':')[0]
                         else:
                             host = host_info
-                        print(f"Found host from EXEC_HOST pattern: {host}", file=sys.stderr)
+                        self.logger.debug(f"Found host from EXEC_HOST pattern: {host}")
             
             # If we still don't have a host, print error and exit
             if not host:
-                print(f"Could not determine execution host for job {job_id}", file=sys.stderr)
+                self.logger.error(f"Could not determine execution host for job {job_id}")
                 return None
             
             # Get the user running the job
@@ -920,20 +921,20 @@ class LSFManager:
                 host = host.strip()
                 # More aggressive cleaning - keep only alphanumeric chars, hyphens, and dots
                 host = re.sub(r'[^a-zA-Z0-9\-\.]', '', host)
-                print(f"Cleaned host name: '{host}'", file=sys.stderr)
+                self.logger.debug(f"Cleaned host name: '{host}'")
                 
                 if not host or not re.match(r'^[a-zA-Z0-9\-\.]+$', host):
-                    print(f"Host name is invalid after cleaning: '{host}'", file=sys.stderr)
+                    self.logger.error(f"Host name is invalid after cleaning: '{host}'")
                     raise ValueError(f"Invalid hostname: {host}")
                 
-                print(f"Attempting to query VNC information on host: {host} for user: {user}", file=sys.stderr)
+                self.logger.info(f"Attempting to query VNC information on host: {host} for user: {user}")
                 
                 # Use SSH to run a command on the remote host to find the Xvnc process
                 ssh_cmd = ['ssh', host, f"ps -u {user} -o pid,command | grep Xvnc"]
-                print(f"Running SSH command: {' '.join(ssh_cmd)}", file=sys.stderr)
+                self.logger.debug(f"Running SSH command: {' '.join(ssh_cmd)}")
                 
                 vnc_process_output = self._run_command(ssh_cmd)
-                print(f"SSH command output: {vnc_process_output}", file=sys.stderr)
+                self.logger.debug(f"SSH command output: {vnc_process_output}")
                 
                 # Look for the display number in the Xvnc process command line
                 # Format will be something like: Xvnc :1 
@@ -941,22 +942,22 @@ class LSFManager:
                 
                 if display_match:
                     display_num = int(display_match.group(1))
-                    print(f"Found display number from Xvnc pattern: {display_num}", file=sys.stderr)
+                    self.logger.info(f"Found display number from Xvnc pattern: {display_num}")
                 else:
                     # Fallback to scanning through all command line arguments
                     args_match = re.search(r'Xvnc.*?:(\d+)', vnc_process_output)
                     if args_match:
                         display_num = int(args_match.group(1))
-                        print(f"Found display number from args pattern: {display_num}", file=sys.stderr)
+                        self.logger.info(f"Found display number from args pattern: {display_num}")
                     else:
                         # If we can't find the display number, use a fallback
                         display_num = (int(job_id) % 5) + 1  # Results in 1-5
-                        print(f"Using fallback display number: {display_num}", file=sys.stderr)
+                        self.logger.info(f"Using fallback display number: {display_num}")
             except Exception as e:
                 # If we can't query the remote host, use the fallback method
-                print(f"Error querying remote host for VNC process: {str(e)}", file=sys.stderr)
+                self.logger.error(f"Error querying remote host for VNC process: {str(e)}")
                 display_num = (int(job_id) % 5) + 1  # Results in 1-5
-                print(f"Using fallback display number after error: {display_num}", file=sys.stderr)
+                self.logger.info(f"Using fallback display number after error: {display_num}")
             
             # VNC uses port 5900+display number
             vnc_port = 5900 + display_num
@@ -968,5 +969,5 @@ class LSFManager:
                 'connection_string': f"{host}:{display_num}"
             }
         except (RuntimeError, ValueError) as e:
-            print(f"Error getting connection details for job {job_id}: {str(e)}", file=sys.stderr)
+            self.logger.error(f"Error getting connection details for job {job_id}: {str(e)}")
             return None 

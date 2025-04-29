@@ -28,13 +28,17 @@ vncconfig -iconic &
 WM="${WINDOW_MANAGER:-gnome}"
 echo "Using window manager: $WM"
 
+# Get script directory - this is where the window manager configs are located
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+echo "Script directory: $SCRIPT_DIR"
+
 # Load window manager specific configuration if available
-WM_CONFIG_PATH="/proj_risc/user_dev/bswan/tools_src/myvnc/config/vnc/${WM}_config.sh"
-if [ -f "$WM_CONFIG_PATH" ]; then
-    echo "Loading window manager config from $WM_CONFIG_PATH"
-    source "$WM_CONFIG_PATH"
+WM_CONFIG="${SCRIPT_DIR}/${WM}_config.sh"
+if [ -f "$WM_CONFIG" ]; then
+    echo "Loading window manager config from $WM_CONFIG"
+    source "$WM_CONFIG"
 else
-    echo "Window manager config not found: $WM_CONFIG_PATH"
+    echo "Window manager config not found: $WM_CONFIG"
     
     # Default fallback based on window manager
     case "$WM" in

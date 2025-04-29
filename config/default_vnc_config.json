@@ -6,14 +6,14 @@
         "name_prefix": "vnc_session",
         "site": "Austin",
         "vncserver_path": "/usr/bin/vncserver",
-        "xstartup_path": "config/vnc/xstartup.sh",
+        "xstartup_path": "/proj_risc/user_dev/bswan/tools_src/myvnc/config/vnc/xstartup.sh",
         "use_custom_xstartup": true
     },
     "window_manager_configs": {
-        "gnome": "config/vnc/gnome_config.sh",
-        "kde": "config/vnc/kde_config.sh",
-        "xfce": "config/vnc/xfce_config.sh",
-        "mate": "config/vnc/mate_config.sh"
+        "gnome": "/proj_risc/user_dev/bswan/tools_src/myvnc/config/vnc/gnome_config.sh",
+        "kde": "/proj_risc/user_dev/bswan/tools_src/myvnc/config/vnc/kde_config.sh",
+        "xfce": "/proj_risc/user_dev/bswan/tools_src/myvnc/config/vnc/xfce_config.sh",
+        "mate": "/proj_risc/user_dev/bswan/tools_src/myvnc/config/vnc/mate_config.sh"
     },
     "available_window_managers": [
         "gnome",
