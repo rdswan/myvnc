@@ -466,6 +466,10 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                         if 'memory_gb' not in job:
                             job['memory_gb'] = 16  # Default value
                         
+                        # Ensure runtime_display is set (for compatibility)
+                        if 'runtime' in job and 'runtime_display' not in job:
+                            job['runtime_display'] = job['runtime']
+                        
                         # Ensure host is present
                         if 'exec_host' not in job or not job['exec_host'] or job['exec_host'] == 'N/A':
                             self.logger.warning(f"Job {job['job_id']} has no exec_host specified")
@@ -823,36 +827,45 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
 
 def load_server_config():
     """Load server configuration from JSON file"""
+    # Use only the default_server_config.json file
     config_path = Path(__file__).parent.parent.parent / "config" / "default_server_config.json"
     
     # Initialize logger early
     logger = logging.getLogger('myvnc')
     
     try:
+        logger.info(f"Loading configuration from: {config_path}")
         with open(config_path, 'r') as f:
             config = json.load(f)
-            # Remove the debug logging here to avoid duplication
-            return config
+            logger.info(f"Successfully loaded config from: {config_path}")
+            print(f"INFO: Using configuration file: {config_path}")
     except FileNotFoundError:
-        logger.warning(f"Server configuration file not found at {config_path}")
-        return {
+        logger.warning(f"Configuration file not found: {config_path}")
+        print(f"WARNING: Configuration file not found: {config_path}")
+        config = {
             "host": "aus-misc",
             "port": 9143,
             "debug": False,
             "max_connections": 5,
             "timeout": 30,
-            "logdir": "logs"  # Ensure logdir is set in the default config
+            "logdir": "/tmp"  # Default to a safe location
         }
     except json.JSONDecodeError:
-        logger.warning(f"Invalid JSON in server configuration file")
-        return {
+        logger.warning(f"Invalid JSON in configuration file: {config_path}")
+        print(f"WARNING: Invalid JSON in configuration file: {config_path}")
+        config = {
             "host": "aus-misc",
             "port": 9143,
             "debug": False,
             "max_connections": 5,
             "timeout": 30,
-            "logdir": "logs"  # Ensure logdir is set in the default config
+            "logdir": "/tmp"  # Default to a safe location
         }
+    
+    # Print config info to console as well for visibility
+    print(f"Server configuration: host={config.get('host')}, port={config.get('port')}, logdir={config.get('logdir')}")
+    
+    return config
 
 def load_lsf_config():
     """Load LSF configuration from JSON file"""

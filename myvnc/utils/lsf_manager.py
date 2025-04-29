@@ -719,6 +719,7 @@ class LSFManager:
                         'submit_time': submit_time,
                         'submit_time_raw': submit_time_raw,
                         'runtime': runtime_display,  # Explicitly include runtime
+                        'runtime_display': runtime_display,  # Add runtime_display for consistency with client
                         'run_time_seconds': run_time_seconds if 'run_time_seconds' in locals() else 0
                     }
                     
@@ -870,6 +871,7 @@ class LSFManager:
                         'exec_host': fields[5].strip(),
                         'host': fields[5].strip(),
                         'runtime': 'N/A',  # Default runtime
+                        'runtime_display': 'N/A',  # Add runtime_display for consistency with client
                         'submit_time': submit_time,
                         'submit_time_raw': submit_time_raw
                     }
