@@ -172,6 +172,13 @@ def start_server():
     pid = read_pid_file()
     if pid and is_server_running(pid):
         logger.info(f"Server is already running with PID {pid}")
+        
+        # Report server URL
+        config = load_server_config()
+        host = config.get('host', 'localhost')
+        port = config.get('port', '9143')
+        url = f"http://{host}:{port}"
+        print(f"Server is already running at {url}")
         return
     
     # If we have a PID file but the server is not running, clean it up
@@ -184,6 +191,13 @@ def start_server():
     if pid:
         logger.info(f"Server is already running with PID {pid} (discovered)")
         write_pid_file(pid)
+        
+        # Report server URL
+        config = load_server_config()
+        host = config.get('host', 'localhost')
+        port = config.get('port', '9143')
+        url = f"http://{host}:{port}"
+        print(f"Server is already running at {url}")
         return
     
     # Start the server
@@ -207,9 +221,18 @@ def start_server():
         logger.info(f"Server started with PID {process.pid}")
         write_pid_file(process.pid)
         
-        # We need to pass the PID to the main.py script somehow
-        # This is usually done by creating an environment variable or a configuration file
-        # For now, we'll just make sure we can find the log file when needed
+        # Get the server URL from config
+        config = load_server_config()
+        host = config.get('host', 'localhost')
+        port = config.get('port', '9143')
+        url = f"http://{host}:{port}"
+        
+        # Format timestamp
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
+        
+        # Print server started message with URL
+        print(f"{timestamp} - myvnc - INFO - Server started with PID {process.pid}")
+        print(f"{timestamp} - myvnc - INFO - Server URL: {url}")
     else:
         # Process exited, read the output to see why
         output = process.stdout.read().decode('utf-8')
@@ -287,11 +310,21 @@ def restart_server():
         # Wait a moment for the log file to be created
         time.sleep(0.5)
         server_log_file = find_server_log_file(pid)
+        
+        # Get the server URL from config
+        config = load_server_config()
+        host = config.get('host', 'localhost')
+        port = config.get('port', '9143')
+        url = f"http://{host}:{port}"
+        
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
         print(f"{timestamp} - myvnc - INFO - Server restarted with PID: {pid}")
+        print(f"{timestamp} - myvnc - INFO - Server URL: {url}")
         print(f"{timestamp} - myvnc - INFO - New log file: {server_log_file if server_log_file else 'Unknown'}")
+        
         # Also log to the logger
         logger.info(f"Server restarted with PID: {pid}")
+        logger.info(f"Server URL: {url}")
         logger.info(f"New log file: {server_log_file if server_log_file else 'Unknown'}")
     else:
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
