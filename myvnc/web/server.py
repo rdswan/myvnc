@@ -10,17 +10,18 @@ import os
 import sys
 import argparse
 import subprocess
+import traceback
 from pathlib import Path
 import time
 import urllib.parse
 import platform
 import http.cookies
-import traceback
 from urllib.parse import parse_qs, urlparse, quote
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler
 from http.cookies import SimpleCookie
 import socket
+import logging
 
 # Add parent directory to path so we can import our modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -30,6 +31,28 @@ from myvnc.utils.lsf_manager import LSFManager
 from myvnc.utils.config_manager import ConfigManager
 from myvnc.utils.vnc_manager import VNCManager
 from myvnc.utils.log_manager import setup_logging, get_logger, get_current_log_file
+
+class LoggingHTTPServer(http.server.HTTPServer):
+    """HTTP Server that logs all requests"""
+    
+    def __init__(self, *args, **kwargs):
+        self.logger = get_logger()
+        super().__init__(*args, **kwargs)
+    
+    def service_actions(self):
+        """Called once per handle_request() cycle to perform any periodic tasks"""
+        super().service_actions()
+    
+    def process_request(self, request, client_address):
+        """Log each incoming request"""
+        self.logger.debug(f"New connection from {client_address[0]}:{client_address[1]}")
+        super().process_request(request, client_address)
+    
+    def handle_error(self, request, client_address):
+        """Log server errors"""
+        self.logger.error(f"Error handling request from {client_address[0]}:{client_address[1]}")
+        self.logger.error(traceback.format_exc())
+        super().handle_error(request, client_address)
 
 class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
     """Handler for VNC manager CGI requests"""
@@ -55,6 +78,10 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         parsed_path = urlparse(self.path)
         path = parsed_path.path
         
+        # Log the request
+        client_address = self.client_address[0] if hasattr(self, 'client_address') and self.client_address else 'unknown'
+        self.logger.info(f"GET request from {client_address}: {path}")
+        
         # Only check authentication if it's enabled
         if self.authentication_enabled and self.authentication_enabled.lower() == "entra":
             # Check authentication for all paths except login page and assets
@@ -62,6 +89,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 is_authenticated, _ = self.check_auth()
                 if not is_authenticated:
                     # Redirect to login page
+                    self.logger.info(f"Unauthenticated request to {path}, redirecting to login")
                     self.send_response(302)
                     self.send_header("Location", "/login")
                     self.end_headers()
@@ -108,6 +136,10 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         # Parse URL path
         path = urlparse(self.path).path
         
+        # Log the request
+        client_address = self.client_address[0] if hasattr(self, 'client_address') and self.client_address else 'unknown'
+        self.logger.info(f"POST request from {client_address}: {path}")
+        
         # Only check authentication if it's enabled
         if self.authentication_enabled and self.authentication_enabled.lower() == "entra":
             # Allow login without authentication
@@ -146,7 +178,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         try:
             with open(os.path.join(self.directory, filename), 'rb') as f:
                 content = f.read()
-                
+            
+            self.logger.info(f"Serving file: {filename}")    
             self.send_response(200)
             self.send_header('Content-type', 'text/html')
             self.end_headers()
@@ -259,6 +292,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         try:
             # If authentication is disabled, return as authenticated with a generic user
             if not self.authentication_enabled or self.authentication_enabled.lower() != "entra":
+                self.logger.info("Session check with authentication disabled, returning anonymous user")
                 self.send_json_response({
                     "authenticated": True,
                     "username": "anonymous",
@@ -273,6 +307,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             
             if is_authenticated:
                 # Send user data
+                self.logger.info(f"Session check: Authenticated user {session.get('username', '')}")
                 self.send_json_response({
                     "authenticated": True,
                     "username": session.get("username", ""),
@@ -282,6 +317,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 })
             else:
                 # Send unauthenticated response
+                self.logger.info("Session check: Not authenticated")
                 self.send_json_response({
                     "authenticated": False
                 }, 401)
@@ -372,6 +408,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
     def handle_vnc_sessions(self):
         """Handle VNC sessions request"""
         try:
+            self.logger.info("Fetching active VNC sessions")
             jobs = self.lsf_manager.get_active_vnc_jobs()
             
             # Add connection details including port to each job
@@ -409,6 +446,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
     def handle_lsf_config(self):
         """Handle LSF configuration request"""
         try:
+            self.logger.info("Handling LSF configuration request")
             config = {
                 'defaults': self.config_manager.get_lsf_defaults(),
                 'queues': self.config_manager.get_available_queues(),
@@ -416,23 +454,29 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 'core_options': self.config_manager.get_core_options(),
                 'sites': self.config_manager.get_available_sites()
             }
+            self.logger.debug(f"Sending LSF config: {config}")
             self.send_json_response(config)
         except Exception as e:
+            self.logger.error(f"Error handling LSF config request: {str(e)}")
             self.send_error_response(str(e))
             
     def handle_server_config(self):
         """Handle server configuration request"""
         try:
+            self.logger.info("Handling server configuration request")
             # Return the server configuration (excluding sensitive information)
             server_config = load_server_config()
             # Remove any sensitive fields if needed
+            self.logger.debug(f"Sending server config: {server_config}")
             self.send_json_response(server_config)
         except Exception as e:
+            self.logger.error(f"Error handling server config request: {str(e)}")
             self.send_error_response(str(e))
     
     def handle_debug_commands(self):
         """Handle /debug/commands endpoint to display command history"""
         try:
+            self.logger.info("Handling debug commands request")
             # Get command history from the LSF manager
             command_history = self.lsf_manager.command_history
             
@@ -449,6 +493,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 formatted_history.append(formatted_cmd)
             
             # Send response
+            self.logger.debug(f"Sending command history with {len(formatted_history)} entries")
             self.send_json_response({
                 "success": True,
                 "command_history": formatted_history
@@ -464,6 +509,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
     def handle_debug_environment(self):
         """Handle /debug/environment endpoint to display environment information"""
         try:
+            self.logger.info("Handling debug environment request")
             # Get basic environment info
             env_info = {
                 "Python Version": platform.python_version(),
@@ -514,10 +560,20 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
 
     def send_json_response(self, data, status=200):
         """Send JSON response to client"""
+        self.logger.debug(f"Sending JSON response with status {status}")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         self.end_headers()
+        
+        # Log a brief summary of the data if it's large
+        if isinstance(data, list) and len(data) > 5:
+            self.logger.debug(f"Response data: list with {len(data)} items")
+        elif isinstance(data, dict) and len(data) > 10:
+            self.logger.debug(f"Response data: dictionary with {len(data)} keys")
+        else:
+            self.logger.debug(f"Response data: {data}")
+            
         self.wfile.write(json.dumps(data).encode())
     
     def send_error_response(self, message, status_code=500):
@@ -528,6 +584,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         elif not isinstance(message, str):
             message = str(message)
         
+        self.logger.error(f"Sending error response with status {status_code}: {message}")
         self.send_response(status_code)
         self.send_header('Content-type', 'application/json')
         self.end_headers()
@@ -539,6 +596,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
     def handle_vnc_config(self):
         """Handle VNC configuration request"""
         try:
+            self.logger.info("Handling VNC configuration request")
             # Get VNC configuration
             config = {
                 "window_managers": self.config_manager.get_available_window_managers(),
@@ -546,8 +604,10 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 "defaults": self.config_manager.get_vnc_defaults(),
                 "sites": self.config_manager.get_available_sites()
             }
+            self.logger.debug(f"Sending VNC config: {config}")
             self.send_json_response(config)
         except Exception as e:
+            self.logger.error(f"Error handling VNC config request: {str(e)}")
             self.send_error_response(str(e))
 
     def handle_vnc_start(self):
@@ -714,13 +774,16 @@ def load_server_config():
     """Load server configuration from JSON file"""
     config_path = Path(__file__).parent.parent.parent / "config" / "default_server_config.json"
     
+    # Initialize logger early
+    logger = logging.getLogger('myvnc')
+    
     try:
         with open(config_path, 'r') as f:
             config = json.load(f)
-            print(f"DEBUG: Loaded server config: {config}")
+            # Remove the debug logging here to avoid duplication
             return config
     except FileNotFoundError:
-        print(f"Warning: Server configuration file not found at {config_path}")
+        logger.warning(f"Server configuration file not found at {config_path}")
         return {
             "host": "aus-misc",
             "port": 9143,
@@ -730,7 +793,7 @@ def load_server_config():
             "logdir": "logs"  # Ensure logdir is set in the default config
         }
     except json.JSONDecodeError:
-        print(f"Warning: Invalid JSON in server configuration file")
+        logger.warning(f"Invalid JSON in server configuration file")
         return {
             "host": "aus-misc",
             "port": 9143,
@@ -812,22 +875,21 @@ def run_server(host=None, port=None, directory=None, config=None):
     if config is None:
         config = load_server_config()
     
-    # Print the configuration for debugging
-    print(f"DEBUG: Config passed to run_server: {config}")
-    
     # Just get the existing logger rather than setting up logging again
     logger = get_logger()
+    
+    # Log the config only once in this function
+    if config.get("debug", False):
+        logger.debug(f"Server configuration: {config}")
     
     # Get log file path and display it clearly
     log_file = get_current_log_file()
     if log_file:
         log_path = log_file.absolute()
-        # Print this message to both console and log file
+        # Log to file
         logger.info(f"Server logs are being written to: {log_path}")
-        # Also print to stdout for visibility
-        print(f"\nINFO: Full log file path: {log_path}\n")
     else:
-        print("\nWARNING: No log file is being used. Logs are only being written to console.\n")
+        logger.warning("No log file is being used. Logs are only being written to console.")
     
     # Source LSF environment after logging is set up
     source_lsf_environment()
@@ -835,6 +897,8 @@ def run_server(host=None, port=None, directory=None, config=None):
     # Override with command line arguments if provided
     host = host or config.get("host", "aus-misc")
     port = port or config.get("port", 9143)
+    
+    logger.info(f"Server configured to run on {host}:{port}")
     
     # If host is 'localhost' or '127.0.0.1', replace it with the fully qualified domain name 
     # for better remote access
@@ -853,19 +917,25 @@ def run_server(host=None, port=None, directory=None, config=None):
         # Use the web directory
         directory = Path(__file__).parent / 'static'
     
+    logger.info(f"Using static directory: {directory}")
+    
     # Ensure data directory exists
     data_dir = Path(__file__).parent.parent / "data"
     data_dir.mkdir(exist_ok=True)
+    logger.info(f"Ensuring data directory exists: {data_dir}")
     
     # Set serving directory
     os.chdir(directory)
+    logger.info(f"Changed working directory to: {os.getcwd()}")
     
     # Check if the address and port are available
     try:
         # Create a test socket to check availability
+        logger.info(f"Testing if {host}:{port} is available...")
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.bind((host, port))
         sock.close()
+        logger.info(f"Socket test successful, {host}:{port} is available")
     except OSError as e:
         if e.errno == 99:  # Cannot assign requested address
             logger.error(f"Error: Cannot bind to address {host}:{port} - Address not available")
@@ -882,11 +952,13 @@ def run_server(host=None, port=None, directory=None, config=None):
     # Create server
     server_address = (host, port)
     try:
-        httpd = http.server.HTTPServer(server_address, VNCRequestHandler)
+        logger.info(f"Creating HTTP server on {host}:{port}")
+        httpd = LoggingHTTPServer(server_address, VNCRequestHandler)
         
         # Set timeout if specified in config
         if "timeout" in config:
             httpd.timeout = config["timeout"]
+            logger.info(f"Server timeout set to {config['timeout']} seconds")
         
         # Get fully qualified hostname for display
         display_host = host
@@ -904,20 +976,24 @@ def run_server(host=None, port=None, directory=None, config=None):
         if log_file:
             log_path = log_file.absolute()
             logger.info(f"All server logs will be written to: {log_path}")
-            # Also print to stdout for visibility
-            print(f"INFO: Server logs are being written to: {log_path}")
         
         if config.get("debug", False):
             logger.info(f"Debug mode: ON")
-            logger.debug(f"Config: {config}")
+        
+        logger.info("Server is ready to handle requests")
         
         try:
+            logger.info("Starting server loop - waiting for connections")
             httpd.serve_forever()
         except KeyboardInterrupt:
-            logger.info("Server stopped")
+            logger.info("Server stopped by keyboard interrupt")
+        except Exception as e:
+            logger.error(f"Error in server loop: {str(e)}")
     except Exception as e:
-        logger.error(f"Error starting server: {str(e)}")
+        logger.error(f"Error creating server: {str(e)}")
         return
+    
+    logger.info("Server has been shutdown")
 
 def parse_args():
     """Parse command line arguments"""
