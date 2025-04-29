@@ -161,7 +161,12 @@ def find_server_log_file(pid):
             if f'myvnc_{pid}.log' in file.name:
                 return str(file)
     except Exception as e:
-        print(f"Error searching for log files: {e}")
+        logger = get_logger()
+        if logger:
+            logger.error(f"Error searching for log files: {e}")
+        else:
+            # Fall back to print only if logger is not available
+            print(f"Error searching for log files: {e}")
     
     return None
 
@@ -227,7 +232,7 @@ def start_server():
         # Always use fully qualified domain name
         host = get_fully_qualified_hostname(host)
         url = f"http://{host}:{port}"
-        print(f"Server is already running at {url}")
+        logger.info(f"Server is already running at {url}")
         return
     
     # If we have a PID file but the server is not running, clean it up
@@ -249,7 +254,7 @@ def start_server():
         # Always use fully qualified domain name
         host = get_fully_qualified_hostname(host)
         url = f"http://{host}:{port}"
-        print(f"Server is already running at {url}")
+        logger.info(f"Server is already running at {url}")
         return
     
     # Start the server
@@ -294,8 +299,8 @@ def start_server():
         # URL with FQDN
         url = f"http://{fqdn_host}:{port}"
         
-        # Format timestamp
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
+        # Log the URL
+        logger.info(f"Server URL: {url}")
         
         # Capture any initial output from the process
         initial_output = ""
@@ -318,19 +323,18 @@ def start_server():
                         logger.info(f"Process output: {line}")
         except Exception as e:
             logger.warning(f"Error reading process output: {e}")
-            
-        # Print server started message with URL
-        print(f"{timestamp} - myvnc - INFO - Server started with PID {process.pid}")
-        print(f"{timestamp} - myvnc - INFO - Server URL: {url}")
-        
-        # Log any redirected output
-        if initial_output:
-            print(initial_output)
     else:
         # Process exited, read the output to see why
-        output = process.stdout.read()
-        logger.error(f"Server failed to start:\n{output}")
-        sys.exit(1)
+        output = process.stdout.read() if process.stdout else ""
+        returncode = process.returncode if process.returncode is not None else "unknown"
+        
+        logger.error(f"Failed to start server (exit code: {returncode})")
+        
+        if output:
+            for line in output.splitlines():
+                logger.error(f"Server output: {line}")
+        
+        return False
 
 def stop_server():
     """Stop the server if it's running"""
@@ -413,18 +417,11 @@ def restart_server():
         fqdn_host = get_fully_qualified_hostname(host)
         url = f"http://{fqdn_host}:{port}"
         
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-        print(f"{timestamp} - myvnc - INFO - Server restarted with PID: {pid}")
-        print(f"{timestamp} - myvnc - INFO - Server URL: {url}")
-        print(f"{timestamp} - myvnc - INFO - New log file: {server_log_file if server_log_file else 'Unknown'}")
-        
-        # Also log to the logger
+        # Log restart information
         logger.info(f"Server restarted with PID: {pid}")
         logger.info(f"Server URL: {url}")
         logger.info(f"New log file: {server_log_file if server_log_file else 'Unknown'}")
     else:
-        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-        print(f"{timestamp} - myvnc - ERROR - Failed to restart server or get the new PID")
         logger.error("Failed to restart server or get the new PID")
 
 def server_status():
@@ -443,11 +440,14 @@ def server_status():
         if pid:
             write_pid_file(pid)
     
+    # Calculate timestamp once, for consistent output
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
+    
     if pid is None or not is_server_running(pid):
         logger.info("Server status: Not running")
         
-        # Print status for user to see
-        print("Server status: Not running")
+        # Print status for user to see but with proper timestamp
+        print(f"{timestamp} - myvnc - INFO - Server status: Not running")
         return
     
     # Server is running, get more information
@@ -460,22 +460,13 @@ def server_status():
     # Always use FQDN even if config has localhost
     fqdn_host = get_fully_qualified_hostname(host)
     
-    status_info = {
-        'status': 'Running',
-        'pid': pid,
-        'host': host,
-        'port': port,
-        'url': f'http://{fqdn_host}:{port}',
-        'logdir': logdir,
-        'uptime': uptime
-    }
-    
     # Find the log file for this PID
     server_log_file = find_server_log_file(pid)
-    if server_log_file:
-        status_info['current_log'] = server_log_file
     
-    # Print status information
+    # Log status information to logger
+    logger.info(f"Server status: Running (PID: {pid}, Uptime: {uptime})")
+    
+    # Print status information with consistent timestamp
     print("Server status:")
     print(f"  Status: Running")
     print(f"  PID: {pid}")
@@ -485,8 +476,6 @@ def server_status():
     print(f"  Log directory: {logdir}")
     print(f"  Current log: {server_log_file if server_log_file else 'Unknown'}")
     print(f"  Uptime: {uptime}")
-    
-    logger.info(f"Server status: Running (PID: {pid}, Uptime: {uptime})")
 
 def main():
     """Main entry point"""

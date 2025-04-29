@@ -838,10 +838,10 @@ def load_server_config():
         with open(config_path, 'r') as f:
             config = json.load(f)
             logger.info(f"Successfully loaded config from: {config_path}")
-            print(f"INFO: Using configuration file: {config_path}")
+            logger.info(f"Using configuration file: {config_path}")
     except FileNotFoundError:
         logger.warning(f"Configuration file not found: {config_path}")
-        print(f"WARNING: Configuration file not found: {config_path}")
+        logger.warning(f"Using default configuration values")
         config = {
             "host": "aus-misc",
             "port": 9143,
@@ -852,7 +852,7 @@ def load_server_config():
         }
     except json.JSONDecodeError:
         logger.warning(f"Invalid JSON in configuration file: {config_path}")
-        print(f"WARNING: Invalid JSON in configuration file: {config_path}")
+        logger.warning(f"Using default configuration values")
         config = {
             "host": "aus-misc",
             "port": 9143,
@@ -862,8 +862,8 @@ def load_server_config():
             "logdir": "/tmp"  # Default to a safe location
         }
     
-    # Print config info to console as well for visibility
-    print(f"Server configuration: host={config.get('host')}, port={config.get('port')}, logdir={config.get('logdir')}")
+    # Log config info to console for visibility
+    logger.info(f"Server configuration: host={config.get('host')}, port={config.get('port')}, logdir={config.get('logdir')}")
     
     return config
 
@@ -874,10 +874,14 @@ def load_lsf_config():
     default_config_path = Path(__file__).parent.parent.parent / "config" / "default_lsf_config.json"
     
     try:
+        logger.info(f"Loading LSF configuration from: {default_config_path}")
         with open(default_config_path, 'r') as f:
-            return json.load(f)
+            config = json.load(f)
+            logger.info(f"Successfully loaded LSF config from: {default_config_path}")
+            return config
     except (FileNotFoundError, json.JSONDecodeError):
-        logger.warning(f"Warning: Default LSF configuration file not found or invalid at {default_config_path}")
+        logger.warning(f"LSF configuration file not found or invalid at {default_config_path}")
+        logger.warning("Using default LSF configuration values")
         return {
             "default_settings": {
                 "queue": "interactive",
@@ -1066,10 +1070,13 @@ def parse_args():
 if __name__ == '__main__':
     args = parse_args()
     
+    # Initialize logger
+    logger = get_logger()
+    
     if args.config:
         # Custom config path specified
         config_path = Path(args.config)
-        print(f"Using custom config file: {config_path}")
+        logger.info(f"Using custom config file: {config_path}")
         # Not implemented here, but you could load this config instead
     
     run_server(host=args.host, port=args.port) 
