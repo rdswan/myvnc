@@ -222,12 +222,32 @@ def start_server():
     """Start the server if it's not already running"""
     logger = setup_logging_for_manage()
     
-    # Check if the server is already running
-    pid = read_pid_file()
-    if pid and is_server_running(pid):
-        logger.info(f"Server is already running with PID {pid}")
-        
-        # Report server URL
+    # First check for any existing server processes
+    running_pid = None
+    
+    # Check if we have a PID file
+    pid_from_file = read_pid_file()
+    if pid_from_file and is_server_running(pid_from_file):
+        running_pid = pid_from_file
+        # Log the warning with proper formatting to make it stand out
+        logger.warning(f"")
+        logger.warning(f"=== SERVER ALREADY RUNNING ===")
+        logger.warning(f"An instance of the server is already running with PID {running_pid}")
+    else:
+        # If PID file doesn't exist or its PID is not running, 
+        # try to find any server process that might be running
+        running_pid = find_server_process()
+        if running_pid:
+            # Log the warning with proper formatting to make it stand out
+            logger.warning(f"")
+            logger.warning(f"=== SERVER ALREADY RUNNING ===")
+            logger.warning(f"An existing server instance was found with PID {running_pid}")
+            
+            # Update PID file to match the found process
+            write_pid_file(running_pid)
+    
+    if running_pid:
+        # Report server URL for existing server
         config = load_server_config()
         host = config.get('host', 'localhost')
         port = config.get('port', '9143')
@@ -242,52 +262,26 @@ def start_server():
         protocol = "https" if use_https else "http"
         
         url = f"{protocol}://{host}:{port}"
-        logger.info(f"Server URL: {url}")
+        logger.warning(f"On instance on server URL: {url} is already running!")
         
         # Find the server log file
-        server_log_file = find_server_log_file(pid)
+        server_log_file = find_server_log_file(running_pid)
         if server_log_file:
-            logger.info(f"Log file: {server_log_file}")
+            logger.warning(f"Existing instance log file: {server_log_file}")
         
-        return pid
+        logger.warning(f"No action taken. Use 'manage.py restart' if you need to restart the server.")
+        
+        # Exit gracefully - don't start a new server
+        return running_pid
     
-    # If we have a PID file but the server is not running, clean it up
-    if pid:
-        logger.info(f"Removing stale PID file for PID {pid}")
-        os.remove(get_pid_file())
+    # If we get here, there's no existing server running, so start a new one
+    logger.info(f"No existing server found. Starting MyVNC server")
     
-    # Check if we can find the server process even without a PID file
-    pid = find_server_process()
-    if pid:
-        logger.info(f"Server is already running with PID {pid} (discovered)")
-        write_pid_file(pid)
-        
-        # Report server URL
-        config = load_server_config()
-        host = config.get('host', 'localhost')
-        port = config.get('port', '9143')
-        
-        # Always use fully qualified domain name
-        host = get_fully_qualified_hostname(host)
-        
-        # Check if HTTPS is configured
-        ssl_cert = config.get('ssl_cert', '')
-        ssl_key = config.get('ssl_key', '')
-        use_https = ssl_cert and ssl_key and os.path.exists(ssl_cert) and os.path.exists(ssl_key)
-        protocol = "https" if use_https else "http"
-        
-        url = f"{protocol}://{host}:{port}"
-        logger.info(f"Server URL: {url}")
-        
-        # Find the server log file
-        server_log_file = find_server_log_file(pid)
-        if server_log_file:
-            logger.info(f"Log file: {server_log_file}")
-        
-        return pid
-    
-    # Start the server
-    logger.info("Starting MyVNC server")
+    # Remove any stale PID file if it exists
+    if pid_from_file:
+        logger.info(f"Removing stale PID file for PID {pid_from_file}")
+        if os.path.exists(get_pid_file()):
+            os.remove(get_pid_file())
     
     # Get the full path to main.py
     main_script = Path(os.path.dirname(os.path.abspath(__file__))) / "main.py"
@@ -338,14 +332,20 @@ def start_server():
         url = f"{protocol}://{fqdn_host}:{port}"
         
         # Log the URL
+        logger.info(f"Server successfully started with PID {pid}")
+        logger.info(f"")
+        logger.info(f"=== SERVER STARTED SUCCESSFULLY ===")
+        logger.info(f"PID: {pid}")
         logger.info(f"Server URL: {url}")
+        if use_https:
+            logger.info(f"SSL/HTTPS: Enabled")
         
         # Wait a moment for the log file to be created
         time.sleep(0.5)
         server_log_file = find_server_log_file(pid)
         if server_log_file:
             logger.info(f"Log file: {server_log_file}")
-            
+        
         return pid
     except Exception as e:
         logger.error(f"Failed to start server: {e}")
@@ -366,7 +366,7 @@ def stop_server():
     
     # If we still don't have a PID, the server is not running
     if pid is None:
-        logger.info("Server is not running")
+        logger.info(f"Server is not running")
         return
     
     # Check if the process is actually running
@@ -376,6 +376,8 @@ def stop_server():
         return
     
     # Send a SIGTERM signal to gracefully stop the server
+    logger.info(f"")
+    logger.info(f"=== STOPPING SERVER ===")
     logger.info(f"Stopping server with PID {pid}")
     
     try:
@@ -398,7 +400,8 @@ def stop_server():
         if os.path.exists(get_pid_file()):
             os.remove(get_pid_file())
             
-        logger.info("Server stopped")
+        logger.info(f"")
+        logger.info(f"=== SERVER STOPPED SUCCESSFULLY ===")
         
     except ProcessLookupError:
         logger.warning(f"Process {pid} not found, removing PID file")
@@ -409,7 +412,8 @@ def restart_server():
     """Restart the server"""
     logger = setup_logging_for_manage()
     
-    logger.info("Restarting server")
+    logger.info(f"")
+    logger.info(f"=== RESTARTING SERVER ===")
     
     # Stop the existing server
     stop_server()
@@ -440,10 +444,7 @@ def server_status():
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
     
     if pid is None or not is_server_running(pid):
-        logger.info("Server status: Not running")
-        
-        # Print status for user to see but with proper timestamp
-        print(f"{timestamp} - myvnc - INFO - Server status: Not running")
+        logger.info(f"Server status: Not running")
         return
     
     # Server is running, get more information
@@ -465,23 +466,20 @@ def server_status():
     use_https = ssl_cert and ssl_key and os.path.exists(ssl_cert) and os.path.exists(ssl_key)
     protocol = "https" if use_https else "http"
     
-    # Log status information to logger
-    logger.info(f"Server status: Running (PID: {pid}, Uptime: {uptime})")
-    
-    # Print status information with consistent timestamp
-    print("Server status:")
-    print(f"  Status: Running")
-    print(f"  PID: {pid}")
-    print(f"  Host: {host}")
-    print(f"  Port: {port}")
-    print(f"  URL: {protocol}://{fqdn_host}:{port}")
-    print(f"  SSL: {'Enabled' if use_https else 'Disabled'}")
+    # Log status information
+    logger.info(f"Server status:")
+    logger.info(f"  Status: Running")
+    logger.info(f"  PID: {pid}")
+    logger.info(f"  Host: {host}")
+    logger.info(f"  Port: {port}")
+    logger.info(f"  URL: {protocol}://{fqdn_host}:{port}")
+    logger.info(f"  SSL: {'Enabled' if use_https else 'Disabled'}")
     if use_https:
-        print(f"  SSL Certificate: {ssl_cert}")
-        print(f"  SSL Key: {ssl_key}")
-    print(f"  Log directory: {logdir}")
-    print(f"  Current log: {server_log_file if server_log_file else 'Unknown'}")
-    print(f"  Uptime: {uptime}")
+        logger.info(f"  SSL Certificate: {ssl_cert}")
+        logger.info(f"  SSL Key: {ssl_key}")
+    logger.info(f"  Log directory: {logdir}")
+    logger.info(f"  Current log: {server_log_file if server_log_file else 'Unknown'}")
+    logger.info(f"  Uptime: {uptime}")
 
 def main():
     """Main entry point"""
