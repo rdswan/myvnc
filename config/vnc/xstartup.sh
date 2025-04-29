@@ -20,6 +20,7 @@ exec >> "$HOME/.vnc/xstartup.log" 2>&1
 echo "Starting VNC session at $(date)"
 
 # Set basic X settings
+touch $HOME/.Xresources
 xrdb $HOME/.Xresources
 xsetroot -solid grey
 vncconfig -iconic &
