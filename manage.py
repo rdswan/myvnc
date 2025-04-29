@@ -20,6 +20,7 @@ import subprocess
 import datetime
 import json
 import psutil
+import glob
 from pathlib import Path
 
 # Add the current directory to the path so we can import from the myvnc package
@@ -40,7 +41,12 @@ def setup_logging_for_manage():
 
 def get_pid_file():
     """Get the path to the PID file"""
-    return Path(os.path.dirname(os.path.abspath(__file__))) / "myvnc_server.pid"
+    # Load server configuration to get logdir
+    config = load_server_config()
+    logdir = config.get('logdir', '/tmp')
+    
+    # Use the logdir from the config file
+    return Path(logdir) / "myvnc_server.pid"
 
 def write_pid_file(pid):
     """Write the PID to the PID file"""
@@ -112,6 +118,39 @@ def get_uptime(pid):
             return f"{seconds}s"
     return "Unknown"
 
+def get_log_filename_for_pid(pid):
+    """Get the log filename using PID format"""
+    config = load_server_config()
+    logdir = config.get('logdir', '/tmp')
+    return str(Path(logdir) / f"myvnc_{pid}.log")
+
+def find_server_log_file(pid):
+    """Find the log file associated with the given PID"""
+    if not pid:
+        return None
+    
+    # Get server config for log directory
+    config = load_server_config()
+    
+    log_dir = config.get('logdir', '/tmp')
+    log_path = Path(log_dir)
+    
+    # Look for log file with PID in name
+    log_file = log_path / f'myvnc_{pid}.log'
+    
+    if log_file.exists():
+        return str(log_file)
+    
+    # Fallback: Check all log files in directory if specific file not found
+    try:
+        for file in log_path.glob('myvnc_*.log'):
+            if f'myvnc_{pid}.log' in file.name:
+                return str(file)
+    except Exception as e:
+        print(f"Error searching for log files: {e}")
+    
+    return None
+
 def start_server():
     """Start the server if it's not already running"""
     logger = setup_logging_for_manage()
@@ -159,6 +198,10 @@ def start_server():
         print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - INFO - Server started with PID {process.pid}")
         logger.info(f"Server started with PID {process.pid}")
         write_pid_file(process.pid)
+        
+        # We need to pass the PID to the main.py script somehow
+        # This is usually done by creating an environment variable or a configuration file
+        # For now, we'll just make sure we can find the log file when needed
     else:
         # Process exited, read the output to see why
         output = process.stdout.read().decode('utf-8')
@@ -264,7 +307,7 @@ def server_status():
     
     host = config.get('host', 'localhost')
     port = config.get('port', '9143')
-    logdir = config.get('logdir', 'logs')
+    logdir = config.get('logdir', '/tmp')
     
     status_info = {
         'status': 'Running',
@@ -276,10 +319,10 @@ def server_status():
         'uptime': uptime
     }
     
-    # Current log file
-    log_file = get_current_log_file()
-    if log_file:
-        status_info['current_log'] = str(log_file)
+    # Find the log file for this PID
+    server_log_file = find_server_log_file(pid)
+    if server_log_file:
+        status_info['current_log'] = server_log_file
     
     # Print status information
     print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - INFO - Server status:")
@@ -289,7 +332,7 @@ def server_status():
     print(f"  Port: {port}")
     print(f"  URL: http://{host}:{port}")
     print(f"  Log directory: {logdir}")
-    print(f"  Current log: {log_file if log_file else 'Unknown'}")
+    print(f"  Current log: {server_log_file if server_log_file else 'Unknown'}")
     print(f"  Uptime: {uptime}")
     
     logger.info(f"Server status: Running (PID: {pid}, Uptime: {uptime})")
