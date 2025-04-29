@@ -3,8 +3,8 @@ import sys
 import logging
 import atexit
 import subprocess
+import datetime
 from pathlib import Path
-from datetime import datetime
 
 # Global logger instance
 logger = None
@@ -33,8 +33,22 @@ class LoggingTee:
         self.file_handler.flush()  # Ensure immediate writing to disk
     
     def flush(self):
-        self.original_stream.flush()
-        self.file_handler.flush()
+        try:
+            self.original_stream.flush()
+        except BrokenPipeError:
+            # Handle broken pipe error - this can happen when the parent process terminates
+            pass
+        except Exception as e:
+            # Log other exceptions but don't crash
+            print(f"Error flushing original stream: {str(e)}")
+        
+        try:
+            # Check if the file handler is closed before flushing
+            if not self.file_handler.closed:
+                self.file_handler.flush()
+        except Exception as e:
+            # Log other exceptions but don't crash
+            print(f"Error flushing file handler: {str(e)}")
         
     def isatty(self):
         # Needed for compatibility with interactive prompts
@@ -45,6 +59,13 @@ def register_subprocess_handler():
     old_popen = subprocess.Popen
     
     def new_popen(*args, **kwargs):
+        # Log the command that's about to be executed
+        cmd_str = ' '.join(str(arg) for arg in args[0]) if args and isinstance(args[0], (list, tuple)) else str(args[0])
+        timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]
+        print(f"{timestamp} - myvnc - INFO - COMMAND: {cmd_str}")
+        if logger:
+            logger.info(f"EXECUTING COMMAND: {cmd_str}")
+        
         # Make sure stdout and stderr are captured
         if 'stdout' not in kwargs:
             kwargs['stdout'] = subprocess.PIPE
@@ -60,25 +81,29 @@ def register_subprocess_handler():
         # Override communicate to log output
         def new_communicate(*args, **kwargs):
             output, error = old_communicate(*args, **kwargs)
+            
+            # Format timestamp consistently
+            timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]
+            
             if output:
                 try:
                     output_str = output.decode('utf-8')
+                    print(f"{timestamp} - myvnc - INFO - COMMAND OUTPUT: {cmd_str}\n{output_str}")
                     if logger:
+                        logger.info(f"COMMAND OUTPUT from '{cmd_str}':")
                         for line in output_str.splitlines():
-                            if line.strip():
-                                logger.info(f"SUBPROCESS OUTPUT: {line}")
-                    print(f"SUBPROCESS OUTPUT: {output_str}")
+                            logger.info(f"  {line}")
                 except Exception as e:
                     print(f"Error logging subprocess output: {str(e)}")
             
             if error:
                 try:
                     error_str = error.decode('utf-8')
+                    print(f"{timestamp} - myvnc - ERROR - COMMAND ERROR: {cmd_str}\n{error_str}")
                     if logger:
+                        logger.error(f"COMMAND ERROR from '{cmd_str}':")
                         for line in error_str.splitlines():
-                            if line.strip():
-                                logger.error(f"SUBPROCESS ERROR: {line}")
-                    print(f"SUBPROCESS ERROR: {error_str}")
+                            logger.error(f"  {line}")
                 except Exception as e:
                     print(f"Error logging subprocess error: {str(e)}")
                     
@@ -158,7 +183,7 @@ def setup_logging(config=None):
         sys.stderr = LoggingTee(log_file_handle, original_stderr)
         
         # Register close function to avoid file handle leaks
-        atexit.register(lambda: log_file_handle.close() if log_file_handle else None)
+        atexit.register(lambda: log_file_handle.close() if log_file_handle and not log_file_handle.closed else None)
         
         # Register subprocess handler to capture output from subprocesses
         register_subprocess_handler()

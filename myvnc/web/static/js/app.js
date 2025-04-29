@@ -130,6 +130,7 @@ async function loadVNCConfig() {
         document.getElementById('vnc-name').placeholder = `${vncConfig.defaults.name_prefix}_${randomId}`;
     } catch (error) {
         console.error('Failed to load VNC configuration:', error);
+        showMessage('Could not load VNC configuration. Please try again later.', 'error');
     }
 }
 

@@ -18,9 +18,9 @@ class ConfigManager:
         else:
             self.config_dir = Path(config_dir)
         
-        # Load configurations
-        self.vnc_config = self._load_config("vnc_config.json")
-        self.lsf_config = self._load_config("lsf_config.json")
+        # Load configurations - use the default_prefix in filenames
+        self.vnc_config = self._load_config("default_vnc_config.json")
+        self.lsf_config = self._load_config("default_lsf_config.json")
     
     def _load_config(self, filename):
         """
@@ -40,6 +40,17 @@ class ConfigManager:
             with open(config_path, 'r') as f:
                 return json.load(f)
         except FileNotFoundError:
+            # If the file has default_ prefix and is not found, try without prefix for backward compatibility
+            if filename.startswith("default_"):
+                alt_filename = filename.replace("default_", "", 1)
+                alt_path = self.config_dir / alt_filename
+                try:
+                    with open(alt_path, 'r') as f:
+                        return json.load(f)
+                except FileNotFoundError:
+                    raise RuntimeError(f"Configuration file {filename} not found at {config_path} (also tried {alt_path})")
+                except json.JSONDecodeError:
+                    raise RuntimeError(f"Invalid JSON in configuration file {alt_filename}")
             raise RuntimeError(f"Configuration file {filename} not found at {config_path}")
         except json.JSONDecodeError:
             raise RuntimeError(f"Invalid JSON in configuration file {filename}")

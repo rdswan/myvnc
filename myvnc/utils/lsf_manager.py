@@ -294,8 +294,9 @@ class LSFManager:
             
             # Convert command list to string for logging
             cmd_str = ' '.join(str(arg) for arg in bsub_cmd)
-            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - INFO - Executing command: {cmd_str}")
-            self.logger.info(f"Executing command: {cmd_str}")
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]
+            print(f"{timestamp} - myvnc - INFO - SUBMIT COMMAND: {cmd_str}")
+            self.logger.info(f"SUBMIT COMMAND: {cmd_str}")
             
             # Add to command history before execution
             cmd_entry = {
@@ -309,39 +310,25 @@ class LSFManager:
             
             # Execute the command
             try:
-                result = subprocess.run(
-                    bsub_cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    # Remove text=True for Python 3.6 compatibility
-                    # text=True,
-                    check=True
-                )
-                # Convert bytes to string for Python 3.6
-                stdout = result.stdout.decode('utf-8')
-                stderr = result.stderr.decode('utf-8')
+                # Use _run_command to ensure consistent logging
+                self.logger.info(f"Submitting VNC job with bsub")
+                # Use _run_command instead of subprocess.run directly
+                stdout = self._run_command(bsub_cmd)
                 
                 # Extract job ID from output
                 job_id_match = re.search(r'Job <(\d+)>', stdout)
                 job_id = job_id_match.group(1) if job_id_match else 'unknown'
                 
-                # Update command history with success
-                cmd_entry['stdout'] = stdout
-                cmd_entry['stderr'] = stderr
-                cmd_entry['success'] = True
+                self.logger.info(f"Job submitted successfully, ID: {job_id}")
                 
                 return job_id
                 
-            except subprocess.CalledProcessError as e:
-                # Convert bytes to string for Python 3.6
-                stdout = e.stdout.decode('utf-8') if e.stdout else ''
-                stderr = e.stderr.decode('utf-8') if e.stderr else ''
-                
-                error_msg = f"Command failed: {stderr}"
+            except Exception as e:
+                error_msg = f"Command failed: {str(e)}"
+                self.logger.error(f"Job submission failed: {error_msg}")
                 
                 # Update command history with failure
-                cmd_entry['stdout'] = stdout
-                cmd_entry['stderr'] = error_msg
+                cmd_entry['stderr'] += f"\nException: {str(e)}"
                 
                 raise Exception(error_msg)
                 
@@ -397,24 +384,56 @@ class LSFManager:
             
             # Use bjobs with the exact format specified by the user
             cmd = f'bjobs -o "jobid stat user queue first_host run_time command delimiter=\';\'" -noheader -u {user} -J myvnc_vncserver'
-            print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - INFO - Executing command: {cmd}")
-            self.logger.info(f"Executing command: {cmd}")
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]
+            print(f"{timestamp} - myvnc - INFO - BJOBS COMMAND: {cmd}")
+            self.logger.info(f"BJOBS COMMAND: {cmd}")
             
+            # Add to command history
+            cmd_entry = {
+                'command': cmd,
+                'stdout': '',
+                'stderr': '',
+                'success': False,  # Will update after execution
+                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            self.command_history.append(cmd_entry)
+            
+            # Run the command and capture output directly
             proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             output, error = proc.communicate()
             
-            if error:
-                error_text = error.decode('utf-8').strip()
-                if "delimiter" in error_text and "Illegal job ID" in error_text:
+            # Decode and log the output
+            output_str = output.decode('utf-8').strip() if output else ""
+            error_str = error.decode('utf-8').strip() if error else ""
+            
+            # Update command history
+            cmd_entry['stdout'] = output_str
+            cmd_entry['stderr'] = error_str
+            cmd_entry['success'] = proc.returncode == 0
+            
+            # Log the results
+            if output_str:
+                print(f"{timestamp} - myvnc - INFO - BJOBS OUTPUT:\n{output_str}")
+                self.logger.info(f"BJOBS OUTPUT: {len(output_str.splitlines())} line(s)")
+                for line in output_str.splitlines():
+                    self.logger.info(f"  {line}")
+            
+            if error_str:
+                print(f"{timestamp} - myvnc - WARNING - BJOBS STDERR:\n{error_str}")
+                self.logger.warning(f"bjobs stderr output:")
+                for line in error_str.splitlines():
+                    self.logger.warning(f"  {line}")
+                    
+                if "delimiter" in error_str and "Illegal job ID" in error_str:
                     # Older LSF versions don't support the delimiter parameter
                     # Fall back to standard bjobs command
-                    self.logger.warning(f"LSF version doesn't support delimiter: {error_text}")
+                    self.logger.warning(f"LSF version doesn't support delimiter: {error_str}")
                     return self._get_active_vnc_jobs_standard()
                 else:
-                    self.logger.error(f"Error in bjobs command: {error_text}")
+                    self.logger.error(f"Error in bjobs command: {error_str}")
                     return jobs
             
-            lines = output.decode('utf-8').strip().split('\n')
+            lines = output_str.splitlines() if output_str else []
             self.logger.debug(f"bjobs command output: {len(lines)} line(s)")
             
             if not lines or (len(lines) == 1 and not lines[0].strip()):
