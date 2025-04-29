@@ -5,7 +5,15 @@
         "color_depth": 24,
         "name_prefix": "vnc_session",
         "site": "Austin",
-        "vncserver_path": "/usr/bin/vncserver"
+        "vncserver_path": "/usr/bin/vncserver",
+        "xstartup_path": "config/vnc/xstartup.sh",
+        "use_custom_xstartup": true
+    },
+    "window_manager_configs": {
+        "gnome": "config/vnc/gnome_config.sh",
+        "kde": "config/vnc/kde_config.sh",
+        "xfce": "config/vnc/xfce_config.sh",
+        "mate": "config/vnc/mate_config.sh"
     },
     "available_window_managers": [
         "gnome",
