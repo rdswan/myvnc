@@ -3,7 +3,8 @@
         "queue": "interactive",
         "num_cores": 2,
         "memory_gb": 16,
-        "job_name": "myvnc_vncserver"
+        "job_name": "myvnc_vncserver",
+        "default_site": "Austin"
     },
     "available_queues": [
         "interactive",
