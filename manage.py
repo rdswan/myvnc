@@ -232,8 +232,14 @@ def start_server():
         # Always use fully qualified domain name
         host = get_fully_qualified_hostname(host)
         url = f"http://{host}:{port}"
-        logger.info(f"Server is already running at {url}")
-        return
+        logger.info(f"Server URL: {url}")
+        
+        # Find the server log file
+        server_log_file = find_server_log_file(pid)
+        if server_log_file:
+            logger.info(f"Log file: {server_log_file}")
+        
+        return pid
     
     # If we have a PID file but the server is not running, clean it up
     if pid:
@@ -254,8 +260,14 @@ def start_server():
         # Always use fully qualified domain name
         host = get_fully_qualified_hostname(host)
         url = f"http://{host}:{port}"
-        logger.info(f"Server is already running at {url}")
-        return
+        logger.info(f"Server URL: {url}")
+        
+        # Find the server log file
+        server_log_file = find_server_log_file(pid)
+        if server_log_file:
+            logger.info(f"Log file: {server_log_file}")
+        
+        return pid
     
     # Start the server
     logger.info("Starting MyVNC server")
@@ -277,24 +289,27 @@ def start_server():
     env = os.environ.copy()
     env['MYVNC_FQDN_HOST'] = fqdn_host
     
-    # Start the server process with explicit FQDN
-    process = subprocess.Popen(
-        [sys.executable, str(main_script), '--host', fqdn_host], 
-        stdout=subprocess.PIPE, 
-        stderr=subprocess.STDOUT,
-        start_new_session=True,  # Detach from terminal
-        universal_newlines=True,  # Use text mode for Python 3.6 compatibility
-        env=env  # Pass the environment with FQDN to the child process
-    )
-    
-    # Give it a moment to start
-    time.sleep(1)
-    
-    # Check if the process is still running (didn't immediately exit)
-    if process.poll() is None:
-        # Process is still running, write the PID file
-        logger.info(f"Server started with PID {process.pid}")
-        write_pid_file(process.pid)
+    # Start the server process and completely detach it
+    # Use nohup to ensure the process continues running even after the parent exits
+    try:
+        # Create the command to run
+        cmd = [sys.executable, str(main_script), '--host', fqdn_host]
+        
+        # Use subprocess.Popen with stdout/stderr redirected to /dev/null 
+        # and start in a new session to fully detach from terminal
+        process = subprocess.Popen(
+            cmd, 
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+            env=env
+        )
+        
+        # Process is now detached, get its PID
+        pid = process.pid
+        logger.info(f"Server started with PID {pid}")
+        write_pid_file(pid)
         
         # URL with FQDN
         url = f"http://{fqdn_host}:{port}"
@@ -302,39 +317,16 @@ def start_server():
         # Log the URL
         logger.info(f"Server URL: {url}")
         
-        # Capture any initial output from the process
-        initial_output = ""
-        try:
-            # Check if there's any output available (non-blocking)
-            if process.stdout.readable():
-                # Read up to 4096 bytes (typical buffer size)
-                initial_output = process.stdout.read(4096)
-                
-                # If output contains "Server URL: http://localhost", replace with FQDN
-                if "Server URL: http://localhost" in initial_output:
-                    initial_output = initial_output.replace(
-                        f"Server URL: http://localhost:{port}", 
-                        f"Server URL: http://{fqdn_host}:{port}"
-                    )
-                
-                # Log the adjusted output
-                if initial_output:
-                    for line in initial_output.splitlines():
-                        logger.info(f"Process output: {line}")
-        except Exception as e:
-            logger.warning(f"Error reading process output: {e}")
-    else:
-        # Process exited, read the output to see why
-        output = process.stdout.read() if process.stdout else ""
-        returncode = process.returncode if process.returncode is not None else "unknown"
-        
-        logger.error(f"Failed to start server (exit code: {returncode})")
-        
-        if output:
-            for line in output.splitlines():
-                logger.error(f"Server output: {line}")
-        
-        return False
+        # Wait a moment for the log file to be created
+        time.sleep(0.5)
+        server_log_file = find_server_log_file(pid)
+        if server_log_file:
+            logger.info(f"Log file: {server_log_file}")
+            
+        return pid
+    except Exception as e:
+        logger.error(f"Failed to start server: {e}")
+        return None
 
 def stop_server():
     """Stop the server if it's running"""
@@ -396,33 +388,14 @@ def restart_server():
     
     logger.info("Restarting server")
     
+    # Stop the existing server
     stop_server()
+    
     # Give it a moment to shut down completely
     time.sleep(1)
-    start_server()
     
-    # Get the new PID and find the new log file
-    pid = read_pid_file()
-    if pid and is_server_running(pid):
-        # Wait a moment for the log file to be created
-        time.sleep(0.5)
-        server_log_file = find_server_log_file(pid)
-        
-        # Get the server URL from config
-        config = load_server_config()
-        host = config.get('host', 'localhost')
-        port = config.get('port', '9143')
-        
-        # Always use fully qualified domain name
-        fqdn_host = get_fully_qualified_hostname(host)
-        url = f"http://{fqdn_host}:{port}"
-        
-        # Log restart information
-        logger.info(f"Server restarted with PID: {pid}")
-        logger.info(f"Server URL: {url}")
-        logger.info(f"New log file: {server_log_file if server_log_file else 'Unknown'}")
-    else:
-        logger.error("Failed to restart server or get the new PID")
+    # Start a new server and return its PID
+    return start_server()
 
 def server_status():
     """Show the status of the server"""
