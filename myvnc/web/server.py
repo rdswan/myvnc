@@ -25,6 +25,7 @@ from http.server import SimpleHTTPRequestHandler
 from http.cookies import SimpleCookie
 import socket
 import logging
+import ssl
 
 # Add parent directory to path so we can import our modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -1027,7 +1028,13 @@ def run_server(host=None, port=None, directory=None, config=None):
     # Create server
     server_address = (binding_host, port)
     try:
-        logger.info(f"Creating HTTP server on {binding_host}:{port}")
+        # Check for SSL certificate and key files in config
+        ssl_cert = config.get("ssl_cert")
+        ssl_key = config.get("ssl_key")
+        use_https = ssl_cert and ssl_key and os.path.exists(ssl_cert) and os.path.exists(ssl_key)
+        
+        # Create HTTP or HTTPS server based on SSL configuration
+        logger.info(f"Creating {'HTTPS' if use_https else 'HTTP'} server on {binding_host}:{port}")
         httpd = LoggingHTTPServer(server_address, VNCRequestHandler)
         
         # Set timeout if specified in config
@@ -1035,8 +1042,21 @@ def run_server(host=None, port=None, directory=None, config=None):
             httpd.timeout = config["timeout"]
             logger.info(f"Server timeout set to {config['timeout']} seconds")
         
-        # Log server startup with FQDN for user-facing URL
-        logger.info(f"Server started - accessible at http://{fqdn_host}:{port}")
+        # Wrap the socket with SSL if HTTPS is enabled
+        if use_https:
+            # Create SSL context
+            ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+            ssl_context.load_cert_chain(certfile=ssl_cert, keyfile=ssl_key)
+            
+            # Wrap the socket with SSL
+            httpd.socket = ssl_context.wrap_socket(httpd.socket, server_side=True)
+            logger.info(f"SSL enabled with certificate: {ssl_cert}, key: {ssl_key}")
+            
+            # Log server startup with HTTPS
+            logger.info(f"Server started - accessible at https://{fqdn_host}:{port}")
+        else:
+            # Log server startup with HTTP
+            logger.info(f"Server started - accessible at http://{fqdn_host}:{port}")
         
         # Get log file path and log it clearly
         log_file = get_current_log_file()
@@ -1068,6 +1088,8 @@ def parse_args():
     parser.add_argument('--host', help='Host to bind to')
     parser.add_argument('--port', type=int, help='Port to bind to')
     parser.add_argument('--config', help='Path to server configuration file')
+    parser.add_argument('--ssl-cert', help='Path to SSL certificate file for HTTPS')
+    parser.add_argument('--ssl-key', help='Path to SSL private key file for HTTPS')
     return parser.parse_args()
 
 if __name__ == '__main__':
@@ -1076,10 +1098,20 @@ if __name__ == '__main__':
     # Initialize logger
     logger = get_logger()
     
+    # Load configuration
+    config = load_server_config()
+    
     if args.config:
         # Custom config path specified
         config_path = Path(args.config)
         logger.info(f"Using custom config file: {config_path}")
         # Not implemented here, but you could load this config instead
     
-    run_server(host=args.host, port=args.port) 
+    # Override config with command line SSL arguments if provided
+    if args.ssl_cert:
+        config["ssl_cert"] = args.ssl_cert
+    
+    if args.ssl_key:
+        config["ssl_key"] = args.ssl_key
+    
+    run_server(host=args.host, port=args.port, config=config) 

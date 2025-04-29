@@ -234,7 +234,14 @@ def start_server():
         
         # Always use fully qualified domain name
         host = get_fully_qualified_hostname(host)
-        url = f"http://{host}:{port}"
+        
+        # Check if HTTPS is configured
+        ssl_cert = config.get('ssl_cert', '')
+        ssl_key = config.get('ssl_key', '')
+        use_https = ssl_cert and ssl_key and os.path.exists(ssl_cert) and os.path.exists(ssl_key)
+        protocol = "https" if use_https else "http"
+        
+        url = f"{protocol}://{host}:{port}"
         logger.info(f"Server URL: {url}")
         
         # Find the server log file
@@ -262,7 +269,14 @@ def start_server():
         
         # Always use fully qualified domain name
         host = get_fully_qualified_hostname(host)
-        url = f"http://{host}:{port}"
+        
+        # Check if HTTPS is configured
+        ssl_cert = config.get('ssl_cert', '')
+        ssl_key = config.get('ssl_key', '')
+        use_https = ssl_cert and ssl_key and os.path.exists(ssl_cert) and os.path.exists(ssl_key)
+        protocol = "https" if use_https else "http"
+        
+        url = f"{protocol}://{host}:{port}"
         logger.info(f"Server URL: {url}")
         
         # Find the server log file
@@ -314,8 +328,14 @@ def start_server():
         logger.info(f"Server started with PID {pid}")
         write_pid_file(pid)
         
+        # Check if HTTPS is configured
+        ssl_cert = config.get('ssl_cert', '')
+        ssl_key = config.get('ssl_key', '')
+        use_https = ssl_cert and ssl_key and os.path.exists(ssl_cert) and os.path.exists(ssl_key)
+        protocol = "https" if use_https else "http"
+        
         # URL with FQDN
-        url = f"http://{fqdn_host}:{port}"
+        url = f"{protocol}://{fqdn_host}:{port}"
         
         # Log the URL
         logger.info(f"Server URL: {url}")
@@ -439,6 +459,12 @@ def server_status():
     # Find the log file for this PID
     server_log_file = find_server_log_file(pid)
     
+    # Check if HTTPS is configured
+    ssl_cert = config.get('ssl_cert', '')
+    ssl_key = config.get('ssl_key', '')
+    use_https = ssl_cert and ssl_key and os.path.exists(ssl_cert) and os.path.exists(ssl_key)
+    protocol = "https" if use_https else "http"
+    
     # Log status information to logger
     logger.info(f"Server status: Running (PID: {pid}, Uptime: {uptime})")
     
@@ -448,7 +474,11 @@ def server_status():
     print(f"  PID: {pid}")
     print(f"  Host: {host}")
     print(f"  Port: {port}")
-    print(f"  URL: http://{fqdn_host}:{port}")
+    print(f"  URL: {protocol}://{fqdn_host}:{port}")
+    print(f"  SSL: {'Enabled' if use_https else 'Disabled'}")
+    if use_https:
+        print(f"  SSL Certificate: {ssl_cert}")
+        print(f"  SSL Key: {ssl_key}")
     print(f"  Log directory: {logdir}")
     print(f"  Current log: {server_log_file if server_log_file else 'Unknown'}")
     print(f"  Uptime: {uptime}")

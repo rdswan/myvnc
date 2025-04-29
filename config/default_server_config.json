@@ -1,10 +1,13 @@
 {
     "host": "localhost",
     "port": 9143,
-    "debug": false,
+    "debug": true,
     "max_connections": 5,
     "timeout": 30,
     "authentication": "",
     "auth_notes": "To enable Entra SSO, set authentication to 'Entra'",
-    "logdir": "/localdev/myvnc/logs"
+    "logdir": "/localdev/myvnc/logs",
+    "ssl_cert": "",
+    "ssl_key": "",
+    "ssl_notes": "To enable HTTPS, set ssl_cert and ssl_key to valid file paths"
 }
