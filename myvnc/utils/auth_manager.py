@@ -303,10 +303,10 @@ class AuthManager:
             if response.status_code == 200:
                 return response.json()
             else:
-                print(f"Error fetching user info: {response.status_code} - {response.text}")
+                self.logger.error(f"Error fetching user info: {response.status_code} - {response.text}")
                 return None
         except Exception as e:
-            print(f"Exception fetching user info: {str(e)}")
+            self.logger.error(f"Exception fetching user info: {str(e)}")
             return None
     
     def _get_user_groups_from_graph(self, access_token):
@@ -340,10 +340,10 @@ class AuthManager:
                 data = response.json()
                 return [group.get('displayName', '') for group in data.get('value', [])]
             else:
-                print(f"Error fetching user groups: {response.status_code} - {response.text}")
+                self.logger.error(f"Error fetching user groups: {response.status_code} - {response.text}")
                 return []
         except Exception as e:
-            print(f"Exception fetching user groups: {str(e)}")
+            self.logger.error(f"Exception fetching user groups: {str(e)}")
             return []
     
     def handle_auth_code(self, code: str) -> Tuple[bool, str, Optional[Dict]]:

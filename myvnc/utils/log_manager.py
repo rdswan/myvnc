@@ -15,6 +15,8 @@ log_file_handle = None
 # Original stdout and stderr
 original_stdout = sys.stdout
 original_stderr = sys.stderr
+# Flag to track if subprocess handler has been registered
+subprocess_handler_registered = False
 
 class LoggingTee:
     """
@@ -56,13 +58,20 @@ class LoggingTee:
 
 def register_subprocess_handler():
     """Register a custom subprocess handler to capture output from subprocesses"""
+    global subprocess_handler_registered
+    
+    # Only register the handler once
+    if subprocess_handler_registered:
+        return
+    
+    # Mark as registered immediately to prevent race conditions
+    subprocess_handler_registered = True
+    
     old_popen = subprocess.Popen
     
     def new_popen(*args, **kwargs):
         # Log the command that's about to be executed
         cmd_str = ' '.join(str(arg) for arg in args[0]) if args and isinstance(args[0], (list, tuple)) else str(args[0])
-        timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]
-        print(f"{timestamp} - myvnc - INFO - COMMAND: {cmd_str}")
         if logger:
             logger.info(f"EXECUTING COMMAND: {cmd_str}")
         
@@ -82,30 +91,25 @@ def register_subprocess_handler():
         def new_communicate(*args, **kwargs):
             output, error = old_communicate(*args, **kwargs)
             
-            # Format timestamp consistently
-            timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]
-            
             if output:
                 try:
                     output_str = output.decode('utf-8')
-                    print(f"{timestamp} - myvnc - INFO - COMMAND OUTPUT: {cmd_str}\n{output_str}")
                     if logger:
                         logger.info(f"COMMAND OUTPUT from '{cmd_str}':")
                         for line in output_str.splitlines():
                             logger.info(f"  {line}")
                 except Exception as e:
-                    print(f"Error logging subprocess output: {str(e)}")
+                    logger.error(f"Error logging subprocess output: {str(e)}")
             
             if error:
                 try:
                     error_str = error.decode('utf-8')
-                    print(f"{timestamp} - myvnc - ERROR - COMMAND ERROR: {cmd_str}\n{error_str}")
                     if logger:
                         logger.error(f"COMMAND ERROR from '{cmd_str}':")
                         for line in error_str.splitlines():
                             logger.error(f"  {line}")
                 except Exception as e:
-                    print(f"Error logging subprocess error: {str(e)}")
+                    logger.error(f"Error logging subprocess error: {str(e)}")
                     
             return output, error
             
@@ -128,21 +132,27 @@ def setup_logging(config=None):
     logger = logging.getLogger('myvnc')
     logger.setLevel(logging.DEBUG)
     
-    # Clear any existing handlers
+    # Clear any existing handlers to avoid duplicate logging
     if logger.handlers:
         logger.handlers.clear()
     
     # Set format for log messages
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     
-    # Add console handler
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
+    # Add console handler if one doesn't already exist
+    has_console_handler = False
+    has_file_handler = False
     
-    # Debug prints
-    print(f"DEBUG: Config type received in setup_logging: {type(config)}")
-    print(f"DEBUG: Config content received in setup_logging: {config}")
+    for handler in logger.handlers:
+        if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+            has_console_handler = True
+        elif isinstance(handler, logging.FileHandler):
+            has_file_handler = True
+            
+    if not has_console_handler:
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
     
     # Create a log file
     try:
@@ -152,9 +162,8 @@ def setup_logging(config=None):
         # If config has a logdir, use that instead
         if config and isinstance(config, dict) and 'logdir' in config and config['logdir']:
             logdir = config['logdir']
-            print(f"DEBUG: Using logdir from config: {logdir}")
         else:
-            print(f"DEBUG: Using default logdir: {logdir}")
+            logdir = '/tmp'
         
         # Create log directory if it doesn't exist
         logdir_path = Path(logdir)
@@ -168,29 +177,32 @@ def setup_logging(config=None):
         current_log_file = log_file
         
         full_path = log_file.absolute()
-        print(f"DEBUG: Creating log file at: {full_path}")
         
-        # Add file handler for logging
-        file_handler = logging.FileHandler(str(full_path))
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
+        # Only add file handler if one doesn't already exist for this log file
+        if not has_file_handler:
+            file_handler = logging.FileHandler(str(full_path))
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
         
-        # Open the log file for stdout/stderr redirection
-        log_file_handle = open(str(full_path), 'a')
-        
-        # Redirect stdout and stderr to both console and log file
-        sys.stdout = LoggingTee(log_file_handle, original_stdout)
-        sys.stderr = LoggingTee(log_file_handle, original_stderr)
-        
-        # Register close function to avoid file handle leaks
-        atexit.register(lambda: log_file_handle.close() if log_file_handle and not log_file_handle.closed else None)
+            # Open the log file for stdout/stderr redirection
+            if log_file_handle is None or log_file_handle.closed:
+                log_file_handle = open(str(full_path), 'a')
+            
+                # Redirect stdout and stderr to both console and log file
+                # Only do this if we haven't already
+                if sys.stdout is original_stdout:
+                    sys.stdout = LoggingTee(log_file_handle, original_stdout)
+                if sys.stderr is original_stderr:
+                    sys.stderr = LoggingTee(log_file_handle, original_stderr)
+            
+                # Register close function to avoid file handle leaks
+                atexit.register(lambda: log_file_handle.close() if log_file_handle and not log_file_handle.closed else None)
         
         # Register subprocess handler to capture output from subprocesses
         register_subprocess_handler()
         
         # Log to both console and file
         console_msg = f"Logging to file: {full_path}"
-        print(f"INFO: {console_msg}")
         logger.info(console_msg)
     except Exception as e:
         # If we can't set up file logging, log to console

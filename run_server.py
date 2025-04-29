@@ -18,7 +18,7 @@ sys.path.insert(0, str(script_dir))
 
 # Import the server module and other necessary functions
 from myvnc.web.server import run_server, load_server_config
-from myvnc.utils.log_manager import setup_logging
+from myvnc.utils.log_manager import setup_logging, get_logger
 
 if __name__ == "__main__":
     # Load server configuration
@@ -26,7 +26,8 @@ if __name__ == "__main__":
     
     # Set up logging with config
     setup_logging(config=config)
+    logger = get_logger()
     
     # Run the server
-    print(f"Starting MyVNC server from directory: {os.getcwd()}")
+    logger.info(f"Starting MyVNC server from directory: {os.getcwd()}")
     run_server(host="0.0.0.0", port=9143, config=config) 

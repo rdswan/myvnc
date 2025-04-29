@@ -35,9 +35,6 @@ if __name__ == "__main__":
     config = load_server_config()
     lsf_config = load_lsf_config()
     
-    # Print config for debugging
-    print(f"DEBUG: Config loaded in main.py: {config}")
-    
     # Reset any existing loggers to ensure we start fresh
     logging.getLogger('myvnc').handlers = []
     
@@ -47,9 +44,9 @@ if __name__ == "__main__":
     # Verify we have a log file
     log_file = get_current_log_file()
     if log_file:
-        print(f"INFO: Created log file at: {log_file.absolute()}")
+        logger.info(f"Created log file at: {log_file.absolute()}")
     else:
-        print("WARNING: No log file was created!")
+        logger.warning("No log file was created!")
     
     logger.info(f"Using LSF environment file: {lsf_config.get('env_file', 'Not configured')}")
     

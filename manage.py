@@ -35,8 +35,21 @@ logger = None
 def setup_logging_for_manage():
     """Set up logging for the management script"""
     global logger
+    
+    # First try to get an existing logger
+    if logger is not None:
+        return logger
+        
+    # Only create a new logger if one doesn't exist
     config = load_server_config()
-    logger = setup_logging(config=config)
+    
+    # Try using get_logger first, which will reuse an existing logger if possible
+    logger = get_logger()
+    
+    # If that didn't work, fall back to setup_logging
+    if logger is None:
+        logger = setup_logging(config=config)
+        
     return logger
 
 def get_pid_file():
@@ -158,26 +171,22 @@ def start_server():
     # Check if the server is already running
     pid = read_pid_file()
     if pid and is_server_running(pid):
-        print(f"Server is already running with PID {pid}")
         logger.info(f"Server is already running with PID {pid}")
         return
     
     # If we have a PID file but the server is not running, clean it up
     if pid:
-        print(f"Removing stale PID file for PID {pid}")
         logger.info(f"Removing stale PID file for PID {pid}")
         os.remove(get_pid_file())
     
     # Check if we can find the server process even without a PID file
     pid = find_server_process()
     if pid:
-        print(f"Server is already running with PID {pid} (discovered)")
         logger.info(f"Server is already running with PID {pid} (discovered)")
         write_pid_file(pid)
         return
     
     # Start the server
-    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - INFO - Starting MyVNC server")
     logger.info("Starting MyVNC server")
     
     # Get the full path to main.py
@@ -195,7 +204,6 @@ def start_server():
     # Check if the process is still running (didn't immediately exit)
     if process.poll() is None:
         # Process is still running, write the PID file
-        print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - INFO - Server started with PID {process.pid}")
         logger.info(f"Server started with PID {process.pid}")
         write_pid_file(process.pid)
         
@@ -205,7 +213,6 @@ def start_server():
     else:
         # Process exited, read the output to see why
         output = process.stdout.read().decode('utf-8')
-        print(f"Server failed to start:\n{output}")
         logger.error(f"Server failed to start:\n{output}")
         sys.exit(1)
 
@@ -224,19 +231,16 @@ def stop_server():
     
     # If we still don't have a PID, the server is not running
     if pid is None:
-        print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - INFO - Server is not running")
         logger.info("Server is not running")
         return
     
     # Check if the process is actually running
     if not is_server_running(pid):
-        print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - INFO - Server is not running (PID {pid} not found)")
         logger.info(f"Server is not running (PID {pid} not found)")
         os.remove(get_pid_file())
         return
     
     # Send a SIGTERM signal to gracefully stop the server
-    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - INFO - Stopping server with PID {pid}")
     logger.info(f"Stopping server with PID {pid}")
     
     try:
@@ -252,7 +256,6 @@ def stop_server():
         
         # If the process is still running after waiting, force kill it
         if is_server_running(pid):
-            print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - WARNING - Server did not exit gracefully, forcing termination")
             logger.warning(f"Server did not exit gracefully, forcing termination")
             os.kill(pid, signal.SIGKILL)
         
@@ -260,11 +263,9 @@ def stop_server():
         if os.path.exists(get_pid_file()):
             os.remove(get_pid_file())
             
-        print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - INFO - Server stopped")
         logger.info("Server stopped")
         
     except ProcessLookupError:
-        print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - WARNING - Process {pid} not found, removing PID file")
         logger.warning(f"Process {pid} not found, removing PID file")
         if os.path.exists(get_pid_file()):
             os.remove(get_pid_file())
@@ -273,7 +274,6 @@ def restart_server():
     """Restart the server"""
     logger = setup_logging_for_manage()
     
-    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - INFO - Restarting server")
     logger.info("Restarting server")
     
     stop_server()
@@ -298,8 +298,10 @@ def server_status():
             write_pid_file(pid)
     
     if pid is None or not is_server_running(pid):
-        print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - INFO - Server status: Not running")
         logger.info("Server status: Not running")
+        
+        # Print status for user to see
+        print("Server status: Not running")
         return
     
     # Server is running, get more information
@@ -325,7 +327,7 @@ def server_status():
         status_info['current_log'] = server_log_file
     
     # Print status information
-    print(f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]} - myvnc - INFO - Server status:")
+    print("Server status:")
     print(f"  Status: Running")
     print(f"  PID: {pid}")
     print(f"  Host: {host}")

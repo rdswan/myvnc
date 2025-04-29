@@ -10,12 +10,15 @@ import subprocess
 import sys
 import os
 from pathlib import Path
+import logging
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 # Import server config loader
 from myvnc.web.server import load_server_config
+
+logger = logging.getLogger(__name__)
 
 def get_server_url():
     """Get the server URL from configuration file or environment variable"""
@@ -66,10 +69,10 @@ def run_curl_command(endpoint, method="GET", data=None):
         result = subprocess.run(cmd, check=True, capture_output=True, text=True)
         return json.loads(result.stdout)
     except subprocess.CalledProcessError as e:
-        print(f"Error: {e.stderr}", file=sys.stderr)
+        logger.error(f"Error: {e.stderr}")
         raise RuntimeError(f"Command failed with exit code {e.returncode}")
     except json.JSONDecodeError:
-        print(f"Error: Invalid JSON response", file=sys.stderr)
+        logger.error("Error: Invalid JSON response")
         raise RuntimeError("Failed to parse server response")
 
 def list_vnc_sessions():
@@ -149,14 +152,14 @@ def server_info():
     try:
         # Get server configuration
         config = run_curl_command("config/server")
-        print("Server Configuration:")
-        print(f"Host: {config.get('host', 'localhost')}")
-        print(f"Port: {config.get('port', 8000)}")
-        print(f"Debug Mode: {'Enabled' if config.get('debug', False) else 'Disabled'}")
-        print(f"Max Connections: {config.get('max_connections', 5)}")
-        print(f"Timeout: {config.get('timeout', 30)} seconds")
+        logger.debug(f"Server Configuration:")
+        logger.debug(f"Host: {config.get('host', 'localhost')}")
+        logger.debug(f"Port: {config.get('port', 8000)}")
+        logger.debug(f"Debug Mode: {'Enabled' if config.get('debug', False) else 'Disabled'}")
+        logger.debug(f"Max Connections: {config.get('max_connections', 5)}")
+        logger.debug(f"Timeout: {config.get('timeout', 30)} seconds")
     except Exception as e:
-        print(f"Error getting server information: {str(e)}", file=sys.stderr)
+        logger.error(f"Error getting server information: {str(e)}")
         sys.exit(1)
 
 def start_server(args):
