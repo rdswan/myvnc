@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: © 2025 Tenstorrent AI ULC
+# SPDX-License-Identifier: Apache-2.0
 """
 Mock MSAL implementation for testing Entra ID integration
 This module provides a minimal mock of the MSAL (Microsoft Authentication Library) 

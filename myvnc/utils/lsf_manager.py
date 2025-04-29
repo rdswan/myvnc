@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: © 2025 Tenstorrent AI ULC
+# SPDX-License-Identifier: Apache-2.0
 """
 LSF Manager for submitting and monitoring LSF jobs
 """

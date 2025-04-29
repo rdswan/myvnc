@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: © 2025 Tenstorrent AI ULC
+# SPDX-License-Identifier: Apache-2.0
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem,
                              QPushButton, QHBoxLayout, QHeaderView)
 from PyQt6.QtCore import QTimer, Qt

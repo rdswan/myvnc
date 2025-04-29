@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: © 2025 Tenstorrent AI ULC
+# SPDX-License-Identifier: Apache-2.0
 import sys
 from .gui import run_gui
 from .cli import main as cli_main
