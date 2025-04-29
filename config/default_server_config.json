@@ -1,7 +1,7 @@
 {
     "host": "localhost",
     "port": 9143,
-    "debug": true,
+    "debug": false,
     "max_connections": 5,
     "timeout": 30,
     "authentication": "",
