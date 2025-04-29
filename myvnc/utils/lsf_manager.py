@@ -305,7 +305,6 @@ class LSFManager:
             
             # Convert command list to string for logging
             cmd_str = ' '.join(str(arg) for arg in bsub_cmd)
-            self.logger.info(f"SUBMIT COMMAND: {cmd_str}")
             
             # Add to command history before execution
             cmd_entry = {
@@ -390,7 +389,6 @@ class LSFManager:
             
             # Use bjobs with the exact format specified by the user
             cmd = f'bjobs -o "jobid stat user queue first_host run_time command delimiter=\';\'" -noheader -u {user} -J myvnc_vncserver'
-            self.logger.info(f"BJOBS COMMAND: {cmd}")
             
             # Add to command history
             cmd_entry = {
@@ -417,7 +415,6 @@ class LSFManager:
             
             # Log the results
             if output_str:
-                self.logger.info(f"BJOBS OUTPUT: {len(output_str.splitlines())} line(s)")
                 for line in output_str.splitlines():
                     self.logger.info(f"  {line}")
             
