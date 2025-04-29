@@ -88,7 +88,7 @@ class ConfigManager:
             # Return just the site names
             return [site["name"] for site in sites]
         except (KeyError, TypeError):
-            print("Warning: available_sites not found or has invalid format in lsf_config.json")
+            print("Warning: available_sites not found or has invalid format in default_lsf_config.json")
             # Return a default list of sites if none are found
             return ["Toronto", "Austin", "Bangalore"]
     
