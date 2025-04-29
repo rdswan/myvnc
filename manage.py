@@ -22,6 +22,7 @@ import json
 import psutil
 import glob
 from pathlib import Path
+import socket
 
 # Add the current directory to the path so we can import from the myvnc package
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -177,6 +178,16 @@ def start_server():
         config = load_server_config()
         host = config.get('host', 'localhost')
         port = config.get('port', '9143')
+        
+        # Use fully qualified domain name
+        if host != 'localhost' and host != '127.0.0.1':
+            try:
+                fqdn = socket.getfqdn(host)
+                if fqdn != host:
+                    host = fqdn
+            except Exception as e:
+                logger.warning(f"Could not get FQDN for {host}: {e}")
+        
         url = f"http://{host}:{port}"
         print(f"Server is already running at {url}")
         return
@@ -196,6 +207,16 @@ def start_server():
         config = load_server_config()
         host = config.get('host', 'localhost')
         port = config.get('port', '9143')
+        
+        # Use fully qualified domain name
+        if host != 'localhost' and host != '127.0.0.1':
+            try:
+                fqdn = socket.getfqdn(host)
+                if fqdn != host:
+                    host = fqdn
+            except Exception as e:
+                logger.warning(f"Could not get FQDN for {host}: {e}")
+        
         url = f"http://{host}:{port}"
         print(f"Server is already running at {url}")
         return
@@ -225,6 +246,16 @@ def start_server():
         config = load_server_config()
         host = config.get('host', 'localhost')
         port = config.get('port', '9143')
+        
+        # Use fully qualified domain name
+        if host != 'localhost' and host != '127.0.0.1':
+            try:
+                fqdn = socket.getfqdn(host)
+                if fqdn != host:
+                    host = fqdn
+            except Exception as e:
+                logger.warning(f"Could not get FQDN for {host}: {e}")
+        
         url = f"http://{host}:{port}"
         
         # Format timestamp
@@ -315,6 +346,16 @@ def restart_server():
         config = load_server_config()
         host = config.get('host', 'localhost')
         port = config.get('port', '9143')
+        
+        # Use fully qualified domain name
+        if host != 'localhost' and host != '127.0.0.1':
+            try:
+                fqdn = socket.getfqdn(host)
+                if fqdn != host:
+                    host = fqdn
+            except Exception as e:
+                logger.warning(f"Could not get FQDN for {host}: {e}")
+        
         url = f"http://{host}:{port}"
         
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
