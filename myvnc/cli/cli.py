@@ -31,6 +31,12 @@ def get_server_url():
     host = config.get("host", "localhost")
     port = config.get("port", 8000)
     
+    # Import get_fully_qualified_hostname here to avoid circular import
+    from myvnc.web.server import get_fully_qualified_hostname
+    
+    # Convert localhost or simple hostname to FQDN
+    host = get_fully_qualified_hostname(host)
+    
     return f"http://{host}:{port}"
 
 def run_curl_command(endpoint, method="GET", data=None):
@@ -66,7 +72,7 @@ def run_curl_command(endpoint, method="GET", data=None):
     cmd.append(url)
     
     try:
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
         return json.loads(result.stdout)
     except subprocess.CalledProcessError as e:
         logger.error(f"Error: {e.stderr}")
@@ -171,7 +177,11 @@ def start_server(args):
         cmd = [sys.executable, str(server_path)]
         
         if args.host:
-            cmd.extend(["--host", args.host])
+            # Import get_fully_qualified_hostname here if needed
+            from myvnc.web.server import get_fully_qualified_hostname
+            # Ensure we're using FQDN even for command line arguments
+            fqdn_host = get_fully_qualified_hostname(args.host)
+            cmd.extend(["--host", fqdn_host])
         
         if args.port:
             cmd.extend(["--port", str(args.port)])
@@ -183,6 +193,10 @@ def start_server(args):
         config = load_server_config()
         host = args.host or config.get("host", "localhost")
         port = args.port or config.get("port", 8000)
+        
+        # Always use FQDN
+        from myvnc.web.server import get_fully_qualified_hostname
+        host = get_fully_qualified_hostname(host)
         
         print(f"Starting server on {host}:{port}...")
         subprocess.run(cmd)

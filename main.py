@@ -12,9 +12,11 @@ Configuration:
 
 import sys
 import argparse
+import socket
+import subprocess
 from pathlib import Path
 import logging
-from myvnc.web.server import run_server, load_server_config, load_lsf_config
+from myvnc.web.server import run_server, load_server_config, load_lsf_config, get_fully_qualified_hostname
 from myvnc.utils.log_manager import setup_logging, get_logger, get_current_log_file
 
 def parse_args():
@@ -53,6 +55,15 @@ if __name__ == "__main__":
     # Use command line arguments if provided, otherwise use config file
     host = args.host or config.get("host")
     port = args.port or config.get("port")
+    
+    # Always resolve to FQDN if host is localhost or simple hostname
+    if host == "localhost" or host == "127.0.0.1" or host == "0.0.0.0" or (host and host.count('.') == 0):
+        original_host = host
+        host = get_fully_qualified_hostname(host)
+        if host != original_host:
+            logger.info(f"Resolved {original_host} to FQDN: {host}")
+            # Update config to ensure consistency
+            config["host"] = host
     
     # Override authentication setting if provided
     if args.auth is not None:

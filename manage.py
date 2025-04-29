@@ -170,7 +170,7 @@ def get_fully_qualified_hostname(host):
     if host == 'localhost' or host == '127.0.0.1':
         try:
             # Try to get the FQDN using the hostname command
-            process = subprocess.run(['hostname', '-f'], capture_output=True, text=True, check=False)
+            process = subprocess.run(['hostname', '-f'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, check=False)
             if process.returncode == 0 and process.stdout.strip():
                 return process.stdout.strip()
             
@@ -185,7 +185,7 @@ def get_fully_qualified_hostname(host):
     elif host.count('.') == 0:  # If host is a simple hostname without domain
         try:
             # Try to get full domain by running hostname -f command
-            process = subprocess.run(['hostname', '-f'], capture_output=True, text=True, check=False)
+            process = subprocess.run(['hostname', '-f'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, check=False)
             if process.returncode == 0 and process.stdout.strip():
                 return process.stdout.strip()
             
@@ -224,7 +224,7 @@ def start_server():
         host = config.get('host', 'localhost')
         port = config.get('port', '9143')
         
-        # Use fully qualified domain name
+        # Always use fully qualified domain name
         host = get_fully_qualified_hostname(host)
         url = f"http://{host}:{port}"
         print(f"Server is already running at {url}")
@@ -246,7 +246,7 @@ def start_server():
         host = config.get('host', 'localhost')
         port = config.get('port', '9143')
         
-        # Use fully qualified domain name
+        # Always use fully qualified domain name
         host = get_fully_qualified_hostname(host)
         url = f"http://{host}:{port}"
         print(f"Server is already running at {url}")
@@ -258,11 +258,29 @@ def start_server():
     # Get the full path to main.py
     main_script = Path(os.path.dirname(os.path.abspath(__file__))) / "main.py"
     
-    # Start the server process
-    process = subprocess.Popen([sys.executable, str(main_script)], 
-                             stdout=subprocess.PIPE, 
-                             stderr=subprocess.STDOUT,
-                             start_new_session=True)  # Detach from terminal
+    # Load config to get host and port
+    config = load_server_config()
+    
+    # Get host and always use FQDN
+    host = config.get('host', 'localhost')
+    port = config.get('port', '9143')
+    
+    # Get FQDN to explicitly pass to main.py script
+    fqdn_host = get_fully_qualified_hostname(host)
+    
+    # Explicitly add FQDN to the environment for child process to inherit
+    env = os.environ.copy()
+    env['MYVNC_FQDN_HOST'] = fqdn_host
+    
+    # Start the server process with explicit FQDN
+    process = subprocess.Popen(
+        [sys.executable, str(main_script), '--host', fqdn_host], 
+        stdout=subprocess.PIPE, 
+        stderr=subprocess.STDOUT,
+        start_new_session=True,  # Detach from terminal
+        universal_newlines=True,  # Use text mode for Python 3.6 compatibility
+        env=env  # Pass the environment with FQDN to the child process
+    )
     
     # Give it a moment to start
     time.sleep(1)
@@ -273,24 +291,44 @@ def start_server():
         logger.info(f"Server started with PID {process.pid}")
         write_pid_file(process.pid)
         
-        # Get the server URL from config
-        config = load_server_config()
-        host = config.get('host', 'localhost')
-        port = config.get('port', '9143')
-        
-        # Use fully qualified domain name
-        host = get_fully_qualified_hostname(host)
-        url = f"http://{host}:{port}"
+        # URL with FQDN
+        url = f"http://{fqdn_host}:{port}"
         
         # Format timestamp
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
         
+        # Capture any initial output from the process
+        initial_output = ""
+        try:
+            # Check if there's any output available (non-blocking)
+            if process.stdout.readable():
+                # Read up to 4096 bytes (typical buffer size)
+                initial_output = process.stdout.read(4096)
+                
+                # If output contains "Server URL: http://localhost", replace with FQDN
+                if "Server URL: http://localhost" in initial_output:
+                    initial_output = initial_output.replace(
+                        f"Server URL: http://localhost:{port}", 
+                        f"Server URL: http://{fqdn_host}:{port}"
+                    )
+                
+                # Log the adjusted output
+                if initial_output:
+                    for line in initial_output.splitlines():
+                        logger.info(f"Process output: {line}")
+        except Exception as e:
+            logger.warning(f"Error reading process output: {e}")
+            
         # Print server started message with URL
         print(f"{timestamp} - myvnc - INFO - Server started with PID {process.pid}")
         print(f"{timestamp} - myvnc - INFO - Server URL: {url}")
+        
+        # Log any redirected output
+        if initial_output:
+            print(initial_output)
     else:
         # Process exited, read the output to see why
-        output = process.stdout.read().decode('utf-8')
+        output = process.stdout.read()
         logger.error(f"Server failed to start:\n{output}")
         sys.exit(1)
 
@@ -371,9 +409,9 @@ def restart_server():
         host = config.get('host', 'localhost')
         port = config.get('port', '9143')
         
-        # Use fully qualified domain name
-        host = get_fully_qualified_hostname(host)
-        url = f"http://{host}:{port}"
+        # Always use fully qualified domain name
+        fqdn_host = get_fully_qualified_hostname(host)
+        url = f"http://{fqdn_host}:{port}"
         
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
         print(f"{timestamp} - myvnc - INFO - Server restarted with PID: {pid}")
@@ -419,12 +457,15 @@ def server_status():
     port = config.get('port', '9143')
     logdir = config.get('logdir', '/tmp')
     
+    # Always use FQDN even if config has localhost
+    fqdn_host = get_fully_qualified_hostname(host)
+    
     status_info = {
         'status': 'Running',
         'pid': pid,
         'host': host,
         'port': port,
-        'url': f'http://{host}:{port}',
+        'url': f'http://{fqdn_host}:{port}',
         'logdir': logdir,
         'uptime': uptime
     }
@@ -440,7 +481,7 @@ def server_status():
     print(f"  PID: {pid}")
     print(f"  Host: {host}")
     print(f"  Port: {port}")
-    print(f"  URL: http://{host}:{port}")
+    print(f"  URL: http://{fqdn_host}:{port}")
     print(f"  Log directory: {logdir}")
     print(f"  Current log: {server_log_file if server_log_file else 'Unknown'}")
     print(f"  Uptime: {uptime}")

@@ -93,7 +93,12 @@ def register_subprocess_handler():
             
             if output:
                 try:
-                    output_str = output.decode('utf-8')
+                    # If universal_newlines=True was used, output is already a string
+                    if isinstance(output, str):
+                        output_str = output
+                    else:
+                        output_str = output.decode('utf-8')
+                        
                     if logger:
                         logger.info(f"COMMAND OUTPUT from '{cmd_str}':")
                         for line in output_str.splitlines():
@@ -103,7 +108,12 @@ def register_subprocess_handler():
             
             if error:
                 try:
-                    error_str = error.decode('utf-8')
+                    # If universal_newlines=True was used, error is already a string
+                    if isinstance(error, str):
+                        error_str = error
+                    else:
+                        error_str = error.decode('utf-8')
+                        
                     if logger:
                         logger.error(f"COMMAND ERROR from '{cmd_str}':")
                         for line in error_str.splitlines():

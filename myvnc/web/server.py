@@ -37,7 +37,7 @@ def get_fully_qualified_hostname(host):
     if host == 'localhost' or host == '127.0.0.1' or host == '0.0.0.0':
         try:
             # Try to get the FQDN using the hostname command
-            process = subprocess.run(['hostname', '-f'], capture_output=True, text=True, check=False)
+            process = subprocess.run(['hostname', '-f'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, check=False)
             if process.returncode == 0 and process.stdout.strip():
                 return process.stdout.strip()
             
@@ -52,7 +52,7 @@ def get_fully_qualified_hostname(host):
     elif host.count('.') == 0:  # If host is a simple hostname without domain
         try:
             # Try to get full domain by running hostname -f command
-            process = subprocess.run(['hostname', '-f'], capture_output=True, text=True, check=False)
+            process = subprocess.run(['hostname', '-f'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, check=False)
             if process.returncode == 0 and process.stdout.strip():
                 return process.stdout.strip()
             
@@ -946,19 +946,24 @@ def run_server(host=None, port=None, directory=None, config=None):
     source_lsf_environment()
 
     # Override with command line arguments if provided
-    host = host or config.get("host", "aus-misc")
+    host = host or config.get("host", "localhost")
     port = port or config.get("port", 9143)
     
-    logger.info(f"Server configured to run on {host}:{port}")
+    logger.info(f"Server initially configured for: {host}:{port}")
     
-    # Get fully qualified domain name for the host
-    if host == "localhost" or host == "127.0.0.1" or host == "0.0.0.0" or host.count('.') == 0:
-        original_host = host
-        host = get_fully_qualified_hostname(host)
-        if host != original_host:
-            logger.info(f"Converting {original_host} to fully qualified domain name: {host}")
-            # Also update the config for other parts of the application
-            config["host"] = host
+    # Always get fully qualified domain name, especially for localhost
+    original_host = host
+    fqdn_host = get_fully_qualified_hostname(host)
+    
+    # Log the transformation and update config for consistency
+    if fqdn_host != original_host:
+        logger.info(f"Resolved {original_host} to FQDN: {fqdn_host}")
+        # Also update the config for other parts of the application that need the FQDN
+        config["host"] = fqdn_host
+    
+    # Use 0.0.0.0 for binding to allow connections from any interface
+    binding_host = "0.0.0.0"
+    logger.info(f"Server will bind to {binding_host}:{port} but will report as {fqdn_host}")
     
     if directory is None:
         # Use the web directory
@@ -978,28 +983,31 @@ def run_server(host=None, port=None, directory=None, config=None):
     # Check if the address and port are available
     try:
         # Create a test socket to check availability
-        logger.info(f"Testing if {host}:{port} is available...")
+        logger.info(f"Testing if {binding_host}:{port} is available...")
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.bind((host, port))
+        # Set socket option to allow reuse of the address
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((binding_host, port))
         sock.close()
-        logger.info(f"Socket test successful, {host}:{port} is available")
+        logger.info(f"Socket test successful, {binding_host}:{port} is available")
     except OSError as e:
         if e.errno == 99:  # Cannot assign requested address
-            logger.error(f"Error: Cannot bind to address {host}:{port} - Address not available")
+            logger.error(f"Error: Cannot bind to address {binding_host}:{port} - Address not available")
             logger.error(f"       Verify that the host address is correct and exists on this machine")
             return
         elif e.errno == 98:  # Address already in use
-            logger.error(f"Error: Cannot bind to address {host}:{port} - Port is already in use")
+            logger.error(f"Error: Cannot bind to address {binding_host}:{port} - Port is already in use")
             logger.error(f"       Check if another instance of the server is already running")
+            logger.error(f"       You might need to kill the previous process using: `lsof -i :{port} | grep LISTEN`")
             return
         else:
-            logger.error(f"Error: Cannot bind to address {host}:{port} - {e}")
+            logger.error(f"Error: Cannot bind to address {binding_host}:{port} - {e}")
             return
     
     # Create server
-    server_address = (host, port)
+    server_address = (binding_host, port)
     try:
-        logger.info(f"Creating HTTP server on {host}:{port}")
+        logger.info(f"Creating HTTP server on {binding_host}:{port}")
         httpd = LoggingHTTPServer(server_address, VNCRequestHandler)
         
         # Set timeout if specified in config
@@ -1007,12 +1015,8 @@ def run_server(host=None, port=None, directory=None, config=None):
             httpd.timeout = config["timeout"]
             logger.info(f"Server timeout set to {config['timeout']} seconds")
         
-        # Get fully qualified hostname for display
-        display_host = host
-        # No need for another lookup if we already resolved the hostname
-        
-        # Log server startup
-        logger.info(f"Starting server on http://{display_host}:{port}")
+        # Log server startup with FQDN for user-facing URL
+        logger.info(f"Server started - accessible at http://{fqdn_host}:{port}")
         
         # Get log file path and log it clearly
         log_file = get_current_log_file()
