@@ -280,6 +280,23 @@ def restart_server():
     # Give it a moment to shut down completely
     time.sleep(1)
     start_server()
+    
+    # Get the new PID and find the new log file
+    pid = read_pid_file()
+    if pid and is_server_running(pid):
+        # Wait a moment for the log file to be created
+        time.sleep(0.5)
+        server_log_file = find_server_log_file(pid)
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
+        print(f"{timestamp} - myvnc - INFO - Server restarted with PID: {pid}")
+        print(f"{timestamp} - myvnc - INFO - New log file: {server_log_file if server_log_file else 'Unknown'}")
+        # Also log to the logger
+        logger.info(f"Server restarted with PID: {pid}")
+        logger.info(f"New log file: {server_log_file if server_log_file else 'Unknown'}")
+    else:
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
+        print(f"{timestamp} - myvnc - ERROR - Failed to restart server or get the new PID")
+        logger.error("Failed to restart server or get the new PID")
 
 def server_status():
     """Show the status of the server"""
