@@ -3,13 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tenstorrent VNC Manager - Login</title>
+    <title>MyVNC - Login</title>
     <link rel="stylesheet" href="css/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@300;500;700&display=swap" rel="stylesheet">
     <style>
+        .user-info {
+            display: flex;
+            align-items: center;
+            margin-left: auto;
+            gap: 1rem;
+            color: white;
+        }
+        
+        .user-name {
+            font-weight: 500;
+        }
+        
+        .button.small {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.8rem;
+        }
+        
         .login-container {
             display: flex;
             flex-direction: column;
@@ -111,7 +128,12 @@
 <body>
     <header class="header">
         <div class="header-content">
-            <h1 class="app-title"><i class="fas fa-desktop"></i> VNC Manager</h1>
+            <div class="logo-container">
+                <a href="https://tenstorrent.com/" target="_blank" title="Visit Tenstorrent.com">
+                    <img src="img/tt-logo.png" alt="Tenstorrent Logo" class="tt-logo">
+                </a>
+                <h1 class="app-title">MyVNC</h1>
+            </div>
         </div>
     </header>
     

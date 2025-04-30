@@ -4,10 +4,10 @@
     "debug": true,
     "max_connections": 5,
     "timeout": 30,
-    "authentication": "",
+    "authentication": "LDAP",
     "auth_notes": "To enable authentication, set 'authentication' to either 'Entra' or 'LDAP'",
     "logdir": "/localdev/myvnc/logs",
-    "ssl_cert": "/proj_risc/user_dev/bswan/tools_src/myvnc/config/ssl/cert.pem",
-    "ssl_key": "/proj_risc/user_dev/bswan/tools_src/myvnc/config/ssl/key.pem",
+    "ssl_cert": "",
+    "ssl_key": "",
     "ssl_notes": "To enable HTTPS, set ssl_cert and ssl_key to valid file paths"
 }

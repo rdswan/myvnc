@@ -127,12 +127,14 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         
         # Check if authentication method is configured
         if auth_method not in ["entra", "ldap"]:
+            self.logger.debug(f"Authentication disabled: method '{auth_method}' not configured")
             return False
             
         # For LDAP, check if LDAP module is available
         if auth_method == "ldap":
             try:
                 import ldap
+                self.logger.debug("LDAP authentication: module available")
                 return True
             except ImportError:
                 self.logger.warning("LDAP authentication configured but ldap module not available")
@@ -142,12 +144,15 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         if auth_method == "entra":
             try:
                 import msal
+                self.logger.debug("Entra authentication: MSAL module available")
                 return True
             except ImportError:
                 self.logger.warning("Entra authentication configured but msal module not available")
                 return False
                 
-        return True
+        # If we get here, the configured authentication method is invalid
+        self.logger.warning(f"Unknown authentication method configured: {auth_method}")
+        return False
     
     def do_GET(self):
         """Handle GET requests"""
