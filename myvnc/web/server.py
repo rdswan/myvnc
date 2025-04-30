@@ -1044,9 +1044,17 @@ def run_server(host=None, port=None, directory=None, config=None):
         
         # Wrap the socket with SSL if HTTPS is enabled
         if use_https:
-            # Create SSL context
+            # Create SSL context with more permissive settings
             ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
             ssl_context.load_cert_chain(certfile=ssl_cert, keyfile=ssl_key)
+
+            ## Verify client certificates
+            ssl_context.check_hostname = True
+            ssl_context.verify_mode = ssl.CERT_REQUIRED
+
+            ## Don't verify client certificates
+            #ssl_context.check_hostname = False
+            #ssl_context.verify_mode = ssl.CERT_NONE
             
             # Wrap the socket with SSL
             httpd.socket = ssl_context.wrap_socket(httpd.socket, server_side=True)
