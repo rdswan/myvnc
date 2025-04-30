@@ -37,7 +37,7 @@ except ImportError:
 
 # Try to import LDAP, use mock if not available
 try:
-    import ldap
+    import ldap3
     LDAP_AVAILABLE = True
 except ImportError:
     print("LDAP module not available, LDAP authentication will be disabled")
@@ -54,7 +54,7 @@ except ImportError:
         def simple_bind_s(self, *args): raise self.INVALID_CREDENTIALS("LDAP mock")
         def search_s(self, *args): return []
         def unbind(self): pass
-    ldap = MockLDAP()
+    ldap3 = MockLDAP()
 
 # Try to import MSAL, use mock implementation if not available
 try:

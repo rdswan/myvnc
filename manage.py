@@ -472,7 +472,7 @@ def server_status():
     
     # Check if LDAP module is available
     try:
-        import ldap
+        import ldap3
         ldap_available = True
     except ImportError:
         ldap_available = False

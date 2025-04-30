@@ -14,7 +14,9 @@ from pathlib import Path
 
 # Try to import ldap package
 try:
-    import ldap
+    import ldap3
+    from ldap3 import Connection, Server, SIMPLE, SUBTREE
+    from ldap3.core.exceptions import LDAPBindError, LDAPSocketOpenError, LDAPException
     LDAP_AVAILABLE = True
 except ImportError:
     print("LDAP module not available, LDAP authentication will be disabled")
@@ -32,6 +34,9 @@ except ImportError:
         def search_s(self, *args): return []
         def unbind(self): pass
     ldap = MockLDAP()
+
+# Define constants for ldap3
+SUBTREE = 2  # Equivalent to ldap.SCOPE_SUBTREE
 
 class LDAPManager:
     """Manages LDAP authentication for VNC Manager"""
@@ -87,39 +92,38 @@ class LDAPManager:
             return False, "LDAP authentication is not available", None
         
         try:
-            # Initialize LDAP connection
-            self.logger.info(f"Connecting to LDAP server at {self.ldap_server}")
-            conn = ldap.initialize(self.ldap_server)
-            conn.set_option(ldap.OPT_REFERRALS, 0)
-            
-            # User bind DN format - supports both UPN (user@domain) and DN (cn=user,dc=domain,dc=com) formats
+            # Format user credentials
             if '@' not in username and ',' not in username:
                 user_dn = f"{username}@{self.ldap_domain}"
             else:
                 user_dn = username
                 
+            # Initialize LDAP server
+            self.logger.info(f"Connecting to LDAP server at {self.ldap_server}")
+            server = Server(self.ldap_server)
+            
             # Try to bind with user credentials
             self.logger.info(f"Attempting to authenticate user: {user_dn}")
-            conn.simple_bind_s(user_dn, password)
-            
-            # Get user info with user's account or admin account if available
-            user_info = self._get_user_info(conn, username, user_dn)
-            
-            # Unbind and close connection
-            conn.unbind()
+            with Connection(server, user=user_dn, password=password, authentication=SIMPLE) as conn:
+                if not conn.bind():
+                    self.logger.warning(f"Failed to bind: {conn.result}")
+                    return False, "Authentication failed", None
+                
+                # Get user info with user's account
+                user_info = self._get_user_info(conn, username, user_dn)
             
             if not user_info:
                 return False, "User found but unable to retrieve details", None
             
             return True, "Authentication successful", user_info
             
-        except ldap.INVALID_CREDENTIALS:
+        except LDAPBindError:
             self.logger.warning(f"Invalid credentials for user: {username}")
             return False, "Invalid username or password", None
-        except ldap.SERVER_DOWN:
+        except LDAPSocketOpenError:
             self.logger.error(f"LDAP server is down or not reachable: {self.ldap_server}")
             return False, "LDAP server is not available", None
-        except ldap.LDAPError as e:
+        except LDAPException as e:
             self.logger.error(f"LDAP error authenticating {username}: {str(e)}")
             return False, f"LDAP error: {str(e)}", None
         except Exception as e:
@@ -152,67 +156,89 @@ class LDAPManager:
             
             # Search for user details
             self.logger.info(f"Searching for user with filter: {search_filter}")
-            result = conn.search_s(
+            conn.search(
                 self.ldap_base_dn,
-                ldap.SCOPE_SUBTREE,
+                SUBTREE,
                 search_filter,
-                attributes
+                attributes=attributes
             )
             
             # Process results
-            if not result or len(result) == 0:
+            if not conn.entries or len(conn.entries) == 0:
                 self.logger.warning(f"No LDAP user found matching filter: {search_filter}")
                 return None
             
             # Get user entry details
-            user_entry = result[0]
-            user_dn = user_entry[0]
-            user_attrs = user_entry[1]
+            user_entry = conn.entries[0]
+            user_dn = user_entry.entry_dn
             
             # Extract user information with fallbacks
             user_info = {
-                'username': self._get_ldap_attribute(user_attrs, self.ldap_attr_username, username),
-                'display_name': self._get_ldap_attribute(user_attrs, self.ldap_attr_display_name, username),
-                'email': self._get_ldap_attribute(user_attrs, self.ldap_attr_email, f"{username}@{self.ldap_domain}"),
+                'username': self._get_ldap3_attribute(user_entry, self.ldap_attr_username, username),
+                'display_name': self._get_ldap3_attribute(user_entry, self.ldap_attr_display_name, username),
+                'email': self._get_ldap3_attribute(user_entry, self.ldap_attr_email, f"{username}@{self.ldap_domain}"),
                 'groups': [],
                 'dn': user_dn
             }
             
             # Extract group memberships
-            if self.ldap_attr_groups in user_attrs:
-                for group_dn in user_attrs[self.ldap_attr_groups]:
-                    group_dn_str = group_dn.decode('utf-8')
-                    # Extract CN from the DN - typical format is CN=GroupName,OU=Groups,DC=domain,DC=com
-                    if group_dn_str.startswith('CN='):
-                        cn_part = group_dn_str.split(',')[0]
-                        group_name = cn_part[3:]  # Remove 'CN=' prefix
-                        user_info['groups'].append(group_name)
+            group_values = self._get_ldap3_attribute_list(user_entry, self.ldap_attr_groups, [])
+            for group_dn in group_values:
+                # Extract CN from the DN - typical format is CN=GroupName,OU=Groups,DC=domain,DC=com
+                if group_dn.startswith('CN='):
+                    cn_part = group_dn.split(',')[0]
+                    group_name = cn_part[3:]  # Remove 'CN=' prefix
+                    user_info['groups'].append(group_name)
             
             self.logger.info(f"Successfully retrieved info for user: {user_info['username']}")
             return user_info
             
-        except ldap.LDAPError as e:
+        except ldap3.core.exceptions.LDAPException as e:
             self.logger.error(f"LDAP error getting user info: {str(e)}")
             return None
     
-    def _get_ldap_attribute(self, attrs, attr_name, default_value):
+    def _get_ldap3_attribute(self, entry, attr_name, default_value):
         """
-        Helper to get an LDAP attribute with proper decoding
+        Helper to get an LDAP attribute from ldap3 entry
         
         Args:
-            attrs: Dictionary of attributes
+            entry: ldap3 Entry object
             attr_name: Name of the attribute to get
             default_value: Default value if attribute not found
             
         Returns:
             String value of the attribute
         """
-        if attr_name in attrs and attrs[attr_name]:
-            try:
-                # LDAP attributes are binary, decode to UTF-8
-                return attrs[attr_name][0].decode('utf-8')
-            except (UnicodeDecodeError, AttributeError, IndexError):
-                return default_value
+        try:
+            if hasattr(entry, attr_name) and getattr(entry, attr_name):
+                value = getattr(entry, attr_name)
+                if isinstance(value, list) and value:
+                    return str(value[0])
+                return str(value)
+        except (AttributeError, IndexError):
+            pass
+        return default_value
+    
+    def _get_ldap3_attribute_list(self, entry, attr_name, default_value):
+        """
+        Helper to get a list of values for an LDAP attribute from ldap3 entry
+        
+        Args:
+            entry: ldap3 Entry object
+            attr_name: Name of the attribute to get
+            default_value: Default value if attribute not found
+            
+        Returns:
+            List of string values for the attribute
+        """
+        try:
+            if hasattr(entry, attr_name) and getattr(entry, attr_name):
+                value = getattr(entry, attr_name)
+                if isinstance(value, list):
+                    return [str(item) for item in value]
+                return [str(value)]
+        except (AttributeError, IndexError):
+            pass
         return default_value
     
     def create_session(self, user_info):

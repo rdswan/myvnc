@@ -133,11 +133,11 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         # For LDAP, check if LDAP module is available
         if auth_method == "ldap":
             try:
-                import ldap
+                import ldap3
                 self.logger.debug("LDAP authentication: module available")
                 return True
             except ImportError:
-                self.logger.warning("LDAP authentication configured but ldap module not available")
+                self.logger.warning("LDAP authentication configured but ldap3 module not available")
                 return False
         
         # For Entra, check if MSAL module is available
