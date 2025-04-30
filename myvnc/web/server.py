@@ -121,6 +121,34 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         
         super().__init__(*args, **kwargs)
     
+    def is_auth_enabled(self):
+        """Check if authentication is enabled and available"""
+        auth_method = self.authentication_enabled.lower() if self.authentication_enabled else ""
+        
+        # Check if authentication method is configured
+        if auth_method not in ["entra", "ldap"]:
+            return False
+            
+        # For LDAP, check if LDAP module is available
+        if auth_method == "ldap":
+            try:
+                import ldap
+                return True
+            except ImportError:
+                self.logger.warning("LDAP authentication configured but ldap module not available")
+                return False
+        
+        # For Entra, check if MSAL module is available
+        if auth_method == "entra":
+            try:
+                import msal
+                return True
+            except ImportError:
+                self.logger.warning("Entra authentication configured but msal module not available")
+                return False
+                
+        return True
+    
     def do_GET(self):
         """Handle GET requests"""
         # Parse URL path
@@ -131,12 +159,22 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         client_address = self.client_address[0] if hasattr(self, 'client_address') and self.client_address else 'unknown'
         self.logger.info(f"GET request from {client_address}: {path}")
         
+        # Check if authentication is enabled and available
+        auth_enabled = self.is_auth_enabled()
+        
+        # Special case: redirect /login to / if authentication is disabled
+        if path == "/login" and not auth_enabled:
+            self.logger.info(f"Login page requested but authentication is disabled, redirecting to main page")
+            self.send_response(302)
+            self.send_header("Location", "/")
+            self.end_headers()
+            return
+        
         # Only check authentication if it's enabled
-        auth_method = self.authentication_enabled.lower() if self.authentication_enabled else ""
-        if auth_method in ["entra", "ldap"]:
+        if auth_enabled:
             # Check authentication for all paths except login page and assets
             if not path.startswith("/login") and not path.startswith("/auth/") and not self._is_public_asset(path):
-                is_authenticated, _, _ = self.check_auth()
+                is_authenticated, message, _ = self.check_auth()
                 if not is_authenticated:
                     # Redirect to login page
                     self.logger.info(f"Unauthenticated request to {path}, redirecting to login")
@@ -144,18 +182,11 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                     self.send_header("Location", "/login")
                     self.end_headers()
                     return
-        
-        # Special case: redirect /login to / if authentication is disabled
-        if path == "/login" and not auth_method:
-            self.send_response(302)
-            self.send_header("Location", "/")
-            self.end_headers()
-            return
             
         # Handle specific paths
         if path == "/":
             self.serve_file("index.html")
-        elif path == "/login" and auth_method:
+        elif path == "/login" and auth_enabled:
             self.serve_file("login.html")
         elif path == "/session" or path == "/api/auth/session":
             self.handle_session()
@@ -173,9 +204,9 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.handle_debug_commands()
         elif path == "/api/debug/environment":
             self.handle_debug_environment()
-        elif path == "/auth/entra" and auth_method == "entra":
+        elif path == "/auth/entra" and auth_enabled and self.authentication_enabled.lower() == "entra":
             self.handle_auth_entra()
-        elif path == "/auth/callback" and auth_method == "entra":
+        elif path == "/auth/callback" and auth_enabled and self.authentication_enabled.lower() == "entra":
             self.handle_auth_callback()
         else:
             # Try to serve static file
@@ -190,9 +221,11 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         client_address = self.client_address[0] if hasattr(self, 'client_address') and self.client_address else 'unknown'
         self.logger.info(f"POST request from {client_address}: {path}")
         
+        # Check if authentication is enabled and available
+        auth_enabled = self.is_auth_enabled()
+        
         # Only check authentication if it's enabled
-        auth_method = self.authentication_enabled.lower() if self.authentication_enabled else ""
-        if auth_method in ["entra", "ldap"]:
+        if auth_enabled:
             # Allow login without authentication
             if path == "/api/auth/login" or path == "/api/login":
                 self.handle_login()
@@ -200,7 +233,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             
             # Check authentication for all other paths
             if not path.startswith("/auth/"):
-                is_authenticated, _, _ = self.check_auth()
+                is_authenticated, message, _ = self.check_auth()
                 if not is_authenticated:
                     self.send_json_response({
                         "success": False,
@@ -522,15 +555,34 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
     def handle_server_config(self):
         """Handle server configuration request"""
         try:
-            self.logger.info("Handling server configuration request")
-            # Return the server configuration (excluding sensitive information)
-            server_config = load_server_config()
-            # Remove any sensitive fields if needed
-            self.logger.debug(f"Sending server config: {server_config}")
-            self.send_json_response(server_config)
+            config = self.server_config.copy()
+            
+            # Add auth config status to the response
+            auth_method = config.get('authentication', '').lower()
+            auth_enabled = self.is_auth_enabled()
+            config['auth_enabled'] = auth_enabled
+            
+            # Add extra information for debugging
+            if not auth_enabled and auth_method in ['entra', 'ldap']:
+                # Authentication is configured but not available (missing modules)
+                if auth_method == 'ldap':
+                    try:
+                        import ldap
+                        config['ldap_available'] = True
+                    except ImportError:
+                        config['ldap_available'] = False
+                        
+                if auth_method == 'entra':
+                    try:
+                        import msal
+                        config['msal_available'] = True
+                    except ImportError:
+                        config['msal_available'] = False
+            
+            self.send_json_response(config)
         except Exception as e:
-            self.logger.error(f"Error handling server config request: {str(e)}")
-            self.send_error_response(str(e))
+            self.logger.error(f"Error getting server config: {str(e)}")
+            self.send_error_response(f"Failed to get server configuration: {str(e)}")
     
     def handle_debug_commands(self):
         """Handle /debug/commands endpoint to display command history"""

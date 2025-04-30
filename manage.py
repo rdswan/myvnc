@@ -466,6 +466,31 @@ def server_status():
     use_https = ssl_cert and ssl_key and os.path.exists(ssl_cert) and os.path.exists(ssl_key)
     protocol = "https" if use_https else "http"
     
+    # Check authentication configuration
+    auth_method = config.get('authentication', 'None')
+    auth_enabled = auth_method.lower() in ['entra', 'ldap']
+    
+    # Check if LDAP module is available
+    try:
+        import ldap
+        ldap_available = True
+    except ImportError:
+        ldap_available = False
+    
+    # Check if MSAL (Microsoft Auth) module is available
+    try:
+        import msal
+        msal_available = True
+    except ImportError:
+        msal_available = False
+    
+    # Determine actual auth status based on configuration and module availability
+    actual_auth_enabled = auth_enabled
+    if auth_method.lower() == 'ldap' and not ldap_available:
+        actual_auth_enabled = False
+    elif auth_method.lower() == 'entra' and not msal_available:
+        actual_auth_enabled = False
+    
     # Log status information
     logger.info(f"Server status:")
     logger.info(f"  Status: Running")
@@ -477,6 +502,19 @@ def server_status():
     if use_https:
         logger.info(f"  SSL Certificate: {ssl_cert}")
         logger.info(f"  SSL Key: {ssl_key}")
+    logger.info(f"  Authentication: {'Enabled' if actual_auth_enabled else 'Disabled'}")
+    if auth_method and auth_method.lower() != 'none':
+        logger.info(f"  Auth Method: {auth_method}")
+        logger.info(f"  Auth Method Configured: {'Yes' if auth_enabled else 'No'}")
+        logger.info(f"  Auth Method Available: {'Yes' if actual_auth_enabled else 'No'}")
+        logger.info(f"  Auth Status: {auth_method + ' (' + ('Active' if actual_auth_enabled else 'Inactive - Module Missing') + ')'}")
+        
+        # Add details about the auth modules
+        if auth_method.lower() == 'ldap':
+            logger.info(f"  LDAP Module Available: {'Yes' if ldap_available else 'No'}")
+        elif auth_method.lower() == 'entra':
+            logger.info(f"  MSAL Module Available: {'Yes' if msal_available else 'No'}")
+    
     logger.info(f"  Log directory: {logdir}")
     logger.info(f"  Current log: {server_log_file if server_log_file else 'Unknown'}")
     logger.info(f"  Uptime: {uptime}")
