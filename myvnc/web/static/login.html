@@ -148,9 +148,9 @@
                 </button>
             </form>
             
-            <div class="login-divider">OR</div>
+            <div class="login-divider" id="login-divider">OR</div>
             
-            <a href="/auth/entra" class="sso-button">
+            <a href="/auth/entra" class="sso-button" id="entra-sso-button">
                 <i class="fab fa-microsoft"></i> Sign in with Microsoft Entra ID
             </a>
         </div>
@@ -164,6 +164,8 @@
         document.addEventListener('DOMContentLoaded', function() {
             const loginForm = document.getElementById('login-form');
             const errorMessage = document.getElementById('login-error');
+            const loginDivider = document.getElementById('login-divider');
+            const entraSsoButton = document.getElementById('entra-sso-button');
             
             // Check for error parameter in URL
             const urlParams = new URLSearchParams(window.location.search);
@@ -171,6 +173,43 @@
                 errorMessage.textContent = decodeURIComponent(urlParams.get('error'));
                 errorMessage.style.display = 'block';
             }
+            
+            // Check server configuration to determine authentication methods
+            fetch('/api/server/config')
+                .then(response => response.json())
+                .then(config => {
+                    const authMethod = (config.authentication || '').toLowerCase();
+                    
+                    // Adjust the login UI based on the authentication method
+                    if (authMethod === 'ldap') {
+                        // For LDAP, show username/password login but hide SSO option
+                        loginDivider.style.display = 'none';
+                        entraSsoButton.style.display = 'none';
+                        
+                        // Update the login form title to indicate LDAP
+                        document.querySelector('.login-title').textContent = 'Login with LDAP';
+                    } else if (authMethod === 'entra') {
+                        // For Entra, show both login options
+                        loginDivider.style.display = 'flex';
+                        entraSsoButton.style.display = 'block';
+                        
+                        // Update the login form title
+                        document.querySelector('.login-title').textContent = 'Login to VNC Manager';
+                    } else {
+                        // If no authentication is configured, show a message
+                        document.querySelector('.login-title').textContent = 'Authentication Error';
+                        errorMessage.textContent = 'Authentication is not properly configured on the server.';
+                        errorMessage.style.display = 'block';
+                        loginForm.style.display = 'none';
+                        loginDivider.style.display = 'none';
+                        entraSsoButton.style.display = 'none';
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching server config:', error);
+                    errorMessage.textContent = 'Error connecting to server. Please try again later.';
+                    errorMessage.style.display = 'block';
+                });
             
             loginForm.addEventListener('submit', async function(event) {
                 event.preventDefault();

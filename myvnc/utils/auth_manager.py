@@ -77,7 +77,16 @@ class AuthManager:
         """Initialize the auth manager"""
         # Load server configuration
         self.server_config = self._load_server_config()
-        self.auth_enabled = self.server_config.get("authentication", "").lower() == "entra"
+        self.auth_method = self.server_config.get("authentication", "").lower()
+        self.auth_enabled = self.auth_method in ["entra", "ldap"]
+        
+        # Import specialized auth managers
+        from .entra_manager import EntraManager
+        from .ldap_manager import LDAPManager
+        
+        # Initialize the specific auth manager based on configuration
+        self.entra_manager = EntraManager() if self.auth_method == "entra" else None
+        self.ldap_manager = LDAPManager() if self.auth_method == "ldap" else None
         
         # Only set up auth if enabled
         if not self.auth_enabled:
@@ -95,8 +104,6 @@ class AuthManager:
         self.client_secret = os.environ.get('ENTRA_CLIENT_SECRET', '')
         self.redirect_uri = os.environ.get('ENTRA_REDIRECT_URI', 'http://localhost:8000/auth/callback')
         self.scopes = ['https://graph.microsoft.com/.default']
-        # Default to 'entra' authentication if environment variables are set
-        self.auth_method = os.environ.get('AUTH_METHOD', 'entra' if self.tenant_id and self.client_id else 'ldap')
         
         # Initialize MSAL app if using Entra ID
         if self.auth_method == 'entra' and self.tenant_id and self.client_id:
@@ -132,7 +139,7 @@ class AuthManager:
             print(f"Warning: Server configuration file not found or invalid at {config_path}")
             return {}
     
-    def authenticate(self, username: str, password: str) -> Tuple[bool, str, Optional[Dict]]:
+    def authenticate(self, username: str, password: str) -> Tuple[bool, str, Optional[str]]:
         """
         Authenticate a user with Active Directory or Microsoft Entra ID
         
@@ -141,17 +148,19 @@ class AuthManager:
             password: Password
             
         Returns:
-            Tuple of (success, message, session_data)
+            Tuple of (success, message, session_id)
         """
         if not self.auth_enabled:
             return False, "Authentication is disabled", None
             
-        if self.auth_method == 'entra' and self.msal_app:
+        if self.auth_method == 'entra':
             return self._authenticate_entra_id(username, password)
-        else:
+        elif self.auth_method == 'ldap':
             return self._authenticate_ldap(username, password)
+        else:
+            return False, f"Unsupported authentication method: {self.auth_method}", None
     
-    def _authenticate_entra_id(self, username: str, password: str) -> Tuple[bool, str, Optional[Dict]]:
+    def _authenticate_entra_id(self, username: str, password: str) -> Tuple[bool, str, Optional[str]]:
         """
         Authenticate a user with Microsoft Entra ID
         
@@ -160,7 +169,7 @@ class AuthManager:
             password: Password
             
         Returns:
-            Tuple of (success, message, session_data)
+            Tuple of (success, message, session_id)
         """
         try:
             # Use Resource Owner Password Credentials (ROPC) flow
@@ -197,7 +206,7 @@ class AuthManager:
             print(error_msg, file=sys.stderr)
             return False, error_msg, None
     
-    def _authenticate_ldap(self, username: str, password: str) -> Tuple[bool, str, Optional[Dict]]:
+    def _authenticate_ldap(self, username: str, password: str) -> Tuple[bool, str, Optional[str]]:
         """
         Authenticate a user with Active Directory using LDAP
         
@@ -206,76 +215,33 @@ class AuthManager:
             password: Password
             
         Returns:
-            Tuple of (success, message, session_data)
+            Tuple of (success, message, session_id)
         """
+        if not self.ldap_manager:
+            return False, "LDAP authentication not configured", None
+            
         try:
-            # Connect to LDAP server
-            conn = ldap.initialize(self.ad_server)
-            conn.set_option(ldap.OPT_REFERRALS, 0)
+            # Use LDAP manager for authentication
+            success, message, user_info = self.ldap_manager.authenticate(username, password)
             
-            # Bind with user credentials
-            user_dn = f"{username}@{self.ad_domain}"
-            conn.simple_bind_s(user_dn, password)
+            if not success or not user_info:
+                return False, message, None
+                
+            # Extract user details
+            username = user_info.get('username', username)
+            display_name = user_info.get('display_name', username)
+            email = user_info.get('email', f"{username}@{self.ldap_manager.ldap_domain}")
+            groups = user_info.get('groups', [])
             
-            # Search for user details
-            search_filter = f"(sAMAccountName={username})"
-            attributes = ['displayName', 'mail', 'memberOf']
+            # Create session
+            session_id = self.create_session(username, display_name, email, groups)
             
-            result = conn.search_s(
-                self.ad_base_dn,
-                ldap.SCOPE_SUBTREE,
-                search_filter,
-                attributes
-            )
+            return True, "Authentication successful", session_id
             
-            # Process user data
-            if result and len(result) > 0:
-                user_data = {}
-                ldap_attrs = result[0][1]
-                
-                # Extract user attributes
-                if 'displayName' in ldap_attrs:
-                    user_data['display_name'] = ldap_attrs['displayName'][0].decode('utf-8')
-                else:
-                    user_data['display_name'] = username
-                    
-                if 'mail' in ldap_attrs:
-                    user_data['email'] = ldap_attrs['mail'][0].decode('utf-8')
-                
-                # Extract group memberships
-                user_data['groups'] = []
-                if 'memberOf' in ldap_attrs:
-                    for group_dn in ldap_attrs['memberOf']:
-                        group_dn_str = group_dn.decode('utf-8')
-                        # Extract CN from the DN
-                        cn_part = next((part for part in group_dn_str.split(',') if part.startswith('CN=')), None)
-                        if cn_part:
-                            group_name = cn_part.replace('CN=', '')
-                            user_data['groups'].append(group_name)
-                
-                # Create session
-                session_id = self.create_session(username, user_data['display_name'], user_data['email'], user_data['groups'])
-                return True, "Authentication successful", session_id
-            else:
-                return False, "User not found in Active Directory", None
-                
-        except ldap.INVALID_CREDENTIALS:
-            return False, "Invalid credentials", None
-        except ldap.SERVER_DOWN:
-            return False, "LDAP server is unreachable", None
-        except ldap.LDAPError as e:
-            error_msg = f"LDAP error: {str(e)}"
-            print(error_msg, file=sys.stderr)
-            return False, error_msg, None
         except Exception as e:
-            error_msg = f"Authentication error: {str(e)}"
+            error_msg = f"LDAP authentication error: {str(e)}"
             print(error_msg, file=sys.stderr)
             return False, error_msg, None
-        finally:
-            try:
-                conn.unbind()
-            except:
-                pass
     
     def _get_user_info_from_graph(self, access_token):
         """Get user information from Microsoft Graph API"""
@@ -394,71 +360,89 @@ class AuthManager:
             print(error_msg, file=sys.stderr)
             return False, error_msg, None
     
-    def get_auth_url(self) -> str:
+    def validate_session(self, session_id: str) -> Tuple[bool, str, Optional[Dict]]:
         """
-        Get the Microsoft Entra ID authorization URL for interactive login
-        
-        Returns:
-            Authorization URL
-        """
-        if not self.msal_app:
-            return None
-        
-        auth_url = self.msal_app.get_authorization_request_url(
-            scopes=self.scopes,
-            redirect_uri=self.redirect_uri,
-            response_type="code",
-            prompt="select_account"
-        )
-        return auth_url
-    
-    def validate_session(self, session_id: str) -> Tuple[bool, Optional[Dict]]:
-        """
-        Validate a session ID
+        Validate a user session
         
         Args:
             session_id: Session ID to validate
             
         Returns:
-            Tuple of (is_valid, session_data)
+            Tuple of (success, message, session)
         """
-        if not self.auth_enabled:
-            return False, None
+        # Check if the session exists in our local cache
+        if session_id in self.sessions:
+            session = self.sessions[session_id]
             
-        if not session_id or session_id not in self.sessions:
-            return False, None
+            # Update last access time
+            session['last_access'] = time.time()
+            
+            return True, "Session is valid", session
         
-        session = self.sessions[session_id]
+        # If using LDAP, check with LDAP manager
+        if self.auth_method == 'ldap' and self.ldap_manager:
+            success, message, session = self.ldap_manager.validate_session(session_id)
+            if success and session:
+                # Cache the session locally
+                self.sessions[session_id] = session
+                return True, message, session
         
-        # Check if session has expired
-        current_time = time.time()
-        if current_time > session.get('expiry', 0):
-            # Remove expired session
-            del self.sessions[session_id]
-            self.save_sessions()
-            return False, None
-        
-        # Extend session expiry time
-        session['expiry'] = current_time + self.session_expiry
-        self.save_sessions()
-        
-        return True, session
-    
-    def logout(self, session_id: str) -> bool:
+        return False, "Invalid or expired session", None
+
+    def logout(self, session_id: str) -> Tuple[bool, str]:
         """
-        Invalidate a session (logout)
+        Logout a user by invalidating their session
         
         Args:
             session_id: Session ID to invalidate
             
         Returns:
-            True if session was found and removed, False otherwise
+            Tuple of (success, message)
         """
+        # Check local sessions
         if session_id in self.sessions:
-            del self.sessions[session_id]
+            self.sessions.pop(session_id)
             self.save_sessions()
-            return True
-        return False
+            return True, "Logged out successfully"
+        
+        # Check LDAP manager if using LDAP
+        if self.auth_method == 'ldap' and self.ldap_manager:
+            success, message = self.ldap_manager.end_session(session_id)
+            if success:
+                return True, message
+        
+        return False, "Session not found"
+
+    def get_auth_url(self) -> str:
+        """
+        Get the authorization URL for Microsoft Entra ID authentication
+        
+        Returns:
+            Authorization URL string
+        """
+        if self.auth_method != 'entra' or not self.msal_app:
+            return ""
+            
+        # Generate a request state with a random value
+        request_state = str(uuid.uuid4())
+        
+        # Cache the state for validation during the callback
+        # This is a simplistic approach - for production, you would want a more robust solution
+        self.auth_states = getattr(self, 'auth_states', {})
+        self.auth_states[request_state] = {'created_at': time.time()}
+        
+        # Generate the authorization URL
+        auth_params = {
+            "client_id": self.client_id,
+            "response_type": "code",
+            "redirect_uri": self.redirect_uri,
+            "scope": " ".join(self.scopes),
+            "state": request_state,
+            "prompt": "select_account"
+        }
+        
+        auth_url = f"https://login.microsoftonline.com/{self.tenant_id}/oauth2/v2.0/authorize?{urlencode(auth_params)}"
+        return auth_url
     
     def create_session(self, username: str, display_name: str, email: str, groups: List[str]) -> Dict:
         """

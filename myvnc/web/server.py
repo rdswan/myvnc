@@ -132,10 +132,11 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         self.logger.info(f"GET request from {client_address}: {path}")
         
         # Only check authentication if it's enabled
-        if self.authentication_enabled and self.authentication_enabled.lower() == "entra":
+        auth_method = self.authentication_enabled.lower() if self.authentication_enabled else ""
+        if auth_method in ["entra", "ldap"]:
             # Check authentication for all paths except login page and assets
             if not path.startswith("/login") and not path.startswith("/auth/") and not self._is_public_asset(path):
-                is_authenticated, _ = self.check_auth()
+                is_authenticated, _, _ = self.check_auth()
                 if not is_authenticated:
                     # Redirect to login page
                     self.logger.info(f"Unauthenticated request to {path}, redirecting to login")
@@ -145,7 +146,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                     return
         
         # Special case: redirect /login to / if authentication is disabled
-        if path == "/login" and (not self.authentication_enabled or self.authentication_enabled.lower() != "entra"):
+        if path == "/login" and not auth_method:
             self.send_response(302)
             self.send_header("Location", "/")
             self.end_headers()
@@ -154,7 +155,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         # Handle specific paths
         if path == "/":
             self.serve_file("index.html")
-        elif path == "/login" and self.authentication_enabled and self.authentication_enabled.lower() == "entra":
+        elif path == "/login" and auth_method:
             self.serve_file("login.html")
         elif path == "/session" or path == "/api/auth/session":
             self.handle_session()
@@ -172,9 +173,9 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.handle_debug_commands()
         elif path == "/api/debug/environment":
             self.handle_debug_environment()
-        elif path == "/auth/entra" and self.authentication_enabled and self.authentication_enabled.lower() == "entra":
+        elif path == "/auth/entra" and auth_method == "entra":
             self.handle_auth_entra()
-        elif path == "/auth/callback" and self.authentication_enabled and self.authentication_enabled.lower() == "entra":
+        elif path == "/auth/callback" and auth_method == "entra":
             self.handle_auth_callback()
         else:
             # Try to serve static file
@@ -190,7 +191,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         self.logger.info(f"POST request from {client_address}: {path}")
         
         # Only check authentication if it's enabled
-        if self.authentication_enabled and self.authentication_enabled.lower() == "entra":
+        auth_method = self.authentication_enabled.lower() if self.authentication_enabled else ""
+        if auth_method in ["entra", "ldap"]:
             # Allow login without authentication
             if path == "/api/auth/login" or path == "/api/login":
                 self.handle_login()
@@ -198,7 +200,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             
             # Check authentication for all other paths
             if not path.startswith("/auth/"):
-                is_authenticated, _ = self.check_auth()
+                is_authenticated, _, _ = self.check_auth()
                 if not is_authenticated:
                     self.send_json_response({
                         "success": False,
@@ -241,13 +243,13 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         """Check if user is authenticated"""
         session_id = self.get_session_cookie()
         if not session_id:
-            return False, None
+            return False, "No session cookie found", None
         
         success, message, session = self.auth_manager.validate_session(session_id)
         if not success:
-            return False, None
+            return False, message, None
         
-        return True, session
+        return True, message, session
     
     def get_session_cookie(self):
         """Get session cookie from request"""
@@ -340,19 +342,21 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         """Handle session validation requests"""
         try:
             # If authentication is disabled, return as authenticated with a generic user
-            if not self.authentication_enabled or self.authentication_enabled.lower() != "entra":
+            auth_method = self.authentication_enabled.lower() if self.authentication_enabled else ""
+            if not auth_method:
                 self.logger.info("Session check with authentication disabled, returning anonymous user")
                 self.send_json_response({
                     "authenticated": True,
                     "username": "anonymous",
                     "display_name": "Anonymous User",
                     "email": "",
-                    "groups": []
+                    "groups": [],
+                    "auth_method": ""
                 })
                 return
                 
             # Check if user is authenticated
-            is_authenticated, session = self.check_auth()
+            is_authenticated, message, session = self.check_auth()
             
             if is_authenticated:
                 # Send user data
@@ -362,13 +366,15 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                     "username": session.get("username", ""),
                     "display_name": session.get("display_name", ""),
                     "email": session.get("email", ""),
-                    "groups": session.get("groups", [])
+                    "groups": session.get("groups", []),
+                    "auth_method": auth_method
                 })
             else:
                 # Send unauthenticated response
-                self.logger.info("Session check: Not authenticated")
+                self.logger.info(f"Session check: Not authenticated - {message}")
                 self.send_json_response({
-                    "authenticated": False
+                    "authenticated": False,
+                    "message": message
                 }, 401)
                 
         except Exception as e:
@@ -1047,14 +1053,8 @@ def run_server(host=None, port=None, directory=None, config=None):
             # Create SSL context with more permissive settings
             ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
             ssl_context.load_cert_chain(certfile=ssl_cert, keyfile=ssl_key)
-
-            ## Verify client certificates
-            ssl_context.check_hostname = True
-            ssl_context.verify_mode = ssl.CERT_REQUIRED
-
-            ## Don't verify client certificates
-            #ssl_context.check_hostname = False
-            #ssl_context.verify_mode = ssl.CERT_NONE
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE  # Don't verify client certificates
             
             # Wrap the socket with SSL
             httpd.socket = ssl_context.wrap_socket(httpd.socket, server_side=True)
