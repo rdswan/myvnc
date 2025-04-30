@@ -1094,6 +1094,7 @@ def run_server(host=None, port=None, directory=None, config=None):
         # Check for SSL certificate and key files in config
         ssl_cert = config.get("ssl_cert")
         ssl_key = config.get("ssl_key")
+        ssl_ca_chain = config.get("ssl_ca_chain")
         use_https = ssl_cert and ssl_key and os.path.exists(ssl_cert) and os.path.exists(ssl_key)
         
         # Create HTTP or HTTPS server based on SSL configuration
@@ -1109,13 +1110,20 @@ def run_server(host=None, port=None, directory=None, config=None):
         if use_https:
             # Create SSL context with more permissive settings
             ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
-            ssl_context.load_cert_chain(certfile=ssl_cert, keyfile=ssl_key)
+            
+            # If CA chain bundle is provided and exists, load it
+            if ssl_ca_chain and os.path.exists(ssl_ca_chain):
+                ssl_context.load_cert_chain(certfile=ssl_cert, keyfile=ssl_key, cafile=ssl_ca_chain)
+                logger.info(f"SSL enabled with certificate: {ssl_cert}, key: {ssl_key}, CA chain: {ssl_ca_chain}")
+            else:
+                ssl_context.load_cert_chain(certfile=ssl_cert, keyfile=ssl_key)
+                logger.info(f"SSL enabled with certificate: {ssl_cert}, key: {ssl_key}")
+            
             ssl_context.check_hostname = False
             ssl_context.verify_mode = ssl.CERT_NONE  # Don't verify client certificates
             
             # Wrap the socket with SSL
             httpd.socket = ssl_context.wrap_socket(httpd.socket, server_side=True)
-            logger.info(f"SSL enabled with certificate: {ssl_cert}, key: {ssl_key}")
             
             # Log server startup with HTTPS
             logger.info(f"Server started - accessible at https://{fqdn_host}:{port}")
@@ -1155,6 +1163,7 @@ def parse_args():
     parser.add_argument('--config', help='Path to server configuration file')
     parser.add_argument('--ssl-cert', help='Path to SSL certificate file for HTTPS')
     parser.add_argument('--ssl-key', help='Path to SSL private key file for HTTPS')
+    parser.add_argument('--ssl-ca-chain', help='Path to SSL CA chain bundle file (intermediate certificates)')
     return parser.parse_args()
 
 if __name__ == '__main__':
@@ -1178,5 +1187,8 @@ if __name__ == '__main__':
     
     if args.ssl_key:
         config["ssl_key"] = args.ssl_key
+        
+    if args.ssl_ca_chain:
+        config["ssl_ca_chain"] = args.ssl_ca_chain
     
     run_server(host=args.host, port=args.port, config=config) 

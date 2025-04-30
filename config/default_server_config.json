@@ -4,10 +4,11 @@
     "debug": true,
     "max_connections": 5,
     "timeout": 30,
-    "authentication": "LDAP",
+    "authentication": "",
     "auth_notes": "To enable authentication, set 'authentication' to either 'Entra' or 'LDAP'",
     "logdir": "/localdev/myvnc/logs",
     "ssl_cert": "",
     "ssl_key": "",
-    "ssl_notes": "To enable HTTPS, set ssl_cert and ssl_key to valid file paths"
+    "ssl_ca_chain": "",
+    "ssl_notes": "To enable HTTPS, set ssl_cert and ssl_key to valid file paths. Optionally set ssl_ca_chain for intermediate certificates."
 }

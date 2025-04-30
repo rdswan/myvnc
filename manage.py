@@ -258,6 +258,7 @@ def start_server():
         # Check if HTTPS is configured
         ssl_cert = config.get('ssl_cert', '')
         ssl_key = config.get('ssl_key', '')
+        ssl_ca_chain = config.get('ssl_ca_chain', '')
         use_https = ssl_cert and ssl_key and os.path.exists(ssl_cert) and os.path.exists(ssl_key)
         protocol = "https" if use_https else "http"
         
@@ -325,6 +326,7 @@ def start_server():
         # Check if HTTPS is configured
         ssl_cert = config.get('ssl_cert', '')
         ssl_key = config.get('ssl_key', '')
+        ssl_ca_chain = config.get('ssl_ca_chain', '')
         use_https = ssl_cert and ssl_key and os.path.exists(ssl_cert) and os.path.exists(ssl_key)
         protocol = "https" if use_https else "http"
         
@@ -339,6 +341,14 @@ def start_server():
         logger.info(f"Server URL: {url}")
         if use_https:
             logger.info(f"SSL/HTTPS: Enabled")
+            logger.info(f"  SSL Certificate: {ssl_cert}")
+            logger.info(f"  SSL Key: {ssl_key}")
+            if ssl_ca_chain and os.path.exists(ssl_ca_chain):
+                logger.info(f"  SSL CA Chain: {ssl_ca_chain}")
+            elif ssl_ca_chain:
+                logger.info(f"  SSL CA Chain: {ssl_ca_chain} (file not found)")
+            else:
+                logger.info(f"  SSL CA Chain: Not configured")
         
         # Wait a moment for the log file to be created
         time.sleep(0.5)
@@ -463,6 +473,7 @@ def server_status():
     # Check if HTTPS is configured
     ssl_cert = config.get('ssl_cert', '')
     ssl_key = config.get('ssl_key', '')
+    ssl_ca_chain = config.get('ssl_ca_chain', '')
     use_https = ssl_cert and ssl_key and os.path.exists(ssl_cert) and os.path.exists(ssl_key)
     protocol = "https" if use_https else "http"
     
@@ -502,6 +513,12 @@ def server_status():
     if use_https:
         logger.info(f"  SSL Certificate: {ssl_cert}")
         logger.info(f"  SSL Key: {ssl_key}")
+        if ssl_ca_chain and os.path.exists(ssl_ca_chain):
+            logger.info(f"  SSL CA Chain: {ssl_ca_chain}")
+        elif ssl_ca_chain:
+            logger.info(f"  SSL CA Chain: {ssl_ca_chain} (file not found)")
+        else:
+            logger.info(f"  SSL CA Chain: Not configured")
     logger.info(f"  Authentication: {'Enabled' if actual_auth_enabled else 'Disabled'}")
     if auth_method and auth_method.lower() != 'none':
         logger.info(f"  Auth Method: {auth_method}")
