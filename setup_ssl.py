@@ -17,7 +17,6 @@ def main():
     # SSL cert paths
     ssl_cert = script_dir / "config" / "ssl" / "cert.pem"
     ssl_key = script_dir / "config" / "ssl" / "key.pem"
-    ssl_ca_chain = script_dir / "config" / "ssl" / "ca-chain.pem"
     
     # Verify files exist
     if not config_path.exists():
@@ -44,15 +43,6 @@ def main():
     config['ssl_cert'] = str(ssl_cert.absolute())
     config['ssl_key'] = str(ssl_key.absolute())
     
-    # Add CA chain if it exists
-    if ssl_ca_chain.exists():
-        config['ssl_ca_chain'] = str(ssl_ca_chain.absolute())
-        print(f"CA chain bundle found: {ssl_ca_chain}")
-    else:
-        print(f"Note: CA chain bundle not found at {ssl_ca_chain} (optional)")
-        # Set to empty string if not present
-        config['ssl_ca_chain'] = ""
-    
     # Save updated config
     try:
         with open(config_path, 'w') as f:
@@ -60,8 +50,6 @@ def main():
         print(f"Successfully updated config with SSL certificate paths:")
         print(f"Certificate: {config['ssl_cert']}")
         print(f"Key: {config['ssl_key']}")
-        if config['ssl_ca_chain']:
-            print(f"CA Chain: {config['ssl_ca_chain']}")
     except Exception as e:
         print(f"Error updating config file: {e}")
         sys.exit(1)

@@ -572,7 +572,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 # Authentication is configured but not available (missing modules)
                 if auth_method == 'ldap':
                     try:
-                        import ldap
+                        import ldap3
                         config['ldap_available'] = True
                     except ImportError:
                         config['ldap_available'] = False
@@ -1111,12 +1111,40 @@ def run_server(host=None, port=None, directory=None, config=None):
             # Create SSL context with more permissive settings
             ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
             
-            # If CA chain bundle is provided and exists, load it
+            # Load cert chain - first load the cert and key
+            ssl_context.load_cert_chain(certfile=ssl_cert, keyfile=ssl_key)
+            
+            # If CA chain bundle is provided and exists, load it separately
             if ssl_ca_chain and os.path.exists(ssl_ca_chain):
-                ssl_context.load_cert_chain(certfile=ssl_cert, keyfile=ssl_key, cafile=ssl_ca_chain)
-                logger.info(f"SSL enabled with certificate: {ssl_cert}, key: {ssl_key}, CA chain: {ssl_ca_chain}")
+                try:
+                    # Try to load CA chain file using file path directly
+                    ssl_context.load_verify_locations(cafile=ssl_ca_chain)
+                    logger.info(f"SSL enabled with certificate: {ssl_cert}, key: {ssl_key}, CA chain: {ssl_ca_chain}")
+                except Exception as e:
+                    logger.warning(f"Failed to load CA chain bundle: {str(e)}")
+                    # Try alternate method of loading CA chain
+                    try:
+                        with open(ssl_ca_chain, 'rb') as ca_file:
+                            ca_data = ca_file.read()
+                            # Create a temporary file with the correct format
+                            import tempfile
+                            with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                                temp_path = temp_file.name
+                                temp_file.write(ca_data)
+                            
+                            # Try to load from the temp file
+                            ssl_context.load_verify_locations(cafile=temp_path)
+                            logger.info(f"SSL enabled with certificate: {ssl_cert}, key: {ssl_key}, CA chain: {ssl_ca_chain} (via temp file)")
+                            
+                            # Clean up temp file
+                            try:
+                                os.unlink(temp_path)
+                            except:
+                                pass
+                    except Exception as e2:
+                        logger.warning(f"Failed to load CA chain bundle (alternate method): {str(e2)}")
+                        logger.info(f"SSL enabled with certificate: {ssl_cert}, key: {ssl_key}")
             else:
-                ssl_context.load_cert_chain(certfile=ssl_cert, keyfile=ssl_key)
                 logger.info(f"SSL enabled with certificate: {ssl_cert}, key: {ssl_key}")
             
             ssl_context.check_hostname = False
@@ -1163,7 +1191,7 @@ def parse_args():
     parser.add_argument('--config', help='Path to server configuration file')
     parser.add_argument('--ssl-cert', help='Path to SSL certificate file for HTTPS')
     parser.add_argument('--ssl-key', help='Path to SSL private key file for HTTPS')
-    parser.add_argument('--ssl-ca-chain', help='Path to SSL CA chain bundle file (intermediate certificates)')
+    parser.add_argument('--ssl-ca-chain', help='Path to SSL CA chain bundle file for HTTPS')
     return parser.parse_args()
 
 if __name__ == '__main__':
@@ -1187,7 +1215,7 @@ if __name__ == '__main__':
     
     if args.ssl_key:
         config["ssl_key"] = args.ssl_key
-        
+    
     if args.ssl_ca_chain:
         config["ssl_ca_chain"] = args.ssl_ca_chain
     

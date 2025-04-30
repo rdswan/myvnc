@@ -7,8 +7,8 @@
     "authentication": "",
     "auth_notes": "To enable authentication, set 'authentication' to either 'Entra' or 'LDAP'",
     "logdir": "/localdev/myvnc/logs",
-    "ssl_cert": "",
-    "ssl_key": "",
-    "ssl_ca_chain": "",
+    "ssl_cert": "/proj_risc/user_dev/bswan/tools_src/myvnc/config/ssl/myvnc_local_tenstorrent_com.crt",
+    "ssl_key": "/proj_risc/user_dev/bswan/tools_src/myvnc/config/ssl/myvnc.local.tenstorrent.com.key",
+    "ssl_ca_chain": "/proj_risc/user_dev/bswan/tools_src/myvnc/config/ssl/myvnc_local_tenstorrent_com.ca-bundle",
     "ssl_notes": "To enable HTTPS, set ssl_cert and ssl_key to valid file paths. Optionally set ssl_ca_chain for intermediate certificates."
 }

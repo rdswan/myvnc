@@ -19,6 +19,7 @@ import socket
 import subprocess
 from pathlib import Path
 import logging
+import os
 from myvnc.web.server import run_server, load_server_config, load_lsf_config, get_fully_qualified_hostname
 from myvnc.utils.log_manager import setup_logging, get_logger, get_current_log_file
 
@@ -40,6 +41,17 @@ if __name__ == "__main__":
     config = load_server_config()
     lsf_config = load_lsf_config()
     
+    # Ensure log directory exists
+    log_dir = config.get('logdir', '/tmp')
+    os.makedirs(log_dir, exist_ok=True)
+    
+    # Make sure server PID file uses the same log directory
+    pid_file = os.path.join(log_dir, 'myvnc_server.pid')
+    
+    # Record our PID for other components to find
+    with open(pid_file, 'w') as f:
+        f.write(str(os.getpid()))
+    
     # Reset any existing loggers to ensure we start fresh
     logging.getLogger('myvnc').handlers = []
     
@@ -49,7 +61,7 @@ if __name__ == "__main__":
     # Verify we have a log file
     log_file = get_current_log_file()
     if log_file:
-        logger.info(f"Created log file at: {log_file.absolute()}")
+        logger.info(f"Server starting - Log file: {log_file.absolute()}")
     else:
         logger.warning("No log file was created!")
     

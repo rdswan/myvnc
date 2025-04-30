@@ -193,9 +193,15 @@ def setup_logging(config=None):
         # Ensure log directory exists
         logdir_path.mkdir(exist_ok=True, parents=True)
         
-        # Create log file with PID instead of timestamp
-        pid = os.getpid()
-        log_file = logdir_path / f'myvnc_{pid}.log'
+        # Check for special manage.py PID in environment
+        if 'MYVNC_MANAGE_PID' in os.environ:
+            manage_pid = os.environ['MYVNC_MANAGE_PID']
+            log_file = logdir_path / f'myvnc_{manage_pid}.log'
+        else:
+            # Create log file with PID instead of timestamp
+            pid = os.getpid()
+            log_file = logdir_path / f'myvnc_{pid}.log'
+        
         current_log_file = log_file
         
         full_path = log_file.absolute()
@@ -250,6 +256,50 @@ def get_logger():
             # Import here to avoid circular imports
             from myvnc.web.server import load_server_config
             config = load_server_config()
+            
+            # Check if there's a running server whose log we should use
+            try:
+                import psutil
+                
+                # Look for any process that might be our server
+                for proc in psutil.process_iter(['pid', 'cmdline']):
+                    try:
+                        cmdline = ' '.join(proc.info['cmdline'] or [])
+                        if "python" in cmdline and "main.py" in cmdline:
+                            # We found a server process, check if it has a log file
+                            log_path = config.get('logdir', '/tmp')
+                            potential_log = os.path.join(log_path, f"myvnc_{proc.info['pid']}.log")
+                            if os.path.exists(potential_log):
+                                # Use the existing log file for this process
+                                logger = logging.getLogger('myvnc')
+                                # Re-initialize the logger with this file
+                                logger.handlers.clear()  # Remove any existing handlers
+                                formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+                                
+                                # Create file handler for existing log file
+                                file_handler = logging.FileHandler(potential_log)
+                                file_handler.setFormatter(formatter)
+                                logger.addHandler(file_handler)
+                                
+                                # Also add console handler
+                                console_handler = logging.StreamHandler(sys.stdout)
+                                console_handler.setFormatter(formatter)
+                                logger.addHandler(console_handler)
+                                
+                                # Set global variables
+                                global current_log_file
+                                current_log_file = potential_log
+                                
+                                # Return the reused logger
+                                return logger
+                    except Exception:
+                        # Ignore errors when checking processes
+                        pass
+            except ImportError:
+                # psutil not available, skip this part
+                pass
+                
+            # If we get here, either there's no running server or we couldn't reuse its log
             logger = setup_logging(config=config)
         except ImportError:
             # If we can't import the server module, use default config
