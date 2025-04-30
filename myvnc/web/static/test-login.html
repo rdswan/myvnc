@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Login Page</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            overflow: auto;
+            max-height: 400px;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 10px 0;
+        }
+        .error {
+            color: red;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+        .success {
+            color: green;
+            font-weight: bold;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>Login Test Page</h1>
+    <p>This page tests the login functionality and server configuration API.</p>
+    
+    <div>
+        <h2>Server Config API Test</h2>
+        <p>Status: <span id="status">Not tested</span></p>
+        <button id="test-config">Test Server Config</button>
+        <pre id="config-result">Click "Test Server Config" to run the test</pre>
+    </div>
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const statusElement = document.getElementById('status');
+            const configResult = document.getElementById('config-result');
+            const testConfigButton = document.getElementById('test-config');
+            
+            testConfigButton.addEventListener('click', function() {
+                statusElement.textContent = 'Testing...';
+                configResult.textContent = 'Fetching data...';
+                
+                // Option 1: Standard fetch with redirect followed
+                fetch('/api/server/config')
+                    .then(response => {
+                        configResult.textContent += `\nFetch complete. Status: ${response.status}, Type: ${response.type}`;
+                        if (!response.ok) {
+                            if (response.redirected) {
+                                statusElement.textContent = 'Redirected (API requires authentication)';
+                                return 'Redirected to ' + response.url;
+                            }
+                            throw new Error(`Server error: ${response.status}`);
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (typeof data === 'string') {
+                            configResult.textContent = data;
+                        } else {
+                            statusElement.textContent = 'Success!';
+                            configResult.textContent = JSON.stringify(data, null, 2);
+                        }
+                    })
+                    .catch(error => {
+                        statusElement.textContent = 'Error!';
+                        configResult.textContent = 'Error: ' + error.message;
+                        
+                        // Option 2: Try with manual redirect handling
+                        configResult.textContent += '\n\nRetrying with manual redirect handling...';
+                        
+                        fetch('/api/server/config', { redirect: 'manual' })
+                            .then(response => {
+                                configResult.textContent += `\nManual fetch complete. Status: ${response.status}, Type: ${response.type}`;
+                                
+                                if (response.type === 'opaqueredirect' || response.status === 302) {
+                                    statusElement.textContent = 'Redirected, using fallback config';
+                                    return {
+                                        authentication: 'entra',
+                                        auth_enabled: true,
+                                        msal_available: true,
+                                        note: 'This is fallback data because the server redirected the request'
+                                    };
+                                }
+                                
+                                if (!response.ok) {
+                                    throw new Error(`Server error: ${response.status}`);
+                                }
+                                
+                                return response.json();
+                            })
+                            .then(data => {
+                                statusElement.textContent = 'Success with option 2!';
+                                configResult.textContent += '\n\nFallback Config:\n' + JSON.stringify(data, null, 2);
+                            })
+                            .catch(err => {
+                                configResult.textContent += '\n\nFallback also failed: ' + err.message;
+                            });
+                    });
+            });
+        });
+    </script>
+</body>
+</html> 

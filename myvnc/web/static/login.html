@@ -276,42 +276,129 @@
                 errorMessage.style.display = 'block';
             }
             
-            // Check server configuration to determine authentication methods
-            fetch('/api/server/config')
-                .then(response => response.json())
-                .then(config => {
-                    const authMethod = (config.authentication || '').toLowerCase();
+            function hideError() {
+                errorMessage.style.display = 'none';
+            }
+            
+            // Show error message with option to retry
+            function showError(message, canRetry = true) {
+                errorMessage.innerHTML = message;
+                
+                if (canRetry) {
+                    errorMessage.innerHTML += '<br><a href="#" id="retry-config" style="color: #fff; text-decoration: underline; margin-top: 5px; display: inline-block;">Click here to retry</a>';
+                    // Add event listener after DOM update
+                    setTimeout(() => {
+                        const retryLink = document.getElementById('retry-config');
+                        if (retryLink) {
+                            retryLink.addEventListener('click', function(e) {
+                                e.preventDefault();
+                                hideError();
+                                fetchServerConfig();
+                            });
+                        }
+                    }, 0);
+                }
+                
+                errorMessage.style.display = 'block';
+            }
+            
+            // Handle server config response
+            function handleConfigResponse(config) {
+                console.log('Server config loaded successfully:', config);
+                const authMethod = (config.authentication || '').toLowerCase();
+                
+                // Adjust the login UI based on the authentication method
+                if (authMethod === 'ldap') {
+                    // For LDAP, show username/password login but hide SSO option
+                    loginDivider.style.display = 'none';
+                    entraSsoButton.style.display = 'none';
                     
-                    // Adjust the login UI based on the authentication method
-                    if (authMethod === 'ldap') {
-                        // For LDAP, show username/password login but hide SSO option
-                        loginDivider.style.display = 'none';
-                        entraSsoButton.style.display = 'none';
-                        
-                        // Update the login form title to indicate LDAP
-                        document.querySelector('.login-title').textContent = 'Login with LDAP';
-                    } else if (authMethod === 'entra') {
-                        // For Entra, show both login options
-                        loginDivider.style.display = 'flex';
-                        entraSsoButton.style.display = 'block';
-                        
-                        // Update the login form title
-                        document.querySelector('.login-title').textContent = 'Login to VNC Manager';
+                    // Update the login form title to indicate LDAP
+                    document.querySelector('.login-title').textContent = 'Login with LDAP';
+                    
+                    // Check if LDAP is available
+                    if (config.hasOwnProperty('ldap_available') && !config.ldap_available) {
+                        showError('LDAP authentication is configured but the LDAP module is not available on the server.', false);
                     } else {
-                        // If no authentication is configured, show a message
-                        document.querySelector('.login-title').textContent = 'Authentication Error';
-                        errorMessage.textContent = 'Authentication is not properly configured on the server.';
-                        errorMessage.style.display = 'block';
-                        loginForm.style.display = 'none';
-                        loginDivider.style.display = 'none';
-                        entraSsoButton.style.display = 'none';
+                        hideError();
                     }
+                } else if (authMethod === 'entra') {
+                    // For Entra, show both login options
+                    loginDivider.style.display = 'flex';
+                    entraSsoButton.style.display = 'block';
+                    
+                    // Update the login form title
+                    document.querySelector('.login-title').textContent = 'Login to VNC Manager';
+                    
+                    // Check if MSAL is available
+                    if (config.hasOwnProperty('msal_available') && !config.msal_available) {
+                        showError('Microsoft Entra ID authentication is configured but the MSAL module is not available on the server.', false);
+                    } else {
+                        hideError();
+                    }
+                } else {
+                    // If no authentication is configured, show a message
+                    document.querySelector('.login-title').textContent = 'Authentication Error';
+                    showError('Authentication is not properly configured on the server.', false);
+                    loginForm.style.display = 'none';
+                    loginDivider.style.display = 'none';
+                    entraSsoButton.style.display = 'none';
+                }
+                
+                // Log the configuration for debugging
+                console.log('Server config:', config);
+            }
+            
+            // Check server configuration to determine authentication methods
+            function fetchServerConfig(attempt = 1) {
+                const maxAttempts = 3;
+                
+                fetch('/api/server/config', {
+                    // Don't follow redirects automatically
+                    redirect: 'manual'
                 })
-                .catch(error => {
-                    console.error('Error fetching server config:', error);
-                    errorMessage.textContent = 'Error connecting to server. Please try again later.';
-                    errorMessage.style.display = 'block';
-                });
+                    .then(response => {
+                        // Handle redirects manually - if we're redirected to /login, use default config
+                        if (response.type === 'opaqueredirect' || response.status === 302) {
+                            console.log('Server redirected to login page, using default configuration');
+                            return {
+                                authentication: 'entra',
+                                auth_enabled: true,
+                                msal_available: true,
+                                note: 'This is fallback data because the API required authentication'
+                            };
+                        }
+                        
+                        if (!response.ok) {
+                            throw new Error(`Server error: ${response.status}`);
+                        }
+                        
+                        return response.json();
+                    })
+                    .then(config => handleConfigResponse(config))
+                    .catch(error => {
+                        console.error(`Error fetching server config (attempt ${attempt}/${maxAttempts}):`, error);
+                        
+                        if (attempt < maxAttempts) {
+                            // Try again after a delay
+                            console.log(`Retrying in ${attempt * 1000}ms...`);
+                            setTimeout(() => fetchServerConfig(attempt + 1), attempt * 1000);
+                        } else {
+                            // Show a more helpful error message after all retries fail
+                            if (error.message && error.message.includes('Server error')) {
+                                showError(`Error connecting to server (${error.message}). Please try again later or contact your administrator.`);
+                            } else {
+                                showError('Error connecting to server. Please try again later.');
+                            }
+                            
+                            // Keep the login form visible so users can still try to log in
+                            document.querySelector('.login-title').textContent = 'Login to VNC Manager';
+                        }
+                    });
+            }
+            
+            // Start the config fetch process
+            fetchServerConfig();
             
             loginForm.addEventListener('submit', async function(event) {
                 event.preventDefault();

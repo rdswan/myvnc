@@ -175,6 +175,13 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.end_headers()
             return
         
+        # Server config endpoint should always be accessible without authentication
+        # This is needed for the login page and for system status checks
+        if path == "/api/server/config" or path == "/api/config/server":
+            self.logger.info(f"Allowing access to server config without authentication")
+            self.handle_server_config()
+            return
+        
         # Only check authentication if it's enabled
         if auth_enabled:
             # Check authentication for all paths except login page and assets
@@ -199,8 +206,6 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.handle_vnc_sessions()
         elif path == "/api/lsf/config" or path == "/api/config/lsf":
             self.handle_lsf_config()
-        elif path == "/api/server/config" or path == "/api/config/server":
-            self.handle_server_config()
         elif path == "/api/config/vnc":
             self.handle_vnc_config()
         elif path == "/api/debug":
@@ -560,6 +565,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
     def handle_server_config(self):
         """Handle server configuration request"""
         try:
+            self.logger.debug("Starting handle_server_config method")
             config = self.server_config.copy()
             
             # Add auth config status to the response
@@ -584,9 +590,12 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                     except ImportError:
                         config['msal_available'] = False
             
+            self.logger.debug(f"Sending server config response: {config}")
             self.send_json_response(config)
+            self.logger.debug("Finished sending server config response")
         except Exception as e:
             self.logger.error(f"Error getting server config: {str(e)}")
+            self.logger.error(traceback.format_exc())
             self.send_error_response(f"Failed to get server configuration: {str(e)}")
     
     def handle_debug_commands(self):
@@ -677,20 +686,31 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
     def send_json_response(self, data, status=200):
         """Send JSON response to client"""
         self.logger.debug(f"Sending JSON response with status {status}")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-        self.end_headers()
-        
-        # Log a brief summary of the data if it's large
-        if isinstance(data, list) and len(data) > 5:
-            self.logger.debug(f"Response data: list with {len(data)} items")
-        elif isinstance(data, dict) and len(data) > 10:
-            self.logger.debug(f"Response data: dictionary with {len(data)} keys")
-        else:
-            self.logger.debug(f"Response data: {data}")
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.end_headers()
             
-        self.wfile.write(json.dumps(data).encode())
+            # Convert data to JSON string first to catch encoding errors
+            json_data = json.dumps(data)
+            self.logger.debug(f"JSON data length: {len(json_data)} bytes")
+            
+            # Log a brief summary of the data if it's large
+            if isinstance(data, list) and len(data) > 5:
+                self.logger.debug(f"Response data: list with {len(data)} items")
+            elif isinstance(data, dict) and len(data) > 10:
+                keys = list(data.keys())[:10]
+                self.logger.debug(f"Response data: dictionary with {len(data)} keys, first keys: {keys}")
+            else:
+                self.logger.debug(f"Response data: {data}")
+                
+            # Write the data to the response
+            self.wfile.write(json_data.encode())
+            self.logger.debug("JSON response sent successfully")
+        except Exception as e:
+            self.logger.error(f"Error in send_json_response: {str(e)}")
+            self.logger.error(traceback.format_exc())
     
     def send_error_response(self, message, status_code=500):
         """Send an error response"""
