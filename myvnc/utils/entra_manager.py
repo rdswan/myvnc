@@ -16,12 +16,16 @@ class EntraManager:
     """Manages Microsoft Entra ID authentication for VNC Manager"""
     
     def __init__(self):
-        """Initialize the Entra ID manager with credentials from environment variables"""
-        # Get configuration from environment variables
+        """Initialize the Entra ID manager with credentials from environment variables or config file"""
+        # Try to load configuration from environment variables first
         self.client_id = os.environ.get('ENTRA_CLIENT_ID')
         self.client_secret = os.environ.get('ENTRA_CLIENT_SECRET')
         self.tenant_id = os.environ.get('ENTRA_TENANT_ID')
         self.redirect_uri = os.environ.get('ENTRA_REDIRECT_URI', 'http://localhost:8080/auth/callback')
+        
+        # If any of the required credentials are missing, try to load from config file
+        if not all([self.client_id, self.client_secret, self.tenant_id]):
+            self._load_config_from_file()
         
         # Validate required configuration
         if not all([self.client_id, self.client_secret, self.tenant_id]):
@@ -41,6 +45,50 @@ class EntraManager:
         
         # Session tracking
         self.sessions = {}
+    
+    def _load_config_from_file(self):
+        """Load Entra ID configuration from the config file"""
+        try:
+            # Get the path to the config file
+            from pathlib import Path
+            config_path = Path(__file__).parent.parent.parent / "config" / "auth" / "entra_config.json"
+            
+            # Check if the file exists
+            if not config_path.exists():
+                logging.warning(f"Entra ID config file not found: {config_path}")
+                return
+            
+            # Load the config file
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+            
+            # Set the configuration values if not already set from environment variables
+            if not self.client_id and 'client_id' in config:
+                self.client_id = config['client_id']
+                # Set as environment variable to be accessible to other components
+                os.environ['ENTRA_CLIENT_ID'] = self.client_id
+                
+            if not self.client_secret and 'client_secret' in config:
+                self.client_secret = config['client_secret']
+                # Set as environment variable to be accessible to other components
+                os.environ['ENTRA_CLIENT_SECRET'] = self.client_secret
+                
+            if not self.tenant_id and 'tenant_id' in config:
+                self.tenant_id = config['tenant_id']
+                # Set as environment variable to be accessible to other components
+                os.environ['ENTRA_TENANT_ID'] = self.tenant_id
+                
+            if 'redirect_uri' in config:
+                self.redirect_uri = config['redirect_uri']
+                # Set as environment variable to be accessible to other components
+                os.environ['ENTRA_REDIRECT_URI'] = self.redirect_uri
+                
+            if 'scopes' in config and config['scopes']:
+                self.scopes = config['scopes']
+                
+            logging.info(f"Loaded Entra ID configuration from {config_path}")
+        except Exception as e:
+            logging.error(f"Error loading Entra ID config from file: {str(e)}")
     
     def get_authorization_url(self):
         """Generate the authorization URL for Entra ID login"""

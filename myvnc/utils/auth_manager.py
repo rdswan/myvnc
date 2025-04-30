@@ -98,11 +98,22 @@ class AuthManager:
         self.ad_domain = os.environ.get('AD_DOMAIN', 'example.com')
         self.ad_base_dn = os.environ.get('AD_BASE_DN', 'dc=example,dc=com')
         
-        # Microsoft Entra ID settings
+        # Microsoft Entra ID settings - try to load from environment variables first
         self.tenant_id = os.environ.get('ENTRA_TENANT_ID', '')
         self.client_id = os.environ.get('ENTRA_CLIENT_ID', '')
         self.client_secret = os.environ.get('ENTRA_CLIENT_SECRET', '')
         self.redirect_uri = os.environ.get('ENTRA_REDIRECT_URI', 'http://localhost:8000/auth/callback')
+        
+        # If Entra credentials are missing and Entra auth is enabled, try to load from config file
+        if self.auth_method == 'entra' and not all([self.tenant_id, self.client_id, self.client_secret]):
+            self._load_entra_config_from_file()
+            
+            # Update from environment variables again (might have been set by EntraManager)
+            self.tenant_id = os.environ.get('ENTRA_TENANT_ID', self.tenant_id)
+            self.client_id = os.environ.get('ENTRA_CLIENT_ID', self.client_id)
+            self.client_secret = os.environ.get('ENTRA_CLIENT_SECRET', self.client_secret)
+            self.redirect_uri = os.environ.get('ENTRA_REDIRECT_URI', self.redirect_uri)
+        
         self.scopes = ['https://graph.microsoft.com/.default']
         
         # Initialize MSAL app if using Entra ID
@@ -138,6 +149,45 @@ class AuthManager:
         except (FileNotFoundError, json.JSONDecodeError):
             print(f"Warning: Server configuration file not found or invalid at {config_path}")
             return {}
+    
+    def _load_entra_config_from_file(self):
+        """Load Entra ID configuration from the config file"""
+        try:
+            # Get the path to the config file
+            config_path = Path(__file__).parent.parent.parent / "config" / "auth" / "entra_config.json"
+            
+            # Check if the file exists
+            if not config_path.exists():
+                print(f"Warning: Entra ID config file not found: {config_path}")
+                return
+            
+            # Load the config file
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+            
+            # Set the configuration values if not already set from environment variables
+            if not self.client_id and 'client_id' in config:
+                self.client_id = config['client_id']
+                os.environ['ENTRA_CLIENT_ID'] = self.client_id
+                
+            if not self.client_secret and 'client_secret' in config:
+                self.client_secret = config['client_secret']
+                os.environ['ENTRA_CLIENT_SECRET'] = self.client_secret
+                
+            if not self.tenant_id and 'tenant_id' in config:
+                self.tenant_id = config['tenant_id']
+                os.environ['ENTRA_TENANT_ID'] = self.tenant_id
+                
+            if not self.redirect_uri and 'redirect_uri' in config:
+                self.redirect_uri = config['redirect_uri']
+                os.environ['ENTRA_REDIRECT_URI'] = self.redirect_uri
+                
+            if 'scopes' in config and config['scopes']:
+                self.scopes = config['scopes']
+                
+            print(f"Loaded Entra ID configuration from {config_path}")
+        except Exception as e:
+            print(f"Error loading Entra ID config from file: {str(e)}")
     
     def authenticate(self, username: str, password: str) -> Tuple[bool, str, Optional[str]]:
         """
