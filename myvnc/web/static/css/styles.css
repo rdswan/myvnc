@@ -288,6 +288,8 @@ select {
   border-radius: var(--border-radius);
   font-size: 1rem;
   line-height: 1.5;
+  height: 3rem;
+  box-sizing: border-box;
   outline: none;
   transition: var(--transition);
   background-color: #fff;

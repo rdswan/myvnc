@@ -149,6 +149,7 @@
         .input-with-icon {
             position: relative;
             transition: all 0.3s ease;
+            width: 100%;
         }
         
         .input-with-icon:focus-within {
@@ -163,6 +164,14 @@
             color: var(--primary-color);
             font-size: 1rem;
             transition: all 0.3s ease;
+        }
+        
+        .input-with-icon input {
+            width: 100%;
+            box-sizing: border-box;
+            height: 3rem;
+            font-size: 1rem;
+            padding-right: 1rem;
         }
         
         .input-with-icon input:focus + .icon-left {
@@ -184,6 +193,15 @@
             background-color: var(--primary-dark);
             transform: translateY(-2px);
             box-shadow: 0 4px 8px rgba(120, 104, 176, 0.3);
+        }
+        
+        .login-form .form-group input {
+            width: 100%;
+            height: 3rem;
+            box-sizing: border-box;
+            padding: 0.75rem 1rem 0.75rem 2.5rem;
+            font-size: 1rem;
+            line-height: 1.5;
         }
     </style>
 </head>
