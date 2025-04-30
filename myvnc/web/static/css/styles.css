@@ -280,20 +280,30 @@ label {
 }
 
 input[type="text"],
+input[type="password"],
+input[type="email"],
+input[type="number"],
+textarea,
 select {
   width: 100%;
-  padding: 0.75rem;
+  padding: 0.75rem 1rem 0.75rem 2.25rem;
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius);
   font-size: 1rem;
   outline: none;
   transition: var(--transition);
+  background-color: white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) inset;
 }
 
 input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="email"]:focus,
+input[type="number"]:focus,
+textarea:focus,
 select:focus {
   border-color: var(--primary-color);
-  box-shadow: 0 0 0 3px rgba(120, 104, 176, 0.1); /* TT Light Purple with opacity */
+  box-shadow: 0 0 0 3px rgba(120, 104, 176, 0.2);
 }
 
 .form-actions {

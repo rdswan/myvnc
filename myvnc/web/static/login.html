@@ -38,31 +38,32 @@
         
         .login-card {
             background-color: white;
-            border-radius: var(--border-radius);
-            box-shadow: var(--shadow);
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
             width: 100%;
             max-width: 400px;
-            padding: 2rem;
+            padding: 2.5rem;
         }
         
         .login-logo {
             text-align: center;
             margin-bottom: 1.5rem;
-            font-size: 1.8rem;
+            font-size: 2rem;
             color: var(--primary-color);
         }
         
         .login-title {
             text-align: center;
-            margin-bottom: 1.5rem;
+            margin-bottom: 1.8rem;
             font-size: 1.5rem;
             color: var(--primary-color);
+            font-weight: 600;
         }
         
         .login-form {
             display: flex;
             flex-direction: column;
-            gap: 1rem;
+            gap: 1.2rem;
         }
         
         .login-error {
@@ -74,8 +75,49 @@
             display: none;
         }
         
+        .login-form .form-group {
+            margin-bottom: 0.5rem;
+        }
+        
+        .login-form label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+            color: var(--text-color);
+        }
+        
+        .login-form .input-with-icon {
+            position: relative;
+        }
+        
+        .login-form .input-with-icon input {
+            width: 100%;
+            padding: 1rem 1rem 1rem 2.5rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--border-radius);
+            font-size: 1rem;
+            transition: all 0.3s ease;
+        }
+        
+        .login-form .input-with-icon .icon-left {
+            position: absolute;
+            left: 0.75rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--primary-color);
+            opacity: 0.7;
+        }
+        
+        .login-form .input-with-icon input:focus {
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(120, 104, 176, 0.2);
+        }
+        
         .login-form button {
-            margin-top: 1rem;
+            margin-top: 1.5rem;
+            padding: 1rem;
+            font-size: 1rem;
+            font-weight: 500;
         }
         
         .login-divider {
@@ -103,7 +145,7 @@
         .sso-button {
             display: block;
             width: 100%;
-            padding: 0.75rem;
+            padding: 1rem;
             border-radius: var(--border-radius);
             background-color: #0078d4;
             color: white;
