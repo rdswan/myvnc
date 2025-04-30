@@ -60,7 +60,7 @@ class LDAPManager:
     
     def _load_config(self):
         """Load LDAP configuration from JSON file"""
-        config_path = Path(__file__).parent.parent.parent / "config" / "ldap_config.json"
+        config_path = Path(__file__).parent.parent.parent / "config" / "auth" / "ldap_config.json"
         
         try:
             if config_path.exists():
