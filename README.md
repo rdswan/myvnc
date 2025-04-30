@@ -22,6 +22,8 @@ It is fully Open Source via the Apache License 2.0
   - Provides a robust way to control the server process
   - Includes status reporting with uptime and connection details
   - Handles process management safely with proper cleanup
+- Fully configurable SSL support. Disabled by default, enabled via configuration
+- Fully configurable Authentication support. Disabled by default, LDAP or Entra enabled via configuration
 
 ## Installation
 
