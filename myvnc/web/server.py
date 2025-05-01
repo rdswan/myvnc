@@ -36,6 +36,41 @@ from myvnc.utils.config_manager import ConfigManager
 from myvnc.utils.vnc_manager import VNCManager
 from myvnc.utils.log_manager import setup_logging, get_logger, get_current_log_file
 
+def setup_logger():
+    """Set up detailed logging configuration"""
+    # Create logger
+    logger = logging.getLogger('myvnc')
+    logger.setLevel(logging.DEBUG)
+    
+    # Create console handler with a higher log level
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    
+    # Create file handler for detailed logs
+    try:
+        file_handler = logging.FileHandler('myvnc.log')
+        file_handler.setLevel(logging.DEBUG)
+    except Exception as e:
+        print(f"Warning: Could not create log file: {str(e)}")
+        file_handler = None
+    
+    # Create formatter
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    
+    # Add formatter to handlers
+    console_handler.setFormatter(formatter)
+    if file_handler:
+        file_handler.setFormatter(formatter)
+    
+    # Add handlers to the logger
+    logger.addHandler(console_handler)
+    if file_handler:
+        logger.addHandler(file_handler)
+    
+    return logger
+
+logger = setup_logger()
+
 def get_fully_qualified_hostname(host):
     """Get the fully qualified domain name for a host"""
     if host == 'localhost' or host == '127.0.0.1' or host == '0.0.0.0':
@@ -50,9 +85,7 @@ def get_fully_qualified_hostname(host):
             if fqdn != 'localhost' and fqdn != '127.0.0.1':
                 return fqdn
         except Exception as e:
-            logger = get_logger()
-            if logger:
-                logger.warning(f"Could not get FQDN: {e}")
+            logger.warning(f"Could not get FQDN: {e}")
     elif host.count('.') == 0:  # If host is a simple hostname without domain
         try:
             # Try to get full domain by running hostname -f command
@@ -74,9 +107,7 @@ def get_fully_qualified_hostname(host):
                 if domain:
                     return f"{host}.{domain}"
         except Exception as e:
-            logger = get_logger()
-            if logger:
-                logger.warning(f"Could not get FQDN for {host}: {e}")
+            logger.warning(f"Could not get FQDN for {host}: {e}")
     
     # Return the original host if no FQDN could be determined
     return host
@@ -218,6 +249,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.handle_auth_entra()
         elif path == "/auth/callback" and auth_enabled and self.authentication_enabled.lower() == "entra":
             self.handle_auth_callback()
+        elif path == "/api/auth/ldap/diagnose" and auth_enabled and self.authentication_enabled.lower() == "ldap":
+            self.ldap_diagnostics()
         else:
             # Try to serve static file
             super().do_GET()
@@ -910,6 +943,32 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.send_json_response({
                 "success": False,
                 "message": error_msg
+            }, 500)
+
+    def ldap_diagnostics(self):
+        """Run LDAP diagnostic tests and return results"""
+        try:
+            # Check if LDAP is the configured authentication method
+            if self.authentication_enabled.lower() != 'ldap':
+                return self.send_json_response({
+                    'success': False,
+                    'message': f'LDAP is not the configured authentication method. Current method: {self.authentication_enabled}'
+                }, 400)
+                
+            # Run the diagnostics
+            self.logger.info("Running LDAP diagnostics...")
+            results = self.auth_manager.ldap_manager.run_diagnostics()
+            
+            # Return the results
+            return self.send_json_response({
+                'success': True,
+                'results': results
+            })
+        except Exception as e:
+            self.logger.error(f"Error running LDAP diagnostics: {str(e)}")
+            return self.send_json_response({
+                'success': False,
+                'message': f'Error running LDAP diagnostics: {str(e)}'
             }, 500)
 
 def load_server_config():

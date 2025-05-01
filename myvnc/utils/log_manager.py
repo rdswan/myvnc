@@ -159,7 +159,7 @@ def setup_logging(config=None):
         logger.handlers.clear()
     
     # Set format for log messages
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
     
     # Add console handler if one doesn't already exist
     has_console_handler = False
@@ -174,6 +174,8 @@ def setup_logging(config=None):
     if not has_console_handler:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(formatter)
+        # Always show at least INFO level in console
+        console_handler.setLevel(logging.INFO)
         logger.addHandler(console_handler)
     
     # Create a log file
@@ -210,6 +212,8 @@ def setup_logging(config=None):
         if not has_file_handler:
             file_handler = logging.FileHandler(str(full_path))
             file_handler.setFormatter(formatter)
+            # Always log at DEBUG level to the file
+            file_handler.setLevel(logging.DEBUG)
             logger.addHandler(file_handler)
         
             # Open the log file for stdout/stderr redirection
@@ -237,6 +241,51 @@ def setup_logging(config=None):
         if config and isinstance(config, dict) and 'debug' in config:
             debug_status = "enabled" if config['debug'] else "disabled"
             logger.info(f"Debug logging is {debug_status}")
+        
+        # Set up LDAP debug logging if authentication method is LDAP
+        if config and isinstance(config, dict) and config.get('authentication', '').lower() == 'ldap':
+            # Enable detailed LDAP logs 
+            ldap_logger = logging.getLogger('ldap')
+            ldap_logger.setLevel(logging.DEBUG)
+            
+            # Add dedicated LDAP file handler for more details
+            ldap_log_file = logdir_path / f'ldap_debug_{pid}.log'
+            try:
+                ldap_file_handler = logging.FileHandler(str(ldap_log_file))
+                ldap_file_handler.setFormatter(formatter)
+                ldap_file_handler.setLevel(logging.DEBUG)
+                ldap_logger.addHandler(ldap_file_handler)
+                logger.info(f"LDAP debug logging enabled at: {ldap_log_file}")
+            except Exception as e:
+                logger.error(f"Could not set up LDAP debug log file: {str(e)}")
+            
+            # Also add LDAP logs to the main log
+            ldap_logger.addHandler(file_handler)
+            
+            # Log LDAP availability
+            try:
+                # Try to determine LDAP status 
+                has_ldap = False
+                has_ldap3 = False
+                
+                try:
+                    import ldap
+                    has_ldap = True
+                    logger.info("python-ldap module is available")
+                except ImportError:
+                    logger.warning("python-ldap module is not available")
+                
+                try:
+                    import ldap3
+                    has_ldap3 = True 
+                    logger.info("ldap3 module is available")
+                except ImportError:
+                    logger.warning("ldap3 module is not available")
+                
+                if not has_ldap and not has_ldap3:
+                    logger.error("No LDAP modules are available - authentication will fail")
+            except Exception as e:
+                logger.error(f"Error checking LDAP module availability: {str(e)}")
             
     except Exception as e:
         # If we can't set up file logging, log to console
