@@ -10,5 +10,6 @@
     "ldap_attr_groups": "memberOf",
     "ldap_admin_binddn": "",
     "ldap_admin_password": "",
+    "session_expiry_days": 45,
     "ldap_notes": "These are example settings. Adjust for your LDAP/AD server."
 } 
