@@ -321,6 +321,24 @@ class AuthManager:
                 self.logger.error(f"LDAP authentication returned invalid session ID type: {type(session_id)}")
                 return False, "Invalid session ID from LDAP authentication", None
             
+            # Clone the session from LDAP manager to auth manager's session store
+            # This ensures sessions are shared between the two managers
+            ldap_session = self.ldap_manager.sessions.get(session_id)
+            if ldap_session:
+                # Copy the session data to our local sessions dictionary
+                self.sessions[session_id] = ldap_session.copy()
+                self.logger.info(f"Copied LDAP session to auth_manager sessions: {session_id[:8]}...")
+                
+                # Ensure the session has an expiry time
+                if 'expiry' not in self.sessions[session_id]:
+                    self.sessions[session_id]['expiry'] = time.time() + self.session_expiry
+                    self.logger.info(f"Added missing expiry to cloned session")
+                
+                # Save sessions to disk
+                self.save_sessions()
+            else:
+                self.logger.warning(f"Could not find session {session_id[:8]}... in LDAP manager sessions")
+            
             return True, "Authentication successful", session_id
                 
         except Exception as e:
@@ -458,12 +476,27 @@ class AuthManager:
         """
         self.logger.debug(f"Validating session: {session_id[:8] if isinstance(session_id, str) and len(session_id) > 8 else session_id}")
         
+        # Additional debug: Log session ID type
+        self.logger.debug(f"Session ID type: {type(session_id)}")
+        
+        # Ensure session_id is a string
+        if not isinstance(session_id, str):
+            self.logger.warning(f"Session ID is not a string: {type(session_id)}")
+            # Try to convert to string
+            try:
+                session_id = str(session_id)
+                self.logger.debug(f"Converted session ID to string: {session_id[:8] if len(session_id) > 8 else session_id}")
+            except Exception as e:
+                self.logger.error(f"Failed to convert session ID to string: {e}")
+                return False, "Invalid session ID format", None
+        
         # Check if the session exists in our local cache
         if session_id in self.sessions:
             session = self.sessions[session_id]
             
             # Debug log session details
             self.logger.debug(f"Found session for user: {session.get('username', 'unknown')}")
+            self.logger.debug(f"Session details: {session}")
             
             # Check for session expiry
             if 'expiry' in session:
@@ -493,6 +526,12 @@ class AuthManager:
         if self.auth_method == 'ldap' and self.ldap_manager:
             self.logger.debug("Session not found in auth_manager, checking LDAP manager")
             success, message, session = self.ldap_manager.validate_session(session_id)
+            
+            # Additional debug: Log LDAP validation result
+            self.logger.debug(f"LDAP validate_session result: success={success}, message={message}")
+            if session:
+                self.logger.debug(f"LDAP session: {session}")
+            
             if success and session:
                 # Cache the session locally
                 self.sessions[session_id] = session
@@ -501,6 +540,9 @@ class AuthManager:
                 if 'expiry' not in session:
                     session['expiry'] = time.time() + self.session_expiry
                     self.logger.debug(f"Added expiry to LDAP session: {session['expiry']}")
+                
+                # Save sessions to persist
+                self.save_sessions()
                 
                 return True, message, session
         

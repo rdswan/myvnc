@@ -171,6 +171,24 @@
                 e.preventDefault();
                 handleLoginSubmit(this);
             });
+            
+            // Check for error parameter in URL
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.has('error')) {
+                const errorType = urlParams.get('error');
+                const errorContainer = document.getElementById('error-message');
+                
+                if (errorType === 'session_expired') {
+                    errorContainer.textContent = 'Your session has expired. Please sign in again.';
+                    errorContainer.style.display = 'block';
+                } else if (errorType === 'not_authenticated') {
+                    errorContainer.textContent = 'You must sign in to access this application.';
+                    errorContainer.style.display = 'block';
+                } else if (errorType === 'invalid_session') {
+                    errorContainer.textContent = 'Your session is invalid. Please sign in again.';
+                    errorContainer.style.display = 'block';
+                }
+            }
         });
     </script>
 </body>

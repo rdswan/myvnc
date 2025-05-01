@@ -148,7 +148,7 @@ class LDAPManager:
             password: Password
             
         Returns:
-            Tuple of (success, message, user_info)
+            Tuple of (success, message, session_id)
         """
         if not LDAP_AVAILABLE:
             error_msg = f"LDAP authentication is not available. Details: {LDAP_ERROR_DETAILS}"
@@ -157,12 +157,39 @@ class LDAPManager:
         
         # Determine which LDAP library to use
         if LDAP_TYPE == "ldap3":
-            return self._authenticate_ldap3(username, password)
+            success, message, user_info = self._authenticate_ldap3(username, password)
         else:
-            return self._authenticate_python_ldap(username, password)
+            success, message, user_info = self._authenticate_python_ldap(username, password)
+            
+        # If authentication was successful and we have user_info, create a session
+        if success and user_info:
+            # Create a session and return the session ID
+            session_id = self.create_session(user_info)
+            self.logger.info(f"Created session for user {username}: {session_id[:8]}...")
+            
+            # Ensure we're returning a string
+            if not isinstance(session_id, str):
+                self.logger.warning(f"Session ID is not a string, converting from {type(session_id)} to string")
+                session_id = str(session_id)
+                
+            return success, message, session_id
+        
+        # If authentication failed or no user_info, return the original result
+        return success, message, None
     
     def _authenticate_ldap3(self, username, password):
-        """Authenticate using ldap3 library"""
+        """
+        Authenticate using ldap3 library
+        
+        Args:
+            username: Username to authenticate
+            password: Password to authenticate
+            
+        Returns:
+            Tuple of (success, message, user_info)
+            where user_info is a dictionary containing user details if successful,
+            or None if authentication failed
+        """
         try:
             # Determine user DN format
             if '@' not in username and ',' not in username:
@@ -172,46 +199,45 @@ class LDAPManager:
                 
             self.logger.info(f"Attempting to authenticate user with ldap3: {user_dn}")
             
-            # Create server object
-            server = Server(self.ldap_server, get_info=ALL)
-            
-            # Connect and bind
-            conn = Connection(
-                server, 
-                user=user_dn, 
-                password=password, 
-                authentication=SIMPLE, 
+            # Initialize LDAP connection
+            conn = ldap3.Connection(
+                ldap3.Server(self.ldap_server, get_info=ldap3.ALL),
+                user=user_dn,
+                password=password,
+                authentication=ldap3.SIMPLE,
                 read_only=True
             )
             
-            bind_result = conn.bind()
+            # Try to bind
+            if not conn.bind():
+                self.logger.warning(f"LDAP authentication failed for {username}: {conn.result}")
+                return False, "Invalid username or password", None
+                
+            self.logger.info(f"LDAP authentication successful for {username}")
             
-            if not bind_result:
-                self.logger.warning(f"Authentication failed for {user_dn}: {conn.result}")
-                return False, f"Authentication failed: {conn.result.get('description', 'Invalid credentials')}", None
-            
-            # Get user info
-            self.logger.info(f"Authentication successful for {user_dn}, fetching user details")
+            # Get user information
             user_info = self._get_user_info_ldap3(conn, username, user_dn)
             
-            # Close connection
+            # Unbind and close connection
             conn.unbind()
             
             if not user_info:
-                return False, "User found but unable to retrieve details", None
+                self.logger.warning(f"User found but unable to retrieve details for {username}")
+                # Create a basic user_info object as fallback
+                user_info = {
+                    'username': username,
+                    'display_name': username,
+                    'email': f"{username}@{self.ldap_domain}",
+                    'groups': []
+                }
+                self.logger.info(f"Created fallback user_info for {username}")
                 
             return True, "Authentication successful", user_info
             
-        except LDAPBindError as e:
+        except ldap3.core.exceptions.LDAPBindError as e:
             self.logger.warning(f"LDAP bind error for {username}: {str(e)}")
             return False, "Invalid username or password", None
-        except LDAPInvalidCredentialsResult as e:
-            self.logger.warning(f"Invalid credentials for {username}: {str(e)}")
-            return False, "Invalid username or password", None
-        except LDAPSocketOpenError as e:
-            self.logger.error(f"LDAP server connection failed: {str(e)}")
-            return False, f"LDAP server is not available: {str(e)}", None
-        except LDAPException as e:
+        except ldap3.core.exceptions.LDAPException as e:
             self.logger.error(f"LDAP error authenticating {username}: {str(e)}")
             return False, f"LDAP error: {str(e)}", None
         except Exception as e:
@@ -286,7 +312,18 @@ class LDAPManager:
         return default_value
     
     def _authenticate_python_ldap(self, username, password):
-        """Authenticate using python-ldap library"""
+        """
+        Authenticate using python-ldap library
+        
+        Args:
+            username: Username to authenticate
+            password: Password to authenticate
+            
+        Returns:
+            Tuple of (success, message, user_info)
+            where user_info is a dictionary containing user details if successful,
+            or None if authentication failed
+        """
         try:
             # Initialize LDAP connection
             self.logger.info(f"Connecting to LDAP server at {self.ldap_server}")
@@ -421,6 +458,9 @@ class LDAPManager:
         # Generate session ID
         session_id = str(uuid.uuid4())
         
+        # Set expiry time (8 hours from now)
+        expiry_time = time.time() + (8 * 60 * 60)
+        
         # Create session with timestamp
         session = {
             'username': user_info['username'],
@@ -428,11 +468,14 @@ class LDAPManager:
             'email': user_info['email'],
             'groups': user_info.get('groups', []),
             'created_at': time.time(),
-            'last_access': time.time()
+            'last_access': time.time(),
+            'expiry': expiry_time
         }
         
         # Store session
         self.sessions[session_id] = session
+        
+        self.logger.info(f"Created LDAP session for {user_info['username']} with expiry at {expiry_time}")
         
         return session_id
     
@@ -444,13 +487,22 @@ class LDAPManager:
             session_id: Session ID to validate
             
         Returns:
-            Tuple of (success, session_data or None)
+            Tuple of (success, message, session_data)
         """
         if not session_id or session_id not in self.sessions:
             return False, "Invalid session", None
         
         # Get session
         session = self.sessions[session_id]
+        
+        # Check for session expiry if set
+        if 'expiry' in session:
+            current_time = time.time()
+            if current_time > session['expiry']:
+                self.logger.warning(f"Session {session_id[:8]}... has expired")
+                # Remove expired session
+                self.sessions.pop(session_id)
+                return False, "Session has expired", None
         
         # Update last access time
         session['last_access'] = time.time()

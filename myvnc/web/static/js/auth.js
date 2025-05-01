@@ -83,7 +83,14 @@ function checkAuthentication() {
                 // User is not authenticated, redirect to login page
                 // Only redirect if not on the login page already
                 if (!window.location.pathname.startsWith('/login')) {
-                    window.location.href = '/login';
+                    // Check if session expired and add query parameter
+                    if (data.reason === 'expired') {
+                        console.log('Session expired, redirecting to login page');
+                        window.location.href = '/login?error=session_expired';
+                    } else {
+                        console.log('Not authenticated, redirecting to login page');
+                        window.location.href = '/login';
+                    }
                 }
             }
         })
@@ -166,6 +173,15 @@ function handleLoginSubmit(event) {
         return;
     }
     
+    console.log('Sending login request for user:', username);
+    
+    // Show loading indicator if available
+    const submitButton = document.querySelector('#login-form button[type="submit"]');
+    if (submitButton) {
+        submitButton.disabled = true;
+        submitButton.textContent = 'Signing in...';
+    }
+    
     // Send login request
     fetch('/api/login', {
         method: 'POST',
@@ -174,16 +190,48 @@ function handleLoginSubmit(event) {
         },
         body: JSON.stringify({ username, password })
     })
-    .then(response => response.json())
+    .then(response => {
+        if (!response.ok) {
+            console.error('Login request failed with status:', response.status);
+            throw new Error(`Login request failed with status: ${response.status}`);
+        }
+        return response.json();
+    })
     .then(data => {
+        console.log('Login response:', data);
+        
         if (data.success) {
-            // Redirect to home page on successful login
-            window.location.href = '/';
+            // Check if we received a session ID in the response
+            if (data.session_id) {
+                console.log('Received session ID, redirecting to home page');
+                
+                // Use a small delay to ensure cookies are set before redirect
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 100);
+            } else {
+                console.error('Login successful but no session ID provided');
+                if (errorContainer) {
+                    errorContainer.textContent = 'Login was successful but no session was created. Please try again.';
+                    errorContainer.style.display = 'block';
+                }
+                // Reset submit button
+                if (submitButton) {
+                    submitButton.disabled = false;
+                    submitButton.textContent = 'Sign In';
+                }
+            }
         } else {
+            console.error('Login failed:', data.message);
             // Display error message
             if (errorContainer) {
                 errorContainer.textContent = data.message || 'Login failed. Please try again.';
                 errorContainer.style.display = 'block';
+            }
+            // Reset submit button
+            if (submitButton) {
+                submitButton.disabled = false;
+                submitButton.textContent = 'Sign In';
             }
         }
     })
@@ -192,6 +240,11 @@ function handleLoginSubmit(event) {
         if (errorContainer) {
             errorContainer.textContent = 'An error occurred during login. Please try again.';
             errorContainer.style.display = 'block';
+        }
+        // Reset submit button
+        if (submitButton) {
+            submitButton.disabled = false;
+            submitButton.textContent = 'Sign In';
         }
     });
 }

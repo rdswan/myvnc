@@ -474,17 +474,37 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                     self.logger.debug(f"Setting session cookie: session_id={session_preview}..., Max-Age={self.auth_manager.session_expiry}")
                 else:
                     self.logger.debug(f"Setting session cookie with non-string session_id type: {type(session_id)}")
-                
-                # Create browser-compatible session cookie without restrictive flags
-                cookie = f"session_id={session_id}; Path=/; Max-Age={self.auth_manager.session_expiry}"
-                username_cookie = f"username={username}; Path=/; Max-Age={self.auth_manager.session_expiry}"
-                self.logger.debug(f"Cookie being set: {cookie}")
+                    # Convert to string if needed
+                    session_id = str(session_id)
                 
                 # Get the actual session to log expiry details
                 _, _, session = self.auth_manager.validate_session(session_id)
                 if session and 'expiry' in session:
                     expiry_time = session['expiry']
                     self.logger.info(f"Session expires at: {time.ctime(expiry_time)}")
+                    
+                    # Create better browser cookie with longer expiry
+                    http_only = "HttpOnly" if self.server.server_name != "localhost" else ""
+                    
+                    # Calculate expiry date in HTTP format
+                    expiry_date = time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime(expiry_time))
+                    
+                    # Create secure cookie if using HTTPS
+                    is_secure = self.headers.get('X-Forwarded-Proto') == 'https' or self.server.server_name != "localhost"
+                    secure_flag = "Secure;" if is_secure else ""
+                    
+                    # Create cookies with proper security settings
+                    cookie = f"session_id={session_id}; Path=/; Expires={expiry_date}; Max-Age={self.auth_manager.session_expiry}; {secure_flag} SameSite=Lax; {http_only}"
+                    username_cookie = f"username={username}; Path=/; Expires={expiry_date}; Max-Age={self.auth_manager.session_expiry}; {secure_flag} SameSite=Lax; {http_only}"
+                    
+                    self.logger.debug(f"Setting cookies: {cookie}")
+                else:
+                    self.logger.warning(f"Session validation failed immediately after creation for {username}")
+                    # Set a more basic cookie but still with proper expiry
+                    expiry_time = time.time() + self.auth_manager.session_expiry
+                    expiry_date = time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime(expiry_time))
+                    cookie = f"session_id={session_id}; Path=/; Expires={expiry_date}; Max-Age={self.auth_manager.session_expiry}"
+                    username_cookie = f"username={username}; Path=/; Expires={expiry_date}; Max-Age={self.auth_manager.session_expiry}"
                 
                 # Send response with cookies
                 self.send_response(200)
@@ -605,15 +625,40 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 return
             
             # Log session ID for tracking
-            self.logger.debug(f"Validating session ID: {session_id[:8] if isinstance(session_id, str) and len(session_id) > 8 else session_id}...")
+            if isinstance(session_id, str) and len(session_id) > 8:
+                self.logger.debug(f"Validating session ID: {session_id[:8]}...")
+            else:
+                self.logger.debug(f"Validating session ID: {session_id}")
             
             # Validate session
             success, message, session = self.auth_manager.validate_session(session_id)
+            
+            # Log more detailed information about the session validation
+            if not success:
+                self.logger.warning(f"Session validation failed: message={message}")
+                # Try to extract the session from auth_manager to see if it exists but is invalid
+                if session_id in self.auth_manager.sessions:
+                    session_data = self.auth_manager.sessions[session_id]
+                    if 'expiry' in session_data:
+                        current_time = time.time()
+                        expiry_time = session_data['expiry']
+                        self.logger.warning(f"Found invalid session: expiry={expiry_time}, current={current_time}, diff={expiry_time-current_time}s, expired={current_time > expiry_time}")
+                    else:
+                        self.logger.warning(f"Found invalid session without expiry field: {session_data}")
+                else:
+                    self.logger.warning(f"Session ID not found in auth_manager sessions")
             
             if success and session:
                 # Send user data
                 username = session.get('username', '')
                 display_name = session.get('display_name', username) or username  # Ensure display_name is not empty
+                
+                # Log session expiry information
+                if 'expiry' in session:
+                    current_time = time.time()
+                    expiry_time = session['expiry']
+                    time_left = expiry_time - current_time
+                    self.logger.debug(f"Session expiry check: current={current_time}, expiry={expiry_time}, time left={time_left:.2f}s")
                 
                 self.logger.info(f"Session check: Authenticated user {username}")
                 self.send_json_response({
@@ -625,12 +670,21 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                     "auth_method": auth_method
                 })
             else:
-                # Send unauthenticated response
+                # Send unauthenticated response with detailed error message
                 self.logger.warning(f"Session check: Not authenticated - {message}")
-                self.send_json_response({
-                    "authenticated": False,
-                    "message": message
-                }, 401)
+                
+                # Check if we need to redirect to login due to session expiry
+                if message == "Session has expired":
+                    self.send_json_response({
+                        "authenticated": False,
+                        "message": message,
+                        "reason": "expired"
+                    }, 401)
+                else:
+                    self.send_json_response({
+                        "authenticated": False,
+                        "message": message
+                    }, 401)
                 
         except Exception as e:
             # Send error response for any exceptions
