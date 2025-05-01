@@ -8,6 +8,7 @@ import json
 from typing import Dict, Optional, Tuple, List
 from pathlib import Path
 from urllib.parse import urlencode
+import logging
 
 # Try to import requests, use mock if not available
 try:
@@ -75,6 +76,9 @@ class AuthManager:
     
     def __init__(self):
         """Initialize the auth manager"""
+        # Initialize logger
+        self.logger = logging.getLogger('myvnc')
+        
         # Load server configuration
         self.server_config = self._load_server_config()
         self.auth_method = self.server_config.get("authentication", "").lower()
@@ -153,8 +157,16 @@ class AuthManager:
     def _load_entra_config_from_file(self):
         """Load Entra ID configuration from the config file"""
         try:
-            # Get the path to the config file
-            config_path = Path(__file__).parent.parent.parent / "config" / "auth" / "entra_config.json"
+            # Get the path from server config or use the default
+            config_path_str = self.server_config.get('entra_config_path', "config/auth/entra_config.json")
+            
+            # Handle both absolute and relative paths
+            config_path = Path(config_path_str)
+            if not config_path.is_absolute():
+                # Resolve relative path from the application root
+                config_path = Path(__file__).parent.parent.parent / config_path_str
+            
+            print(f"Looking for Entra ID config file at: {config_path}")
             
             # Check if the file exists
             if not config_path.exists():
@@ -185,7 +197,7 @@ class AuthManager:
             if 'scopes' in config and config['scopes']:
                 self.scopes = config['scopes']
                 
-            print(f"Loaded Entra ID configuration from {config_path}")
+            print(f"Successfully loaded Entra ID configuration from {config_path}")
         except Exception as e:
             print(f"Error loading Entra ID config from file: {str(e)}")
     

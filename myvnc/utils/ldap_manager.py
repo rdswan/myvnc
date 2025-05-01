@@ -38,7 +38,10 @@ class LDAPManager:
     
     def __init__(self):
         """Initialize the LDAP manager with credentials from environment or config"""
-        # Load server configuration
+        # Load server configuration first to get config paths
+        self.server_config = self._load_server_config()
+        
+        # Load LDAP-specific configuration
         self.config = self._load_config()
         
         # Get LDAP settings from environment variables or config
@@ -58,14 +61,41 @@ class LDAPManager:
         self.sessions = {}
         self.logger = logging.getLogger('myvnc')
     
-    def _load_config(self):
-        """Load LDAP configuration from JSON file"""
-        config_path = Path(__file__).parent.parent.parent / "config" / "auth" / "ldap_config.json"
+    def _load_server_config(self):
+        """Load server configuration to get config file paths"""
+        config_path = Path(__file__).parent.parent.parent / "config" / "default_server_config.json"
         
         try:
             if config_path.exists():
                 with open(config_path, 'r') as f:
                     return json.load(f)
+        except Exception as e:
+            print(f"Error loading server config: {str(e)}")
+        
+        # Return empty config if not found
+        return {}
+    
+    def _load_config(self):
+        """Load LDAP configuration from JSON file"""
+        # Get the path from server config or use the default
+        config_path_str = self.server_config.get('ldap_config_path', "config/auth/ldap_config.json")
+        
+        # Handle both absolute and relative paths
+        config_path = Path(config_path_str)
+        if not config_path.is_absolute():
+            # Resolve relative path from the application root
+            config_path = Path(__file__).parent.parent.parent / config_path_str
+        
+        print(f"Looking for LDAP config file at: {config_path}")
+        
+        try:
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                print(f"Successfully loaded LDAP configuration from {config_path}")
+                return config
+            else:
+                print(f"LDAP config file not found: {config_path}")
         except Exception as e:
             print(f"Error loading LDAP config: {str(e)}")
         

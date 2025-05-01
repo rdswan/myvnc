@@ -11,12 +11,19 @@ import uuid
 import logging
 import requests
 from urllib.parse import urlencode
+from pathlib import Path
 
 class EntraManager:
     """Manages Microsoft Entra ID authentication for VNC Manager"""
     
     def __init__(self):
         """Initialize the Entra ID manager with credentials from environment variables or config file"""
+        # Initialize logger
+        self.logger = logging.getLogger('myvnc')
+        
+        # Load server configuration first to get config paths
+        self.server_config = self._load_server_config()
+        
         # Try to load configuration from environment variables first
         self.client_id = os.environ.get('ENTRA_CLIENT_ID')
         self.client_secret = os.environ.get('ENTRA_CLIENT_SECRET')
@@ -29,7 +36,7 @@ class EntraManager:
         
         # Validate required configuration
         if not all([self.client_id, self.client_secret, self.tenant_id]):
-            logging.error("Microsoft Entra ID configuration missing. Set ENTRA_CLIENT_ID, ENTRA_CLIENT_SECRET, and ENTRA_TENANT_ID environment variables.")
+            self.logger.error("Microsoft Entra ID configuration missing. Set ENTRA_CLIENT_ID, ENTRA_CLIENT_SECRET, and ENTRA_TENANT_ID environment variables.")
         
         # Set up endpoint URLs
         self.authority = f"https://login.microsoftonline.com/{self.tenant_id}"
@@ -46,16 +53,39 @@ class EntraManager:
         # Session tracking
         self.sessions = {}
     
+    def _load_server_config(self):
+        """Load server configuration to get config file paths"""
+        config_path = Path(__file__).parent.parent.parent / "config" / "default_server_config.json"
+        
+        try:
+            if config_path.exists():
+                with open(config_path, 'r') as f:
+                    return json.load(f)
+            else:
+                print(f"Server config file not found: {config_path}")
+        except Exception as e:
+            print(f"Error loading server config: {str(e)}")
+        
+        # Return empty config if not found
+        return {}
+        
     def _load_config_from_file(self):
         """Load Entra ID configuration from the config file"""
         try:
-            # Get the path to the config file
-            from pathlib import Path
-            config_path = Path(__file__).parent.parent.parent / "config" / "auth" / "entra_config.json"
+            # Get the path from server config or use the default
+            config_path_str = self.server_config.get('entra_config_path', "config/auth/entra_config.json")
+            
+            # Handle both absolute and relative paths
+            config_path = Path(config_path_str)
+            if not config_path.is_absolute():
+                # Resolve relative path from the application root
+                config_path = Path(__file__).parent.parent.parent / config_path_str
+            
+            print(f"Looking for Entra ID config file at: {config_path}")
             
             # Check if the file exists
             if not config_path.exists():
-                logging.warning(f"Entra ID config file not found: {config_path}")
+                print(f"Warning: Entra ID config file not found: {config_path}")
                 return
             
             # Load the config file
@@ -86,9 +116,9 @@ class EntraManager:
             if 'scopes' in config and config['scopes']:
                 self.scopes = config['scopes']
                 
-            logging.info(f"Loaded Entra ID configuration from {config_path}")
+            print(f"Successfully loaded Entra ID configuration from {config_path}")
         except Exception as e:
-            logging.error(f"Error loading Entra ID config from file: {str(e)}")
+            print(f"Error loading Entra ID config from file: {str(e)}")
     
     def get_authorization_url(self):
         """Generate the authorization URL for Entra ID login"""
