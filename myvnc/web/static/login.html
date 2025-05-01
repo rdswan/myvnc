@@ -34,6 +34,9 @@
             justify-content: center;
             min-height: calc(100vh - 150px); /* Account for header and footer */
             padding: 20px;
+            margin-top: 30px; /* Added margin to create space between header and login box */
+            position: relative; /* Ensure proper stacking context */
+            z-index: 1; /* Make sure the login container is above other elements except the header */
         }
         
         .login-card {
@@ -43,11 +46,10 @@
             width: 100%;
             max-width: 400px;
             padding: 2rem;
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            transition: box-shadow 0.3s ease;
         }
         
         .login-card:hover {
-            transform: translateY(-5px);
             box-shadow: 0 15px 30px rgba(120, 104, 176, 0.1);
         }
         
@@ -87,11 +89,11 @@
             margin-top: 1.2rem;
             padding: 0.9rem;
             font-size: 1rem;
-            transition: transform 0.2s ease;
+            transition: background-color 0.2s ease;
         }
         
         .login-form button:hover {
-            transform: translateY(-2px);
+            background-color: var(--primary-dark);
         }
         
         .login-divider {
@@ -137,7 +139,6 @@
         
         .sso-button:hover {
             background-color: #0066b3;
-            transform: translateY(-2px);
             box-shadow: 0 4px 8px rgba(0, 120, 212, 0.25);
         }
         
@@ -148,12 +149,11 @@
         
         .input-with-icon {
             position: relative;
-            transition: all 0.3s ease;
             width: 100%;
         }
         
         .input-with-icon:focus-within {
-            transform: translateY(-2px);
+            /* Remove the transform effect that causes movement */
         }
         
         .input-with-icon .icon-left {
@@ -191,7 +191,6 @@
         
         .button.primary:hover {
             background-color: var(--primary-dark);
-            transform: translateY(-2px);
             box-shadow: 0 4px 8px rgba(120, 104, 176, 0.3);
         }
         
