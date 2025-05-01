@@ -2,7 +2,7 @@
     "tenant_id": "",
     "client_id": "",
     "client_secret": "",
-    "redirect_uri": "http://localhost:9143/auth/callback",
+    "redirect_uri": "",
     "scopes": ["https://graph.microsoft.com/.default"],
-    "entra_notes": "Set the tenant_id, client_id, and client_secret for Microsoft Entra ID (formerly Azure AD) authentication."
+    "entra_notes": "Set the tenant_id, client_id, and client_secret for Microsoft Entra ID (formerly Azure AD) authentication. For security, it's recommended to use environment variables for client_secret in production."
 } 

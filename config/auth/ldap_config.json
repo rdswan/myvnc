@@ -1,7 +1,7 @@
 {
-    "ldap_server": "ldap://ldap.tenstorrent.com:389",
-    "ldap_domain": "tenstorrent.com",
-    "ldap_base_dn": "dc=tenstorrent,dc=com",
+    "ldap_server": "",
+    "ldap_domain": "",
+    "ldap_base_dn": "",
     "ldap_user_filter": "(sAMAccountName=%s)",
     "ldap_group_filter": "(&(objectClass=group)(member=%s))",
     "ldap_attr_username": "sAMAccountName",
