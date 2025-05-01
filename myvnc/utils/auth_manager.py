@@ -9,6 +9,7 @@ from typing import Dict, Optional, Tuple, List
 from pathlib import Path
 from urllib.parse import urlencode
 import logging
+import traceback
 
 # Try to import requests, use mock if not available
 try:
@@ -132,7 +133,9 @@ class AuthManager:
         
         # Session management
         self.sessions = {}
-        self.session_dir = 'data'
+        
+        # Use data directory from config, falling back to default
+        self.session_dir = self.server_config.get("datadir", "myvnc/data")
         self.session_file = os.path.join(self.session_dir, 'sessions.json')
         self.session_expiry = 8 * 60 * 60  # 8 hours in seconds
         
@@ -158,7 +161,7 @@ class AuthManager:
         """Load Entra ID configuration from the config file"""
         try:
             # Get the path from server config or use the default
-            config_path_str = self.server_config.get('entra_config_path', "config/auth/entra_config.json")
+            config_path_str = self.server_config.get('entra_config', "config/auth/entra_config.json")
             
             # Handle both absolute and relative paths
             config_path = Path(config_path_str)
@@ -270,39 +273,60 @@ class AuthManager:
     
     def _authenticate_ldap(self, username: str, password: str) -> Tuple[bool, str, Optional[str]]:
         """
-        Authenticate a user with Active Directory using LDAP
+        Authenticate user against LDAP
         
         Args:
-            username: Username (without domain)
-            password: Password
+            username: Username to authenticate
+            password: Password to authenticate
             
         Returns:
             Tuple of (success, message, session_id)
         """
         if not self.ldap_manager:
-            return False, "LDAP authentication not configured", None
+            return False, "LDAP authentication is not configured", None
             
+        self.logger.info(f"Authenticating user {username} with LDAP")
+        
         try:
-            # Use LDAP manager for authentication
-            success, message, user_info = self.ldap_manager.authenticate(username, password)
+            # Use LDAP manager to authenticate
+            success, message, session_id = self.ldap_manager.authenticate(username, password)
             
-            if not success or not user_info:
+            if not success:
+                self.logger.warning(f"LDAP authentication failed for {username}: {message}")
                 return False, message, None
                 
-            # Extract user details
-            username = user_info.get('username', username)
-            display_name = user_info.get('display_name', username)
-            email = user_info.get('email', f"{username}@{self.ldap_manager.ldap_domain}")
-            groups = user_info.get('groups', [])
+            self.logger.info(f"LDAP authentication successful for {username}")
+                
+            # Make sure we got a valid session ID
+            if not session_id:
+                self.logger.error(f"LDAP authentication successful but no session ID returned")
+                # Try to create a session here as a fallback
+                try:
+                    # Create a minimal user info to create a session
+                    user_info = {
+                        'username': username,
+                        'display_name': username,
+                        'email': f"{username}@unknown.com",
+                        'groups': []
+                    }
+                    session_id = self.create_session(username, user_info.get('display_name'), user_info.get('email'), user_info.get('groups', []))
+                    self.logger.info(f"Created fallback session ID: {session_id}")
+                    return True, "Authentication successful (fallback session created)", session_id
+                except Exception as e:
+                    self.logger.error(f"Failed to create fallback session: {str(e)}")
+                    return False, "Authentication successful but session creation failed", None
             
-            # Create session
-            session_id = self.create_session(username, display_name, email, groups)
+            # Extra check to make sure session ID is a string
+            if not isinstance(session_id, str):
+                self.logger.error(f"LDAP authentication returned invalid session ID type: {type(session_id)}")
+                return False, "Invalid session ID from LDAP authentication", None
             
             return True, "Authentication successful", session_id
-            
+                
         except Exception as e:
             error_msg = f"LDAP authentication error: {str(e)}"
-            print(error_msg, file=sys.stderr)
+            self.logger.error(error_msg)
+            self.logger.error(traceback.format_exc())
             return False, error_msg, None
     
     def _get_user_info_from_graph(self, access_token):
@@ -376,7 +400,7 @@ class AuthManager:
             self.logger.error(f"Exception fetching user groups: {str(e)}")
             return []
     
-    def handle_auth_code(self, code: str) -> Tuple[bool, str, Optional[Dict]]:
+    def handle_auth_code(self, code: str) -> Tuple[bool, str, Optional[str]]:
         """
         Handle authorization code from Microsoft Entra ID redirect
         
@@ -384,7 +408,7 @@ class AuthManager:
             code: Authorization code
             
         Returns:
-            Tuple of (success, message, session_data)
+            Tuple of (success, message, session_id)
         """
         if not self.msal_app:
             return False, "Microsoft Entra ID authentication is not configured", None
@@ -412,7 +436,7 @@ class AuthManager:
             # Get group memberships
             groups = self._get_user_groups_from_graph(result['access_token'])
             
-            # Create session
+            # Create session - returns session_id string
             session_id = self.create_session(username, display_name, email, groups)
             
             return True, "Authentication successful", session_id
@@ -432,9 +456,33 @@ class AuthManager:
         Returns:
             Tuple of (success, message, session)
         """
+        self.logger.debug(f"Validating session: {session_id[:8] if isinstance(session_id, str) and len(session_id) > 8 else session_id}")
+        
         # Check if the session exists in our local cache
         if session_id in self.sessions:
             session = self.sessions[session_id]
+            
+            # Debug log session details
+            self.logger.debug(f"Found session for user: {session.get('username', 'unknown')}")
+            
+            # Check for session expiry
+            if 'expiry' in session:
+                current_time = time.time()
+                expiry_time = session['expiry']
+                time_left = expiry_time - current_time
+                
+                # Log expiry information
+                self.logger.debug(f"Session expiry check: current={current_time}, expiry={expiry_time}, time left={time_left:.2f}s")
+                
+                if current_time > expiry_time:
+                    self.logger.warning(f"Session {session_id[:8]}... has expired")
+                    # Remove expired session
+                    self.sessions.pop(session_id)
+                    return False, "Session has expired", None
+            else:
+                # If no expiry set, add one now (8 hours from now)
+                session['expiry'] = time.time() + self.session_expiry
+                self.logger.debug(f"Added missing expiry to session: {session['expiry']}")
             
             # Update last access time
             session['last_access'] = time.time()
@@ -443,12 +491,20 @@ class AuthManager:
         
         # If using LDAP, check with LDAP manager
         if self.auth_method == 'ldap' and self.ldap_manager:
+            self.logger.debug("Session not found in auth_manager, checking LDAP manager")
             success, message, session = self.ldap_manager.validate_session(session_id)
             if success and session:
                 # Cache the session locally
                 self.sessions[session_id] = session
+                
+                # Ensure it has expiry time
+                if 'expiry' not in session:
+                    session['expiry'] = time.time() + self.session_expiry
+                    self.logger.debug(f"Added expiry to LDAP session: {session['expiry']}")
+                
                 return True, message, session
         
+        self.logger.warning(f"Session not found: {session_id[:8]}...")
         return False, "Invalid or expired session", None
 
     def logout(self, session_id: str) -> Tuple[bool, str]:
@@ -506,7 +562,7 @@ class AuthManager:
         auth_url = f"https://login.microsoftonline.com/{self.tenant_id}/oauth2/v2.0/authorize?{urlencode(auth_params)}"
         return auth_url
     
-    def create_session(self, username: str, display_name: str, email: str, groups: List[str]) -> Dict:
+    def create_session(self, username: str, display_name: str, email: str, groups: List[str]) -> str:
         """
         Create a new session for a user
         
@@ -517,11 +573,14 @@ class AuthManager:
             groups: List of group memberships
             
         Returns:
-            Session data including session_id
+            Session ID string
         """
+        # Generate a unique session ID
         session_id = str(uuid.uuid4())
+        # Set expiry time based on the session_expiry value
         expiry = time.time() + self.session_expiry
         
+        # Create session object
         session = {
             'session_id': session_id,
             'username': username,
@@ -529,13 +588,19 @@ class AuthManager:
             'email': email,
             'groups': groups,
             'created': time.time(),
-            'expiry': expiry
+            'expiry': expiry,
+            'last_access': time.time()
         }
         
+        # Store session
         self.sessions[session_id] = session
+        
+        # Save sessions to persist across server restarts
         self.save_sessions()
         
-        return session
+        self.logger.info(f"Created new session for user {username}: {session_id[:8]}...")
+        
+        return session_id
     
     def save_sessions(self):
         """Save sessions to a file"""
@@ -547,10 +612,19 @@ class AuthManager:
     
     def load_sessions(self):
         """Load sessions from a file"""
+        self.sessions = {}  # Initialize with empty dict
+        
         if os.path.exists(self.session_file):
             try:
                 with open(self.session_file, 'r') as f:
-                    self.sessions = json.load(f)
+                    loaded_sessions = json.load(f)
+                    
+                # Validate the loaded sessions to ensure they're properly formatted
+                for session_id, session_data in loaded_sessions.items():
+                    # Ensure session has the required fields
+                    if isinstance(session_data, dict) and 'username' in session_data:
+                        self.sessions[session_id] = session_data
+                        
+                self.logger.info(f"Loaded {len(self.sessions)} sessions from {self.session_file}")
             except Exception as e:
-                print(f"Error loading sessions: {str(e)}")
-                self.sessions = {} 
+                self.logger.error(f"Error loading sessions: {str(e)}")

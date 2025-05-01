@@ -535,6 +535,7 @@ def server_status():
     host = config.get('host', 'localhost')
     port = config.get('port', '9143')
     logdir = config.get('logdir', '/tmp')
+    datadir = config.get('datadir', 'myvnc/data')
     
     # Always use FQDN even if config has localhost
     fqdn_host = get_fully_qualified_hostname(host)
@@ -605,6 +606,7 @@ def server_status():
             logger.info(f"  MSAL Module Available: {'Yes' if msal_available else 'No'}")
     
     logger.info(f"  Log directory: {logdir}")
+    logger.info(f"  Data directory: {datadir}")
     logger.info(f"  Current log: {server_log_file if server_log_file else 'Unknown'}")
     logger.info(f"  Uptime: {uptime}")
 

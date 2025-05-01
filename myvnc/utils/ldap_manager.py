@@ -115,7 +115,7 @@ class LDAPManager:
     def _load_config(self):
         """Load LDAP configuration from JSON file"""
         # Get the path from server config or use the default
-        config_path_str = self.server_config.get('ldap_config_path', "config/auth/ldap_config.json")
+        config_path_str = self.server_config.get('ldap_config', "config/auth/ldap_config.json")
         
         # Handle both absolute and relative paths
         config_path = Path(config_path_str)
