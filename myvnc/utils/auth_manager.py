@@ -137,7 +137,25 @@ class AuthManager:
         # Use data directory from config, falling back to default
         self.session_dir = self.server_config.get("datadir", "myvnc/data")
         self.session_file = os.path.join(self.session_dir, 'sessions.json')
-        self.session_expiry = 8 * 60 * 60  # 8 hours in seconds
+        
+        # Load session expiry from config - default to 30 days (1 month) if not specified
+        self.session_expiry_days = 30  # Default value: 30 days (1 month)
+        
+        # Try to get session expiry from server config first
+        if "session_expiry_days" in self.server_config:
+            self.session_expiry_days = int(self.server_config.get("session_expiry_days", 30))
+            self.logger.info(f"Using session expiry from server config: {self.session_expiry_days} days")
+        
+        # If LDAP auth is enabled, check LDAP config for session expiry
+        if self.auth_method == 'ldap' and self.ldap_manager and hasattr(self.ldap_manager, 'config'):
+            ldap_expiry_days = self.ldap_manager.config.get("session_expiry_days")
+            if ldap_expiry_days is not None:
+                self.session_expiry_days = int(ldap_expiry_days)
+                self.logger.info(f"Using session expiry from LDAP config: {self.session_expiry_days} days")
+        
+        # Calculate session expiry in seconds
+        self.session_expiry = self.session_expiry_days * 24 * 60 * 60
+        self.logger.info(f"Session expiry time set to {self.session_expiry_days} days ({self.session_expiry} seconds)")
         
         # Create the data directory if it doesn't exist
         if not os.path.exists(self.session_dir):

@@ -86,6 +86,11 @@ class LDAPManager:
         self.ldap_admin_binddn = os.environ.get('LDAP_ADMIN_BINDDN', self.config.get('ldap_admin_binddn', ''))
         self.ldap_admin_password = os.environ.get('LDAP_ADMIN_PASSWORD', self.config.get('ldap_admin_password', ''))
         
+        # Load session expiry from config - default to 30 days (1 month) if not specified
+        self.session_expiry_days = int(self.config.get('session_expiry_days', 30))
+        self.session_expiry = self.session_expiry_days * 24 * 60 * 60  # Convert days to seconds
+        self.logger.info(f"LDAP session expiry set to {self.session_expiry_days} days ({self.session_expiry} seconds)")
+        
         # Log LDAP configuration (masking sensitive data)
         self.logger.info(f"LDAP Server: {self.ldap_server}")
         self.logger.info(f"LDAP Domain: {self.ldap_domain}")
@@ -458,8 +463,8 @@ class LDAPManager:
         # Generate session ID
         session_id = str(uuid.uuid4())
         
-        # Set expiry time (8 hours from now)
-        expiry_time = time.time() + (8 * 60 * 60)
+        # Set expiry time based on the configured session expiry
+        expiry_time = time.time() + self.session_expiry
         
         # Create session with timestamp
         session = {
@@ -475,7 +480,7 @@ class LDAPManager:
         # Store session
         self.sessions[session_id] = session
         
-        self.logger.info(f"Created LDAP session for {user_info['username']} with expiry at {expiry_time}")
+        self.logger.info(f"Created LDAP session for {user_info['username']} with expiry in {self.session_expiry_days} days at {time.ctime(expiry_time)}")
         
         return session_id
     

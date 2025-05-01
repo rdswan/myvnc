@@ -288,6 +288,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.handle_debug_commands()
         elif path == "/api/debug/environment":
             self.handle_debug_environment()
+        elif path == "/api/debug/session":
+            self.handle_debug_session()
         elif path == "/auth/entra" and auth_enabled and self.authentication_enabled.lower() == "entra":
             self.handle_auth_entra()
         elif path == "/auth/callback" and auth_enabled and self.authentication_enabled.lower() == "entra":
@@ -948,8 +950,160 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.handle_debug_commands()
         elif debug_command == 'environment':
             self.handle_debug_environment()
+        elif debug_command == 'session':
+            self.handle_debug_session()
         else:
             self.send_error(404)
+            
+    def handle_debug_session(self):
+        """Handle /debug/session endpoint to display session information"""
+        try:
+            self.logger.info("Handling debug session request")
+            self.logger.debug(f"Headers: {dict(self.headers)}")
+            
+            # Check if authentication is enabled
+            auth_enabled = self.is_auth_enabled()
+            if not auth_enabled:
+                # If authentication is disabled, return a default response for anonymous users
+                self.logger.info("Debug session request - Authentication is disabled, returning anonymous user info")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                
+                # Create a dummy session for anonymous user
+                response = {
+                    "success": True,
+                    "message": "Authentication is disabled, using anonymous user",
+                    "authenticated": True,
+                    "session_info": {
+                        "session_id": "anonymous",
+                        "username": "anonymous",
+                        "display_name": "Anonymous User",
+                        "email": "",
+                        "authentication_method": "None",
+                        "created_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+                        "last_access": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+                        "expiry_date": "Never",
+                        "days_until_expiry": 999,
+                        "time_until_expiry_seconds": 999999,
+                        "groups": [],
+                        "is_valid": True
+                    }
+                }
+                
+                self.wfile.write(json.dumps(response).encode())
+                return
+            
+            # Get session cookie from request
+            session_id = self.get_session_cookie()
+            if not session_id:
+                self.logger.warning("Debug session request - No active session found")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                
+                response = {
+                    "success": False,
+                    "message": "No active session found. Please log in.",
+                    "authenticated": False,
+                    "session_info": None
+                }
+                
+                self.wfile.write(json.dumps(response).encode())
+                return
+            
+            self.logger.info(f"Debug session request - Found session ID: {session_id[:8]}...")
+            
+            # Validate session with auth manager
+            success, message, session = self.auth_manager.validate_session(session_id)
+            
+            if not success or not session:
+                # Session is invalid or expired
+                self.logger.warning(f"Debug session request - Invalid session: {message}")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                
+                response = {
+                    "success": False,
+                    "message": message,
+                    "authenticated": False,
+                    "session_info": None
+                }
+                
+                self.wfile.write(json.dumps(response).encode())
+                return
+            
+            self.logger.info(f"Debug session request - Valid session for user: {session.get('username', 'unknown')}")
+            
+            # Calculate days until expiry
+            days_until_expiry = None
+            time_until_expiry = None
+            expiry_date = None
+            
+            if 'expiry' in session:
+                current_time = time.time()
+                expiry_time = session['expiry']
+                # Calculate seconds until expiry
+                time_until_expiry = max(0, expiry_time - current_time)  
+                # Calculate days until expiry
+                days_until_expiry = round(time_until_expiry / (24 * 60 * 60), 1)
+                # Format expiry date for display
+                expiry_date = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expiry_time))
+                self.logger.debug(f"Debug session request - Session expiry: {expiry_date}, days left: {days_until_expiry}")
+            else:
+                self.logger.warning("Debug session request - Session has no expiry date")
+            
+            # Prepare session information
+            session_info = {
+                "session_id": session_id[:8] + "..." if len(session_id) > 8 else session_id,
+                "username": session.get('username', 'unknown'),
+                "display_name": session.get('display_name', ''),
+                "email": session.get('email', ''),
+                "authentication_method": self.authentication_enabled,
+                "created_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(session.get('created', session.get('created_at', 0)))),
+                "last_access": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(session.get('last_access', 0))),
+                "expiry_date": expiry_date,
+                "days_until_expiry": days_until_expiry,
+                "time_until_expiry_seconds": int(time_until_expiry) if time_until_expiry is not None else None,
+                "groups": session.get('groups', []),
+                "is_valid": success
+            }
+            
+            # Log the response for debugging
+            self.logger.debug(f"Debug session request - Sending response with session info: {session_info}")
+            
+            # Send response
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            
+            response = {
+                "success": True,
+                "message": "Session information retrieved successfully",
+                "authenticated": True,
+                "session_info": session_info
+            }
+            
+            self.wfile.write(json.dumps(response).encode())
+            
+        except Exception as e:
+            self.logger.error(f"Error handling debug session: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            
+            # Send error response with explicit headers
+            self.send_response(500)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            
+            response = {
+                "success": False,
+                "message": f"Server error: {str(e)}",
+                "authenticated": False,
+                "session_info": None
+            }
+            
+            self.wfile.write(json.dumps(response).encode())
 
     def send_json_response(self, data, status=200):
         """Send JSON response to client"""

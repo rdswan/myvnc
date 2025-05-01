@@ -781,20 +781,187 @@ document.addEventListener('DOMContentLoaded', () => {
  */
 async function loadDebugInfo() {
     console.log('Loading debug information...');
-    try {
-        // Show loading indicator
-        document.getElementById('debug-environment').innerHTML = '<p class="loading-message">Loading environment information...</p>';
-        
-        // Fetch environment data
-        const data = await apiRequest('debug/environment');
-        console.log('Debug data received:', data);
-        
-        // Display environment information
-        displayEnvironmentInfo(data.environment);
-    } catch (error) {
-        console.error('Failed to load debug information:', error);
-        document.getElementById('debug-environment').innerHTML = '<p class="error">Failed to load environment information.</p>';
+    
+    // Show loading indicators
+    document.getElementById('debug-session').innerHTML = '<p class="loading-message">Loading session information...</p>';
+    document.getElementById('debug-environment').innerHTML = '<p class="loading-message">Loading environment information...</p>';
+    
+    // Fetch session data with better error handling
+    fetchSessionInfo();
+    
+    // Fetch environment data
+    fetchEnvironmentInfo();
+}
+
+/**
+ * Fetch session information from server
+ */
+function fetchSessionInfo() {
+    console.log('Fetching session data using direct fetch...');
+    
+    // Use a simple fetch call for maximum compatibility
+    fetch('/api/debug/session')
+        .then(response => {
+            console.log('Session response status:', response.status);
+            if (!response.ok) {
+                throw new Error(`Server returned status ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            console.log('Session data successfully received:', data);
+            displaySessionInfo(data);
+        })
+        .catch(error => {
+            console.error('Failed to load session information:', error);
+            document.getElementById('debug-session').innerHTML = `
+                <div class="session-status not-authenticated">
+                    <i class="fas fa-exclamation-circle"></i>
+                    <span>Error loading session: ${error.message}</span>
+                </div>
+                <p>Please check the browser console for more details.</p>
+                <button onclick="fetchSessionInfo()" class="button primary">
+                    <i class="fas fa-sync"></i> Try Again
+                </button>
+            `;
+        });
+}
+
+/**
+ * Fetch environment information from server
+ */
+function fetchEnvironmentInfo() {
+    console.log('Fetching environment data using direct fetch...');
+    
+    fetch('/api/debug/environment')
+        .then(response => {
+            console.log('Environment response status:', response.status);
+            if (!response.ok) {
+                throw new Error(`Server returned status ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            console.log('Environment data successfully received:', data);
+            if (data && data.environment) {
+                displayEnvironmentInfo(data.environment);
+            } else {
+                throw new Error('Invalid environment data structure');
+            }
+        })
+        .catch(error => {
+            console.error('Failed to load environment information:', error);
+            document.getElementById('debug-environment').innerHTML = `
+                <div class="error">
+                    <i class="fas fa-exclamation-circle"></i>
+                    <span>Error loading environment: ${error.message}</span>
+                </div>
+                <button onclick="fetchEnvironmentInfo()" class="button primary">
+                    <i class="fas fa-sync"></i> Try Again
+                </button>
+            `;
+        });
+}
+
+/**
+ * Display session information
+ * @param {Object} data - Session information data
+ */
+function displaySessionInfo(data) {
+    const container = document.getElementById('debug-session');
+    
+    if (!data.authenticated || !data.session_info) {
+        container.innerHTML = `
+            <div class="session-status not-authenticated">
+                <i class="fas fa-exclamation-circle"></i>
+                <span>${data.message || 'No active session found'}</span>
+            </div>
+        `;
+        return;
     }
+    
+    const session = data.session_info;
+    
+    // Format the expiry information
+    let expiryInfo = '';
+    if (session.days_until_expiry !== null) {
+        const days = session.days_until_expiry;
+        if (days <= 1) {
+            const hours = Math.round(session.time_until_expiry_seconds / 3600);
+            if (hours < 1) {
+                const minutes = Math.round(session.time_until_expiry_seconds / 60);
+                expiryInfo = `<span class="expiry-soon">${minutes} minutes</span>`;
+            } else {
+                expiryInfo = `<span class="expiry-warning">${hours} hours</span>`;
+            }
+        } else if (days <= 7) {
+            expiryInfo = `<span class="expiry-normal">${days} days</span>`;
+        } else {
+            expiryInfo = `<span class="expiry-long">${days} days</span>`;
+        }
+    } else {
+        expiryInfo = 'N/A';
+    }
+    
+    // Create the HTML for the session information
+    let html = `
+        <div class="session-status authenticated">
+            <i class="fas fa-check-circle"></i>
+            <span>Authenticated as ${session.username}</span>
+        </div>
+        
+        <div class="session-details">
+            <div class="session-row">
+                <div class="session-label">Session ID:</div>
+                <div class="session-value">${session.session_id}</div>
+            </div>
+            <div class="session-row">
+                <div class="session-label">User:</div>
+                <div class="session-value">
+                    ${session.display_name || session.username}
+                    <span class="username">(${session.username})</span>
+                </div>
+            </div>
+            <div class="session-row">
+                <div class="session-label">Email:</div>
+                <div class="session-value">${session.email || 'N/A'}</div>
+            </div>
+            <div class="session-row">
+                <div class="session-label">Auth Method:</div>
+                <div class="session-value">${session.authentication_method || 'N/A'}</div>
+            </div>
+            <div class="session-row">
+                <div class="session-label">Created:</div>
+                <div class="session-value">${session.created_at || 'N/A'}</div>
+            </div>
+            <div class="session-row">
+                <div class="session-label">Last Access:</div>
+                <div class="session-value">${session.last_access || 'N/A'}</div>
+            </div>
+            <div class="session-row">
+                <div class="session-label">Expires:</div>
+                <div class="session-value">${session.expiry_date || 'N/A'}</div>
+            </div>
+            <div class="session-row">
+                <div class="session-label">Time left:</div>
+                <div class="session-value">${expiryInfo}</div>
+            </div>
+        </div>
+    `;
+    
+    // Add group information if available
+    if (session.groups && session.groups.length > 0) {
+        html += `
+            <div class="groups-section">
+                <div class="session-label">User Groups:</div>
+                <div class="groups-list">
+                    ${session.groups.map(group => `<span class="group-tag">${group}</span>`).join('')}
+                </div>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
 }
 
 /**
