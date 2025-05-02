@@ -220,6 +220,23 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.serve_file("login_error.html")
             return
         
+        # Debug endpoints should also be accessible without authentication to help with debugging 
+        if path.startswith("/api/debug"):
+            self.logger.info(f"Allowing access to debug endpoint without authentication: {path}")
+            if path == "/api/debug/environment":
+                self.handle_debug_environment()
+            elif path == "/api/debug/session":
+                self.handle_debug_session()
+            elif path == "/api/debug/app_info":
+                self.handle_debug_app_info()
+            elif path == "/api/debug/commands":
+                self.handle_debug_commands() 
+            elif path == "/api/debug":
+                self.handle_debug()
+            else:
+                self.send_error(404)
+            return
+        
         # Only check authentication if it's enabled
         if auth_enabled:
             # Check authentication for all paths except login page and assets
@@ -292,14 +309,6 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.handle_lsf_config()
         elif path == "/api/config/vnc":
             self.handle_vnc_config()
-        elif path == "/api/debug":
-            self.handle_debug()
-        elif path == "/api/debug/commands":
-            self.handle_debug_commands()
-        elif path == "/api/debug/environment":
-            self.handle_debug_environment()
-        elif path == "/api/debug/session":
-            self.handle_debug_session()
         elif path == "/auth/entra" and auth_enabled and self.authentication_enabled.lower() == "entra":
             self.handle_auth_entra()
         elif path == "/auth/callback" and auth_enabled and self.authentication_enabled.lower() == "entra":
@@ -872,7 +881,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             server_info = {
                 "server_version": getattr(self, "server_version", "1.0.0"),
                 "python_version": platform.python_version(),
-                "server_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "server_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "hostname": platform.node(),
                 "platform": platform.platform(),
                 "os_name": os.name,
@@ -908,10 +917,14 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             # Send response
             self.send_json_response({
                 "success": True,
+                # Include server info fields both at root level and in server_info object
                 "server_version": server_info["server_version"],
                 "python_version": server_info["python_version"],
                 "server_time": server_info["server_time"],
                 "hostname": server_info["hostname"],
+                "platform": server_info["platform"],
+                "system": server_info["system"],
+                # Include nested objects
                 "lsf_info": lsf_info,
                 "vnc_info": vnc_info,
                 "server_info": server_info,
@@ -987,6 +1000,98 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 "message": f"Error: {str(e)}"
             })
     
+    def handle_debug_app_info(self):
+        """Handle /debug/app_info endpoint to display application status information"""
+        try:
+            self.logger.info("Handling debug app_info request")
+            
+            # Get server configuration
+            server_config = self.server_config
+            
+            # Get hostname for current configuration
+            host = server_config.get("host", "localhost")
+            port = server_config.get("port", 9143)
+            ssl_cert = server_config.get("ssl_cert", "")
+            ssl_key = server_config.get("ssl_key", "")
+            ssl_ca_chain = server_config.get("ssl_ca_chain", "")
+            auth_method = server_config.get("authentication", "").lower()
+            
+            # Determine SSL status
+            ssl_enabled = ssl_cert and ssl_key and os.path.exists(ssl_cert) and os.path.exists(ssl_key)
+            
+            # Determine auth status
+            auth_enabled = self.is_auth_enabled()
+            auth_status = "Disabled"
+            if auth_enabled:
+                auth_status = f"{auth_method.upper()} (Active)"
+            elif auth_method:
+                auth_status = f"{auth_method.upper()} (Configured but not active)"
+                
+            # Get process info
+            pid = os.getpid()
+            
+            # Calculate uptime
+            uptime = "Unknown"
+            try:
+                import psutil
+                process = psutil.Process(pid)
+                start_time = process.create_time()
+                uptime_seconds = time.time() - start_time
+                
+                # Format uptime nicely
+                if uptime_seconds < 60:
+                    uptime = f"{int(uptime_seconds)}s"
+                elif uptime_seconds < 3600:
+                    minutes = int(uptime_seconds / 60)
+                    seconds = int(uptime_seconds % 60)
+                    uptime = f"{minutes}m {seconds}s"
+                elif uptime_seconds < 86400:
+                    hours = int(uptime_seconds / 3600)
+                    minutes = int((uptime_seconds % 3600) / 60)
+                    uptime = f"{hours}h {minutes}m"
+                else:
+                    days = int(uptime_seconds / 86400)
+                    hours = int((uptime_seconds % 86400) / 3600)
+                    uptime = f"{days}d {hours}h"
+            except:
+                # If psutil not available, use a simpler approach
+                uptime = "Not available (psutil required)"
+            
+            # Build response data
+            app_info = {
+                "status": "Running",
+                "pid": pid,
+                "host": host,
+                "port": port,
+                "url": f"https://{host}:{port}" if ssl_enabled else f"http://{host}:{port}",
+                "ssl_enabled": ssl_enabled,
+                "ssl_cert": ssl_cert if ssl_enabled else "",
+                "ssl_key": ssl_key if ssl_enabled else "",
+                "ssl_ca_chain": ssl_ca_chain if ssl_enabled and ssl_ca_chain else "",
+                "auth_enabled": auth_enabled,
+                "auth_method": auth_method,
+                "auth_status": auth_status,
+                "log_directory": server_config.get("logdir", ""),
+                "data_directory": server_config.get("datadir", ""),
+                "uptime": uptime,
+                "debug_mode": server_config.get("debug", False),
+                "python_executable": sys.executable,
+                "python_version": platform.python_version()
+            }
+            
+            # Send response
+            self.send_json_response({
+                "success": True,
+                "app_info": app_info
+            })
+        except Exception as e:
+            self.logger.error(f"Error handling app info: {str(e)}")
+            traceback.print_exc()
+            self.send_json_response({
+                "success": False,
+                "message": f"Error: {str(e)}"
+            })
+    
     def handle_debug(self):
         """Handle /debug/* requests"""
         path_parts = self.path.strip('/').split('/')
@@ -1002,6 +1107,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.handle_debug_environment()
         elif debug_command == 'session':
             self.handle_debug_session()
+        elif debug_command == 'app_info':
+            self.handle_debug_app_info()
         else:
             self.send_error(404)
 

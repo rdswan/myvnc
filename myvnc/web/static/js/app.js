@@ -1271,6 +1271,39 @@ document.addEventListener('DOMContentLoaded', () => {
         .fade-in {
             animation: fadeIn 0.3s ease;
         }
+        
+        /* Debug panel styling */
+        .debug-info-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .debug-info-item {
+            padding: 0.5rem;
+            background-color: rgba(0, 0, 0, 0.03);
+            border-radius: 4px;
+            line-height: 1.5;
+        }
+        
+        .debug-info-item:hover {
+            background-color: rgba(0, 0, 0, 0.05);
+        }
+        
+        .debug-info-item strong {
+            color: #6a3de8; /* Purple color that fits the theme */
+            margin-right: 0.5rem;
+            font-weight: 600;
+        }
+        
+        .debug-section h3 {
+            margin-top: 1.5rem;
+            margin-bottom: 1rem;
+            color: #333;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 0.5rem;
+        }
     `;
     
     document.head.appendChild(style);
@@ -1285,12 +1318,16 @@ async function loadDebugInfo() {
     // Show loading indicators
     document.getElementById('debug-session').innerHTML = '<p class="loading-message">Loading session information...</p>';
     document.getElementById('debug-environment').innerHTML = '<p class="loading-message">Loading environment information...</p>';
+    document.getElementById('debug-app-info').innerHTML = '<p class="loading-message">Loading application information...</p>';
     
     // Fetch session data with better error handling
     fetchSessionInfo();
     
     // Fetch environment data
     fetchEnvironmentInfo();
+    
+    // Fetch application information
+    fetchAppInfo();
 }
 
 /**
@@ -1335,11 +1372,25 @@ function fetchEnvironmentInfo() {
             if (!response.ok) {
                 throw new Error(`Server returned status ${response.status}`);
             }
-            return response.json();
+            return response.text();  // Get as text first to inspect the raw response
         })
-        .then(data => {
-            console.log('Environment data successfully received:', data);
-            displayEnvironmentInfo(data);
+        .then(responseText => {
+            console.log('Raw environment response:', responseText);
+            
+            try {
+                const data = JSON.parse(responseText);
+                console.log('Parsed environment data:', data);
+                console.log('Server version:', data.server_version);
+                console.log('Python version:', data.python_version);
+                console.log('Server time:', data.server_time);
+                console.log('Hostname:', data.hostname);
+                console.log('Server info object:', data.server_info);
+                
+                displayEnvironmentInfo(data);
+            } catch (error) {
+                console.error('Error parsing environment data:', error);
+                throw error;
+            }
         })
         .catch(error => {
             console.error('Failed to load environment information:', error);
@@ -1365,47 +1416,17 @@ function displaySessionInfo(data) {
     // Display session information
     html += `
         <h3>Session Information</h3>
-        <div class="debug-info-table">
-            <div class="debug-info-row">
-                <div class="debug-info-label">Session ID</div>
-                <div class="debug-info-value">${data.session_id || 'N/A'}</div>
-            </div>
-            <div class="debug-info-row">
-                <div class="debug-info-label">User</div>
-                <div class="debug-info-value">${data.username || 'Anonymous'}</div>
-            </div>
-            <div class="debug-info-row">
-                <div class="debug-info-label">Display Name</div>
-                <div class="debug-info-value">${data.display_name || data.username || 'N/A'}</div>
-            </div>
-            <div class="debug-info-row">
-                <div class="debug-info-label">Email</div>
-                <div class="debug-info-value">${data.email || 'N/A'}</div>
-            </div>
-            <div class="debug-info-row">
-                <div class="debug-info-label">Authentication</div>
-                <div class="debug-info-value">${data.authenticated ? 'Authenticated' : 'Not Authenticated'}</div>
-            </div>
-            <div class="debug-info-row">
-                <div class="debug-info-label">Auth Method</div>
-                <div class="debug-info-value">${data.auth_method || 'None'}</div>
-            </div>
-            <div class="debug-info-row">
-                <div class="debug-info-label">Login Time</div>
-                <div class="debug-info-value">${data.login_time || 'N/A'}</div>
-            </div>
-            <div class="debug-info-row">
-                <div class="debug-info-label">Session Expiry</div>
-                <div class="debug-info-value session-expiry ${getExpiryClass(data.expiry_days)}">${data.expiry_info || 'Not Available'}</div>
-            </div>
-            <div class="debug-info-row">
-                <div class="debug-info-label">IP Address</div>
-                <div class="debug-info-value">${data.ip_address || 'Unknown'}</div>
-            </div>
-            <div class="debug-info-row">
-                <div class="debug-info-label">User Agent</div>
-                <div class="debug-info-value">${data.user_agent || 'Unknown'}</div>
-            </div>
+        <div class="debug-info-list">
+            <div class="debug-info-item"><strong>Session ID:</strong> ${data.session_id || 'N/A'}</div>
+            <div class="debug-info-item"><strong>User:</strong> ${data.username || 'Anonymous'}</div>
+            <div class="debug-info-item"><strong>Display Name:</strong> ${data.display_name || data.username || 'N/A'}</div>
+            <div class="debug-info-item"><strong>Email:</strong> ${data.email || 'N/A'}</div>
+            <div class="debug-info-item"><strong>Authentication:</strong> ${data.authenticated ? 'Authenticated' : 'Not Authenticated'}</div>
+            <div class="debug-info-item"><strong>Auth Method:</strong> ${data.auth_method || 'None'}</div>
+            <div class="debug-info-item"><strong>Login Time:</strong> ${data.login_time || 'N/A'}</div>
+            <div class="debug-info-item"><strong>Session Expiry:</strong> <span class="session-expiry ${getExpiryClass(data.expiry_days)}">${data.expiry_info || 'Not Available'}</span></div>
+            <div class="debug-info-item"><strong>IP Address:</strong> ${data.ip_address || 'Unknown'}</div>
+            <div class="debug-info-item"><strong>User Agent:</strong> ${data.user_agent || 'Unknown'}</div>
         </div>
     `;
     
@@ -1450,6 +1471,7 @@ function getExpiryClass(expiryDays) {
  */
 function displayEnvironmentInfo(data) {
     console.log('Displaying environment information...');
+    console.log('Server info data received:', data);
     
     const envContainer = document.getElementById('debug-environment');
     
@@ -1458,69 +1480,135 @@ function displayEnvironmentInfo(data) {
     // Server Information
     html += `
         <h3>Server Information</h3>
-        <div class="debug-info-table">
-            <div class="debug-info-row">
-                <div class="debug-info-label">Server Version</div>
-                <div class="debug-info-value">${data.server_version || 'Unknown'}</div>
-            </div>
-            <div class="debug-info-row">
-                <div class="debug-info-label">Python Version</div>
-                <div class="debug-info-value">${data.python_version || 'Unknown'}</div>
-            </div>
-            <div class="debug-info-row">
-                <div class="debug-info-label">Server Time</div>
-                <div class="debug-info-value">${data.server_time || 'Unknown'}</div>
-            </div>
-            <div class="debug-info-row">
-                <div class="debug-info-label">Hostname</div>
-                <div class="debug-info-value">${data.hostname || 'Unknown'}</div>
-            </div>
+        <div class="debug-info-list">
+            <div class="debug-info-item"><strong>Server Version:</strong> ${data.server_version || 'Unknown'}</div>
+            <div class="debug-info-item"><strong>Python Version:</strong> ${data.python_version || 'Unknown'}</div>
+            <div class="debug-info-item"><strong>Server Time:</strong> ${data.server_time || 'Unknown'}</div>
+            <div class="debug-info-item"><strong>Hostname:</strong> ${data.hostname || 'Unknown'}</div>
+            <div class="debug-info-item"><strong>Platform:</strong> ${data.platform || 'Unknown'}</div>
+            <div class="debug-info-item"><strong>Operating System:</strong> ${data.system || 'Unknown'}</div>
         </div>
     `;
     
-    // LSF Configuration
-    if (data.lsf_info) {
+    // Environment Variables (top 10 most relevant)
+    if (data.environment) {
         html += `
-            <h3>LSF Configuration</h3>
-            <div class="debug-info-table">
-                <div class="debug-info-row">
-                    <div class="debug-info-label">LSF Version</div>
-                    <div class="debug-info-value">${data.lsf_info.version || 'Unknown'}</div>
-                </div>
-                <div class="debug-info-row">
-                    <div class="debug-info-label">LSF Root</div>
-                    <div class="debug-info-value">${data.lsf_info.lsf_root || 'Unknown'}</div>
-                </div>
-                <div class="debug-info-row">
-                    <div class="debug-info-label">LSF Default Queue</div>
-                    <div class="debug-info-value">${data.lsf_info.default_queue || 'Unknown'}</div>
-                </div>
-            </div>
-        `;
-    }
-    
-    // VNC Configuration
-    if (data.vnc_info) {
-        html += `
-            <h3>VNC Configuration</h3>
-            <div class="debug-info-table">
-                <div class="debug-info-row">
-                    <div class="debug-info-label">VNC Server Path</div>
-                    <div class="debug-info-value">${data.vnc_info.server_path || 'Unknown'}</div>
-                </div>
-                <div class="debug-info-row">
-                    <div class="debug-info-label">Default Resolution</div>
-                    <div class="debug-info-value">${data.vnc_info.default_resolution || 'Unknown'}</div>
-                </div>
-                <div class="debug-info-row">
-                    <div class="debug-info-label">Default Window Manager</div>
-                    <div class="debug-info-value">${data.vnc_info.default_wm || 'Unknown'}</div>
-                </div>
-            </div>
-        `;
+            <h3>Environment Variables</h3>
+            <div class="debug-info-list">`;
+            
+        // Important environment variables to show first
+        const importantVars = ['USER', 'HOME', 'PATH', 'LSF_LIBDIR', 'LSF_ENVDIR', 'LSF_SERVERDIR', 
+                             'DISPLAY', 'SHELL', 'HOSTNAME', 'LANG', 'PWD'];
+        
+        // Show important variables first
+        importantVars.forEach(key => {
+            if (data.environment[key]) {
+                html += `
+                    <div class="debug-info-item"><strong>${key}:</strong> ${data.environment[key]}</div>
+                `;
+            }
+        });
+        
+        html += `</div>`;
     }
     
     html += '</div>';
     
     envContainer.innerHTML = html;
+}
+
+/**
+ * Fetch application information from server
+ */
+function fetchAppInfo() {
+    console.log('Fetching application information...');
+    
+    fetch('/api/debug/app_info')
+        .then(response => {
+            console.log('App info response status:', response.status);
+            if (!response.ok) {
+                throw new Error(`Server returned status ${response.status}`);
+            }
+            return response.text();  // Get as text first to inspect the raw response
+        })
+        .then(responseText => {
+            console.log('Raw app info response:', responseText);
+            
+            try {
+                const data = JSON.parse(responseText);
+                console.log('Parsed app info data:', data);
+                displayAppInfo(data);
+            } catch (error) {
+                console.error('Error parsing app info data:', error);
+                throw error;
+            }
+        })
+        .catch(error => {
+            console.error('Failed to load application information:', error);
+            document.getElementById('debug-app-info').innerHTML = `
+                <div class="error-message">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <p>Failed to load application information: ${error.message}</p>
+                </div>
+            `;
+        });
+}
+
+/**
+ * Display application information in the debug panel
+ */
+function displayAppInfo(data) {
+    console.log('Displaying application information...');
+    
+    const appInfoContainer = document.getElementById('debug-app-info');
+    if (!appInfoContainer) {
+        console.error('Could not find debug-app-info container');
+        return;
+    }
+    
+    const appInfo = data.app_info || {};
+    
+    let html = '<div class="debug-section">';
+    
+    // App Information
+    html += `
+        <h3>Application Information</h3>
+        <div class="debug-info-list">
+            <div class="debug-info-item"><strong>Status:</strong> ${appInfo.status || 'Unknown'}</div>
+            <div class="debug-info-item"><strong>Process ID:</strong> ${appInfo.pid || 'Unknown'}</div>
+            <div class="debug-info-item"><strong>Uptime:</strong> ${appInfo.uptime || 'Unknown'}</div>
+            <div class="debug-info-item"><strong>URL:</strong> <a href="${appInfo.url || '#'}" target="_blank">${appInfo.url || 'Unknown'}</a></div>
+            <div class="debug-info-item"><strong>Host:</strong> ${appInfo.host || 'Unknown'}</div>
+            <div class="debug-info-item"><strong>Port:</strong> ${appInfo.port || 'Unknown'}</div>
+            <div class="debug-info-item"><strong>Debug Mode:</strong> ${appInfo.debug_mode ? 'Enabled' : 'Disabled'}</div>
+        </div>
+        
+        <h3>Authentication</h3>
+        <div class="debug-info-list">
+            <div class="debug-info-item"><strong>Authentication:</strong> ${appInfo.auth_enabled ? 'Enabled' : 'Disabled'}</div>
+            <div class="debug-info-item"><strong>Auth Method:</strong> ${appInfo.auth_method || 'None'}</div>
+            <div class="debug-info-item"><strong>Auth Status:</strong> ${appInfo.auth_status || 'Unknown'}</div>
+        </div>
+        
+        <h3>SSL Configuration</h3>
+        <div class="debug-info-list">
+            <div class="debug-info-item"><strong>SSL:</strong> ${appInfo.ssl_enabled ? 'Enabled' : 'Disabled'}</div>
+            ${appInfo.ssl_enabled ? `
+                <div class="debug-info-item"><strong>SSL Certificate:</strong> ${appInfo.ssl_cert || 'Not set'}</div>
+                <div class="debug-info-item"><strong>SSL Key:</strong> ${appInfo.ssl_key || 'Not set'}</div>
+                ${appInfo.ssl_ca_chain ? `<div class="debug-info-item"><strong>SSL CA Chain:</strong> ${appInfo.ssl_ca_chain}</div>` : ''}
+            ` : ''}
+        </div>
+        
+        <h3>Server Paths</h3>
+        <div class="debug-info-list">
+            <div class="debug-info-item"><strong>Log Directory:</strong> ${appInfo.log_directory || 'Unknown'}</div>
+            <div class="debug-info-item"><strong>Data Directory:</strong> ${appInfo.data_directory || 'Unknown'}</div>
+            <div class="debug-info-item"><strong>Python Executable:</strong> ${appInfo.python_executable || 'Unknown'}</div>
+        </div>
+    `;
+    
+    html += '</div>';
+    
+    appInfoContainer.innerHTML = html;
 }
