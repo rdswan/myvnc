@@ -12,11 +12,11 @@ It is fully Open Source via the Apache License 2.0
 - There is a tab to support the creation of a new VNC server
   - New VNCs can be opened with a variety of options including name, site, resolution, and window manager of choice.
     - There are default values for these VNC settings, but the user is able to change them via the GUI
-    - Default VNC settings are defined in an included json file called config/default_vnc_config.json
+    - Default VNC settings are defined in an included json file called config/vnc_config.json
 - VNC commands are not executed directly, but rather submitted to LSF via the command line. Therefore neither python-vnc-client nor lsf-python-api packages are required.
   - LSF configuration to define the queue, number of cores, and amount of memory to reserve for submission. There are default values for these 3 LSF definitions, but the user is able to change them via the GUI
   - This script uses the LSF command line tools to interact with an LSF cluster.
-  - Default LSF settings are defined in an included json file called config/default_lsf_config.json
+  - Default LSF settings are defined in an included json file called config/lsf_config.json
   - The LSF environment file path can be configured in config/_defaultlsf_config.json to ensure LSF commands are available
 - Server management functionality with start, stop, restart, and status operations
   - Provides a robust way to control the server process
@@ -25,51 +25,20 @@ It is fully Open Source via the Apache License 2.0
 - Fully configurable SSL support. Disabled by default, enabled via configuration
 - Fully configurable Authentication support. Disabled by default, LDAP or Entra enabled via configuration
 
-## Installation
+## Getting Started
 
 ### Prerequisites
-- Python 3.8 or higher
-- LSF (Load Sharing Facility) installed and configured on your system
-- VNC server installed on the LSF compute nodes
-- psutil package for server management (install with `pip install psutil`)
 
-### Installing from source
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/rdswan/myvnc.git
-   cd myvnc
-   ```
+- Python 3.6+
+- VNC Server installed on your system
+- LSF (Platform Load Sharing Facility) installed and configured
 
-2. Edit the configuration files:
-   ```bash
-   # Edit server configuration (host, port)
-   vim config/default_server_config.json
-   
-   # Edit LSF configuration (including env_file path)
-   vim config/default_lsf_config.json
-   ```
+### Installation
 
-3. Start the server using the management script:
-   ```bash
-   ./manage.py start
-   ```
-
-   Alternately you can start the server directly:
-   ```bash
-   python3 main.py
-   ```
-
-   Or specify different host/port parameters:
-   ```bash
-   python3 main.py --host custom-host --port 8080
-   ```
-
-Note: If your environment does not natively support all the required python modules, a fully self-contained environment is available in this release. It is accessible by the following command:
-    ```bash
-    source .venv_py3/bin/activate
-    ```
-
-    at which point all of the referenced commands in this README should be fully enabled
+1. Clone the repository
+2. Install dependencies: `pip install -r requirements.txt`
+3. Configure your server settings in `config/server_config.json`
+4. Configure your LSF settings in `config/lsf_config.json`
 
 ## Server Management
 

@@ -8,9 +8,9 @@ Main entry point for the MyVNC application
 This script starts the web server for the MyVNC application.
 
 Configuration:
-- default_server_config.json: Contains server settings (host, port, authentication, etc.)
-- default_lsf_config.json: LSF-related settings, including the path to the LSF environment file
-                        that will be sourced before starting the server to make LSF commands available
+- server_config.json: Contains server settings (host, port, authentication, etc.)
+- lsf_config.json: LSF-related settings, including the path to the LSF environment file
+                  that will be sourced before starting the server to make LSF commands available
 """
 
 import sys
@@ -31,6 +31,7 @@ def parse_args():
     parser.add_argument('--config', help='Path to custom config file')
     parser.add_argument('--auth', choices=['', 'Entra'], default=None, 
                       help='Authentication method: empty for none, "Entra" for Microsoft Entra ID')
+    parser.add_argument('--logdir', help='Path to log directory (overrides config file)')
     return parser.parse_args()
 
 if __name__ == "__main__":
@@ -41,8 +42,24 @@ if __name__ == "__main__":
     config = load_server_config()
     lsf_config = load_lsf_config()
     
+    # Set a fallback log directory that is user-writable
+    config_log_dir = config.get('logdir', '/localdev/myvnc/logs')
+    
+    # If command line arg for logdir is provided, use it
+    if args.logdir:
+        log_dir = args.logdir
+    # Otherwise try to use the config value if it's writable
+    elif os.access(config_log_dir, os.W_OK) or os.access(os.path.dirname(config_log_dir), os.W_OK):
+        log_dir = config_log_dir
+    # Otherwise fall back to a temp directory
+    else:
+        log_dir = '/tmp/myvnc/logs'
+        print(f"Log directory {config_log_dir} is not writable, falling back to {log_dir}")
+    
+    # Update the config to use the correct log directory
+    config['logdir'] = log_dir
+    
     # Ensure log directory exists
-    log_dir = config.get('logdir', '/tmp')
     os.makedirs(log_dir, exist_ok=True)
     
     # Make sure server PID file uses the same log directory

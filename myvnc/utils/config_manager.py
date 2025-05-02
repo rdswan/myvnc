@@ -21,8 +21,8 @@ class ConfigManager:
             self.config_dir = Path(config_dir)
         
         # Load configurations - use the default_prefix in filenames
-        self.vnc_config = self._load_config("default_vnc_config.json")
-        self.lsf_config = self._load_config("default_lsf_config.json")
+        self.vnc_config = self._load_config("vnc_config.json")
+        self.lsf_config = self._load_config("lsf_config.json")
     
     def _load_config(self, filename):
         """
@@ -90,7 +90,7 @@ class ConfigManager:
             # Return just the site names
             return [site["name"] for site in sites]
         except (KeyError, TypeError):
-            print("Warning: available_sites not found or has invalid format in default_lsf_config.json")
+            print("Warning: available_sites not found or has invalid format in lsf_config.json")
             # Return a default list of sites if none are found
             return ["Toronto", "Austin", "Bangalore"]
     

@@ -7,6 +7,7 @@ import atexit
 import subprocess
 import datetime
 from pathlib import Path
+import json
 
 # Global logger instance
 logger = None
@@ -302,9 +303,16 @@ def get_logger():
     if logger is None:
         # If logger is not set up yet, create a basic console logger with config
         try:
-            # Import here to avoid circular imports
-            from myvnc.web.server import load_server_config
-            config = load_server_config()
+            # Load config directly without importing from server to avoid circular imports
+            config = {}
+            config_path = Path(__file__).parent.parent.parent / "config" / "server_config.json"
+            
+            try:
+                if config_path.exists():
+                    with open(config_path, 'r') as f:
+                        config = json.load(f)
+            except Exception as e:
+                print(f"Warning: Could not load server config: {e}")
             
             # Check if there's a running server whose log we should use
             try:
@@ -350,8 +358,9 @@ def get_logger():
                 
             # If we get here, either there's no running server or we couldn't reuse its log
             logger = setup_logging(config=config)
-        except ImportError:
-            # If we can't import the server module, use default config
+        except Exception as e:
+            # If we have any issues, use default config
+            print(f"Warning: Error setting up logger: {e}")
             logger = setup_logging()
     return logger
 

@@ -166,7 +166,11 @@ class AuthManager:
     
     def _load_server_config(self):
         """Load server configuration from JSON file"""
-        config_path = Path(__file__).parent.parent.parent / "config" / "default_server_config.json"
+        config_path = Path(__file__).parent.parent.parent / "config" / "server_config.json"
+        
+        if not config_path.exists():
+            print(f"Warning: Could not find server config file at {config_path}")
+            return {}
         
         try:
             with open(config_path, 'r') as f:

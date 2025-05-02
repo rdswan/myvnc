@@ -12,7 +12,7 @@ def main():
     script_dir = Path(os.path.dirname(os.path.abspath(__file__)))
     
     # Server config path
-    config_path = script_dir / "config" / "default_server_config.json"
+    config_path = script_dir / "config" / "server_config.json"
     
     # SSL cert paths
     ssl_cert = script_dir / "config" / "ssl" / "cert.pem"

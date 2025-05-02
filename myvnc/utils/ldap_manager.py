@@ -103,7 +103,7 @@ class LDAPManager:
         
     def _load_server_config(self):
         """Load server configuration to get config file paths"""
-        config_path = Path(__file__).parent.parent.parent / "config" / "default_server_config.json"
+        config_path = Path(__file__).parent.parent.parent / "config" / "server_config.json"
         
         try:
             if config_path.exists():

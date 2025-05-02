@@ -1461,51 +1461,34 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
 
 def load_server_config():
     """Load server configuration from JSON file"""
-    # Use only the default_server_config.json file
-    config_path = Path(__file__).parent.parent.parent / "config" / "default_server_config.json"
-    
-    # Initialize logger early
-    logger = logging.getLogger('myvnc')
+    # Use a basic console logger until the full logging system is set up
+    logger = get_logger()
+    config_path = Path(__file__).parent.parent.parent / "config" / "server_config.json"
     
     try:
         logger.info(f"Loading configuration from: {config_path}")
         with open(config_path, 'r') as f:
             config = json.load(f)
             logger.info(f"Successfully loaded config from: {config_path}")
-            logger.info(f"Using configuration file: {config_path}")
-    except FileNotFoundError:
-        logger.warning(f"Configuration file not found: {config_path}")
-        logger.warning(f"Using default configuration values")
-        config = {
-            "host": "aus-misc",
+            return config
+    except (FileNotFoundError, json.JSONDecodeError, PermissionError) as e:
+        logger.warning(f"Configuration file not found, invalid, or not readable: {e}")
+        # Provide a basic default configuration
+        logger.warning("Using default configuration")
+        return {
+            "host": "localhost",
             "port": 9143,
-            "debug": False,
-            "max_connections": 5,
-            "timeout": 30,
-            "logdir": "/tmp"  # Default to a safe location
+            "logdir": "/tmp/myvnc/logs",
+            "datadir": "/tmp/myvnc/data",
+            "debug": True,
+            "authentication": ""
         }
-    except json.JSONDecodeError:
-        logger.warning(f"Invalid JSON in configuration file: {config_path}")
-        logger.warning(f"Using default configuration values")
-        config = {
-            "host": "aus-misc",
-            "port": 9143,
-            "debug": False,
-            "max_connections": 5,
-            "timeout": 30,
-            "logdir": "/tmp"  # Default to a safe location
-        }
-    
-    # Log config info to console for visibility
-    logger.info(f"Server configuration: host={config.get('host')}, port={config.get('port')}, logdir={config.get('logdir')}")
-    
-    return config
 
 def load_lsf_config():
     """Load LSF configuration from JSON file"""
     # Use a basic console logger until the full logging system is set up
     logger = get_logger()
-    default_config_path = Path(__file__).parent.parent.parent / "config" / "default_lsf_config.json"
+    default_config_path = Path(__file__).parent.parent.parent / "config" / "lsf_config.json"
     
     try:
         logger.info(f"Loading LSF configuration from: {default_config_path}")

@@ -1,5 +1,5 @@
 {
-    "host": "localhost",
+    "host": "myvnc.local.tenstorrent.com",
     "port": 9123,
     "debug": true,
     "max_connections": 5,
