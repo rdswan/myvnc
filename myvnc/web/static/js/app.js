@@ -72,6 +72,9 @@ document.addEventListener('DOMContentLoaded', function() {
         messageClose.addEventListener('click', hideMessage);
     }
     
+    // Initialize collapsible sections
+    initializeCollapsibleSections();
+    
     // Initialize the application in a defined sequence
     initializeApplication();
     
@@ -1304,6 +1307,67 @@ document.addEventListener('DOMContentLoaded', () => {
             border-bottom: 1px solid #eee;
             padding-bottom: 0.5rem;
         }
+        
+        /* Collapsible section styles */
+        .collapsible-section {
+            margin-bottom: 1rem;
+            border: 1px solid #eee;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        
+        .section-header {
+            padding: 1rem;
+            margin: 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            background-color: #f9f9f9;
+            transition: background-color 0.2s ease;
+            border-bottom: none;
+        }
+        
+        .section-header:hover {
+            background-color: #f0f0f0;
+        }
+        
+        .section-title {
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .collapse-indicator {
+            color: #6a3de8;
+            font-size: 0.9rem;
+            transition: transform 0.3s ease;
+        }
+        
+        .collapsed .collapse-indicator i.fa-chevron-up {
+            transform: rotate(180deg);
+        }
+        
+        .section-content {
+            overflow: hidden;
+            max-height: 1000px; /* Default max height */
+            transition: max-height 0.3s ease-out;
+            padding: 0 1rem;
+        }
+        
+        .collapsed .section-content {
+            max-height: 0;
+            padding-top: 0;
+            padding-bottom: 0;
+        }
+        
+        /* Additional styling for the debug panel */
+        #debug-panel .form-card {
+            padding-top: 0.5rem;
+        }
+        
+        #debug-panel .form-title {
+            margin-bottom: 1.5rem;
+        }
     `;
     
     document.head.appendChild(style);
@@ -1404,6 +1468,23 @@ function fetchEnvironmentInfo() {
 }
 
 /**
+ * Adjust the height of a collapsible section if it's expanded
+ */
+function adjustCollapsibleSectionHeight(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    
+    const section = container.closest('.collapsible-section');
+    if (!section) return;
+    
+    const content = section.querySelector('.section-content');
+    if (!content || section.classList.contains('collapsed')) return;
+    
+    // Re-calculate and set the section content height
+    content.style.maxHeight = content.scrollHeight + 'px';
+}
+
+/**
  * Display session information in the debug panel
  */
 function displaySessionInfo(data) {
@@ -1453,6 +1534,9 @@ function displaySessionInfo(data) {
     html += '</div>';
     
     sessionContainer.innerHTML = html;
+    
+    // Adjust the collapsible section height
+    adjustCollapsibleSectionHeight('debug-session');
 }
 
 /**
@@ -1515,6 +1599,9 @@ function displayEnvironmentInfo(data) {
     html += '</div>';
     
     envContainer.innerHTML = html;
+    
+    // Adjust the collapsible section height
+    adjustCollapsibleSectionHeight('debug-environment');
 }
 
 /**
@@ -1611,4 +1698,64 @@ function displayAppInfo(data) {
     html += '</div>';
     
     appInfoContainer.innerHTML = html;
+    
+    // Adjust the collapsible section height
+    adjustCollapsibleSectionHeight('debug-app-info');
+}
+
+/**
+ * Initialize collapsible sections in the debug panel
+ */
+function initializeCollapsibleSections() {
+    const collapsibleSections = document.querySelectorAll('.collapsible-section');
+    
+    collapsibleSections.forEach(section => {
+        const header = section.querySelector('.section-header');
+        const content = section.querySelector('.section-content');
+        
+        if (header && content) {
+            // Initialize the state based on the collapsed class
+            if (section.classList.contains('collapsed')) {
+                content.style.maxHeight = '0px';
+            } else {
+                content.style.maxHeight = content.scrollHeight + 'px';
+            }
+            
+            // Add click event to toggle section
+            header.addEventListener('click', () => {
+                // Toggle collapsed class
+                section.classList.toggle('collapsed');
+                
+                // Toggle the collapse indicator icon
+                const icon = header.querySelector('.collapse-indicator i');
+                if (icon) {
+                    icon.classList.toggle('fa-chevron-down');
+                    icon.classList.toggle('fa-chevron-up');
+                }
+                
+                // Animate the content height
+                if (section.classList.contains('collapsed')) {
+                    content.style.maxHeight = '0px';
+                } else {
+                    // If the section is being expanded, ensure all data is loaded
+                    content.style.maxHeight = content.scrollHeight + 'px';
+                    
+                    // Re-calculate the height after a short delay to account for content loading
+                    setTimeout(() => {
+                        content.style.maxHeight = content.scrollHeight + 'px';
+                    }, 50);
+                }
+            });
+        }
+    });
+    
+    // Re-adjust heights when window is resized
+    window.addEventListener('resize', () => {
+        collapsibleSections.forEach(section => {
+            const content = section.querySelector('.section-content');
+            if (content && !section.classList.contains('collapsed')) {
+                content.style.maxHeight = content.scrollHeight + 'px';
+            }
+        });
+    });
 }
