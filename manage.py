@@ -519,15 +519,145 @@ def server_status():
     # Now get a logger - try to use the server's log if possible
     logger = setup_logging_for_manage()
     
-    # Load server configuration to display
-    config = load_server_config()
-    
-    # Calculate timestamp once, for consistent output
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
-    
     if not is_running:
         logger.info("Server status: Not running")
         return
+    
+    # Server is running, try to get status directly from the server API
+    try:
+        # Check known production config path first (where server is likely running from)
+        prod_config_path = "/localdev/myvnc/config/server_config.json"
+        if os.path.exists(prod_config_path):
+            logger.info(f"Using production server config at: {prod_config_path}")
+            with open(prod_config_path, 'r') as f:
+                config = json.load(f)
+        else:
+            # Fall back to regular config loading
+            logger.info("Production config not found, using default config loading")
+            config = load_server_config()
+        
+        host = config.get('host', 'localhost')
+        port = config.get('port', '9143')
+        
+        # Always use FQDN even if config has localhost
+        fqdn_host = get_fully_qualified_hostname(host)
+        
+        # Check if HTTPS is configured
+        ssl_cert = config.get('ssl_cert', '')
+        ssl_key = config.get('ssl_key', '')
+        ssl_ca_chain = config.get('ssl_ca_chain', '')
+        use_https = ssl_cert and ssl_key and os.path.exists(ssl_cert) and os.path.exists(ssl_key)
+        
+        # Construct the URL to query the running server's status with proper protocol
+        protocol = "https" if use_https else "http"
+        url = f"{protocol}://{fqdn_host}:{port}/api/debug/app_info"
+        logger.info(f"Querying running server for status at: {url}")
+        
+        # Use subprocess to run a curl command to avoid adding requests dependency
+        # Add -k option to ignore SSL certificate validation
+        result = subprocess.run(
+            ["curl", "-sk", url] if use_https else ["curl", "-s", url],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            timeout=5
+        )
+        
+        if result.returncode != 0:
+            logger.error(f"Failed to query server: {result.stderr}")
+            # Fall back to local calculation (old method)
+            _server_status_fallback(pid, prod_config_path)
+            return
+            
+        # Parse the JSON response
+        try:
+            response = json.loads(result.stdout)
+            app_info = response.get('app_info', {})
+            
+            if not app_info:
+                logger.error("Server response did not contain app_info")
+                _server_status_fallback(pid, prod_config_path)
+                return
+                
+            # Log status information directly from the server
+            logger.info("Server status:")
+            
+            # Report configuration files
+            logger.info("Configuration files:")
+            logger.info(f"  Server config: {app_info.get('server_config_file', 'Unknown')}")
+            logger.info(f"  VNC config: {app_info.get('vnc_config_file', 'Unknown')}")
+            logger.info(f"  LSF config: {app_info.get('lsf_config_file', 'Unknown')}")
+            
+            # If LDAP config is configured, report it
+            ldap_config = app_info.get('ldap_config_file', '')
+            if ldap_config and ldap_config != 'Not configured':
+                logger.info(f"  LDAP config: {ldap_config}")
+            else:
+                logger.info("  LDAP config: Not configured")
+                
+            # If Entra config is configured, report it
+            entra_config = app_info.get('entra_config_file', '')
+            if entra_config and entra_config != 'Not configured':
+                logger.info(f"  Entra config: {entra_config}")
+            else:
+                logger.info("  Entra config: Not configured")
+            
+            # Report server status
+            logger.info(f"  Status: {app_info.get('status', 'Unknown')}")
+            logger.info(f"  PID: {app_info.get('pid', 'Unknown')}")
+            logger.info(f"  Host: {app_info.get('host', 'Unknown')}")
+            logger.info(f"  Port: {app_info.get('port', 'Unknown')}")
+            logger.info(f"  URL: {app_info.get('url', 'Unknown')}")
+            logger.info(f"  SSL: {'Enabled' if app_info.get('ssl_enabled', False) else 'Disabled'}")
+            
+            # Report SSL details if enabled
+            if app_info.get('ssl_enabled', False):
+                logger.info(f"  SSL Certificate: {app_info.get('ssl_cert', 'Unknown')}")
+                logger.info(f"  SSL Key: {app_info.get('ssl_key', 'Unknown')}")
+                if app_info.get('ssl_ca_chain'):
+                    logger.info(f"  SSL CA Chain: {app_info.get('ssl_ca_chain')}")
+                    
+            # Report authentication status
+            logger.info(f"  Authentication: {'Enabled' if app_info.get('auth_enabled', False) else 'Disabled'}")
+            
+            if app_info.get('auth_method'):
+                logger.info(f"  Auth Method: {app_info.get('auth_method', 'Unknown')}")
+                logger.info(f"  Auth Status: {app_info.get('auth_status', 'Unknown')}")
+                
+                # Add details about the auth modules
+                auth_available = app_info.get('auth_available', {})
+                if app_info.get('auth_method').lower() == 'ldap':
+                    logger.info(f"  LDAP Module Available: {'Yes' if auth_available.get('ldap', False) else 'No'}")
+                elif app_info.get('auth_method').lower() == 'entra':
+                    logger.info(f"  MSAL Module Available: {'Yes' if auth_available.get('entra', False) else 'No'}")
+            
+            # Report directory information
+            logger.info(f"  Log directory: {app_info.get('log_directory', 'Unknown')}")
+            logger.info(f"  Data directory: {app_info.get('data_directory', 'Unknown')}")
+            logger.info(f"  Current log: {app_info.get('log_file', 'Unknown')}")
+            logger.info(f"  Uptime: {app_info.get('uptime', 'Unknown')}")
+            
+        except json.JSONDecodeError:
+            logger.error(f"Failed to parse server response: {result.stdout}")
+            _server_status_fallback(pid, prod_config_path)
+            
+    except Exception as e:
+        logger.error(f"Error querying server status: {str(e)}")
+        _server_status_fallback(pid, prod_config_path)
+
+def _server_status_fallback(pid, prod_config_path=None):
+    """Fallback method to show server status using local calculations"""
+    logger = get_logger()
+    logger.warning("Using fallback method to determine server status")
+    
+    # Load server configuration to display
+    if prod_config_path and os.path.exists(prod_config_path):
+        logger.info(f"Using production config file: {prod_config_path}")
+        with open(prod_config_path, 'r') as f:
+            config = json.load(f)
+    else:
+        logger.info("Using default config loading")
+        config = load_server_config()
     
     # Server is running, get more information
     uptime = get_uptime(pid)
@@ -576,7 +706,95 @@ def server_status():
         actual_auth_enabled = False
     
     # Log status information
-    logger.info("Server status:")
+    logger.info("Server status (calculated locally):")
+    
+    # Get and log configuration file paths using the path from the production config first if available
+    if prod_config_path and os.path.exists(prod_config_path):
+        server_config_path = prod_config_path
+        # Try to derive other paths from production config directory
+        config_dir = os.path.dirname(prod_config_path)
+        vnc_config_path = os.path.join(config_dir, "vnc_config.json")
+        lsf_config_path = os.path.join(config_dir, "lsf_config.json")
+    else:
+        # Fall back to environment variables and defaults
+        server_config_path = os.environ.get("MYVNC_SERVER_CONFIG_FILE", "")
+        config_dir = os.environ.get("MYVNC_CONFIG_DIR", "")
+        
+        if not server_config_path:
+            if config_dir:
+                server_config_path = os.path.join(config_dir, "server_config.json")
+            else:
+                server_config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "server_config.json")
+        
+        vnc_config_path = os.environ.get("MYVNC_VNC_CONFIG_FILE", "")
+        if not vnc_config_path:
+            if config_dir:
+                vnc_config_path = os.path.join(config_dir, "vnc_config.json")
+            else:
+                vnc_config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "vnc_config.json")
+        
+        lsf_config_path = os.environ.get("MYVNC_LSF_CONFIG_FILE", "")
+        if not lsf_config_path:
+            if config_dir:
+                lsf_config_path = os.path.join(config_dir, "lsf_config.json")
+            else:
+                lsf_config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config", "lsf_config.json")
+    
+    # Get ldap and entra config paths from the loaded config
+    ldap_config_path = config.get('ldap_config', "")
+    if ldap_config_path and not os.path.isabs(ldap_config_path):
+        # If not absolute path, try to resolve relative to production path first, then default
+        if prod_config_path and os.path.exists(prod_config_path):
+            ldap_config_path = os.path.join(os.path.dirname(prod_config_path), ldap_config_path)
+        else:
+            ldap_config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ldap_config_path)
+    
+    entra_config_path = config.get('entra_config', "")
+    if entra_config_path and not os.path.isabs(entra_config_path):
+        # If not absolute path, try to resolve relative to production path first, then default
+        if prod_config_path and os.path.exists(prod_config_path):
+            entra_config_path = os.path.join(os.path.dirname(prod_config_path), entra_config_path)
+        else:
+            entra_config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), entra_config_path)
+    
+    # Log configuration file paths
+    logger.info("Configuration files (warning: might not match server's actual config):")
+    logger.info(f"  Server config: {server_config_path}")
+    if os.path.exists(server_config_path):
+        logger.info(f"    (exists: Yes)")
+    else:
+        logger.info(f"    (exists: No)")
+    
+    logger.info(f"  VNC config: {vnc_config_path}")
+    if os.path.exists(vnc_config_path):
+        logger.info(f"    (exists: Yes)")
+    else:
+        logger.info(f"    (exists: No)")
+    
+    logger.info(f"  LSF config: {lsf_config_path}")
+    if os.path.exists(lsf_config_path):
+        logger.info(f"    (exists: Yes)")
+    else:
+        logger.info(f"    (exists: No)")
+    
+    if ldap_config_path:
+        logger.info(f"  LDAP config: {ldap_config_path}")
+        if os.path.exists(ldap_config_path):
+            logger.info(f"    (exists: Yes)")
+        else:
+            logger.info(f"    (exists: No)")
+    else:
+        logger.info("  LDAP config: Not configured")
+    
+    if entra_config_path:
+        logger.info(f"  Entra config: {entra_config_path}")
+        if os.path.exists(entra_config_path):
+            logger.info(f"    (exists: Yes)")
+        else:
+            logger.info(f"    (exists: No)")
+    else:
+        logger.info("  Entra config: Not configured")
+    
     logger.info(f"  Status: Running")
     logger.info(f"  PID: {pid}")
     logger.info(f"  Host: {host}")
