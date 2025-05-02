@@ -1375,6 +1375,14 @@ function displaySessionInfo(data) {
                 <div class="debug-info-value">${data.username || 'Anonymous'}</div>
             </div>
             <div class="debug-info-row">
+                <div class="debug-info-label">Display Name</div>
+                <div class="debug-info-value">${data.display_name || data.username || 'N/A'}</div>
+            </div>
+            <div class="debug-info-row">
+                <div class="debug-info-label">Email</div>
+                <div class="debug-info-value">${data.email || 'N/A'}</div>
+            </div>
+            <div class="debug-info-row">
                 <div class="debug-info-label">Authentication</div>
                 <div class="debug-info-value">${data.authenticated ? 'Authenticated' : 'Not Authenticated'}</div>
             </div>
@@ -1387,6 +1395,10 @@ function displaySessionInfo(data) {
                 <div class="debug-info-value">${data.login_time || 'N/A'}</div>
             </div>
             <div class="debug-info-row">
+                <div class="debug-info-label">Session Expiry</div>
+                <div class="debug-info-value session-expiry ${getExpiryClass(data.expiry_days)}">${data.expiry_info || 'Not Available'}</div>
+            </div>
+            <div class="debug-info-row">
                 <div class="debug-info-label">IP Address</div>
                 <div class="debug-info-value">${data.ip_address || 'Unknown'}</div>
             </div>
@@ -1396,6 +1408,16 @@ function displaySessionInfo(data) {
             </div>
         </div>
     `;
+    
+    // Display user groups if available
+    if (data.groups && Array.isArray(data.groups) && data.groups.length > 0) {
+        html += `
+            <h3>User Groups</h3>
+            <div class="groups-list">
+                ${data.groups.map(group => `<span class="group-tag">${group}</span>`).join('')}
+            </div>
+        `;
+    }
     
     // Display user permissions if available
     if (data.permissions && Array.isArray(data.permissions) && data.permissions.length > 0) {
@@ -1410,6 +1432,17 @@ function displaySessionInfo(data) {
     html += '</div>';
     
     sessionContainer.innerHTML = html;
+}
+
+/**
+ * Get CSS class for expiry time display
+ */
+function getExpiryClass(expiryDays) {
+    if (!expiryDays || expiryDays <= 0) return '';
+    if (expiryDays < 1) return 'expiry-soon';
+    if (expiryDays < 3) return 'expiry-warning';
+    if (expiryDays < 7) return 'expiry-normal';
+    return 'expiry-long';
 }
 
 /**

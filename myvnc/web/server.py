@@ -26,6 +26,7 @@ from http.cookies import SimpleCookie
 import socket
 import logging
 import ssl
+import importlib
 
 # Add parent directory to path so we can import our modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -297,6 +298,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.handle_debug_commands()
         elif path == "/api/debug/environment":
             self.handle_debug_environment()
+        elif path == "/api/debug/session":
+            self.handle_debug_session()
         elif path == "/auth/entra" and auth_enabled and self.authentication_enabled.lower() == "entra":
             self.handle_auth_entra()
         elif path == "/auth/callback" and auth_enabled and self.authentication_enabled.lower() == "entra":
@@ -864,32 +867,120 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         """Handle /debug/environment endpoint to display environment information"""
         try:
             self.logger.info("Handling debug environment request")
-            # Get basic environment info
-            env_info = {
-                "Python Version": platform.python_version(),
-                "Platform": platform.platform(),
-                "User": os.environ.get("USER", "Unknown"),
-                "Hostname": platform.node(),
+            
+            # Get server information
+            server_info = {
+                "server_version": getattr(self, "server_version", "1.0.0"),
+                "python_version": platform.python_version(),
+                "server_time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "hostname": platform.node(),
+                "platform": platform.platform(),
+                "os_name": os.name,
+                "system": platform.system()
             }
             
-            # Add all environment variables
+            # Get LSF information
+            lsf_info = {
+                "version": "Unknown",
+                "lsf_root": os.environ.get("LSF_LIBDIR", "Unknown").replace("/lib", ""),
+                "default_queue": self.config_manager.lsf_config.get("defaults", {}).get("queue", "Unknown")
+            }
+            
+            # Try to get LSF version
+            try:
+                lsf_version_cmd = "lsid 2>/dev/null | grep 'My cluster name is' | cut -d' ' -f5-"
+                lsf_info["version"] = subprocess.check_output(lsf_version_cmd, shell=True).decode().strip()
+            except Exception as e:
+                self.logger.error(f"Error getting LSF version: {str(e)}")
+            
+            # Get VNC information
+            vnc_info = {
+                "server_path": self.config_manager.vnc_config.get("defaults", {}).get("vncserver_path", "Unknown"),
+                "default_resolution": self.config_manager.vnc_config.get("defaults", {}).get("resolution", "Unknown"),
+                "default_window_manager": self.config_manager.vnc_config.get("defaults", {}).get("window_manager", "Unknown")
+            }
+            
+            # Get environment variables
+            env_info = {}
             for key, value in os.environ.items():
                 env_info[key] = value
             
-            # Include configs
-            config_info = {
-                "vnc_config": self.config_manager.vnc_config,
-                "lsf_config": self.config_manager.lsf_config
+            # Send response
+            self.send_json_response({
+                "success": True,
+                "server_version": server_info["server_version"],
+                "python_version": server_info["python_version"],
+                "server_time": server_info["server_time"],
+                "hostname": server_info["hostname"],
+                "lsf_info": lsf_info,
+                "vnc_info": vnc_info,
+                "server_info": server_info,
+                "environment": env_info
+            })
+        except Exception as e:
+            self.logger.error(f"Error handling debug environment: {str(e)}")
+            traceback.print_exc()
+            self.send_json_response({
+                "success": False,
+                "message": f"Error: {str(e)}"
+            })
+    
+    def handle_debug_session(self):
+        """Handle /debug/session endpoint to display session information"""
+        try:
+            self.logger.info("Handling debug session request")
+            # Get session from cookies if present
+            session_id = self.get_session_cookie()
+            auth_success = False
+            session_data = {}
+            
+            if session_id:
+                auth_success, message, session = self.check_auth()
+                if auth_success and session:
+                    session_data = session
+            
+            # Get authentication method
+            auth_method = self.authentication_enabled.lower() if self.authentication_enabled else "none"
+            
+            # Calculate expiry time if available
+            expiry_info = "Not available"
+            expiry_days = 0
+            if session_data and 'expiry' in session_data:
+                expiry_timestamp = session_data['expiry']
+                current_time = time.time()
+                if expiry_timestamp > current_time:
+                    # Calculate days remaining
+                    seconds_remaining = expiry_timestamp - current_time
+                    days_remaining = seconds_remaining / (60 * 60 * 24)
+                    expiry_days = round(days_remaining, 1)
+                    expiry_info = f"{expiry_days} days remaining (expires {time.ctime(expiry_timestamp)})"
+                else:
+                    expiry_info = "Expired"
+            
+            # Get basic session info
+            data = {
+                "session_id": session_id or "Not set",
+                "authenticated": auth_success,
+                "username": session_data.get("username", "Anonymous"),
+                "auth_method": auth_method,
+                "login_time": session_data.get("login_time", "N/A"),
+                "ip_address": self.client_address[0] if hasattr(self, 'client_address') else "Unknown",
+                "user_agent": self.headers.get("User-Agent", "Unknown"),
+                "permissions": session_data.get("permissions", []),
+                "expiry_info": expiry_info,
+                "expiry_days": expiry_days,
+                "display_name": session_data.get("display_name", "N/A"),
+                "email": session_data.get("email", "N/A"),
+                "groups": session_data.get("groups", [])
             }
             
             # Send response
             self.send_json_response({
                 "success": True,
-                "environment": env_info,
-                "config": config_info
+                **data
             })
         except Exception as e:
-            self.logger.error(f"Error handling debug environment: {str(e)}")
+            self.logger.error(f"Error handling debug session: {str(e)}")
             traceback.print_exc()
             self.send_json_response({
                 "success": False,
@@ -909,6 +1000,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.handle_debug_commands()
         elif debug_command == 'environment':
             self.handle_debug_environment()
+        elif debug_command == 'session':
+            self.handle_debug_session()
         else:
             self.send_error(404)
 
