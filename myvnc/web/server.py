@@ -38,6 +38,11 @@ from myvnc.utils.vnc_manager import VNCManager
 from myvnc.utils.db_manager import DatabaseManager
 from myvnc.utils.log_manager import setup_logging, get_logger, get_current_log_file
 
+# Global variables to track actual config file paths used
+server_config_actual_path = None
+vnc_config_actual_path = None
+lsf_config_actual_path = None
+
 def setup_logger():
     """Set up detailed logging configuration"""
     # Create logger
@@ -1074,6 +1079,19 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             else:
                 url = f"https://{host}" if ssl_enabled else f"http://{host}"
             
+            # Get LDAP and Entra config paths, resolve relative paths
+            ldap_config_path = server_config.get('ldap_config', '')
+            if ldap_config_path and not os.path.isabs(ldap_config_path) and server_config_actual_path:
+                # Resolve relative to server config directory
+                server_config_dir = os.path.dirname(server_config_actual_path)
+                ldap_config_path = os.path.join(server_config_dir, ldap_config_path)
+            
+            entra_config_path = server_config.get('entra_config', '')
+            if entra_config_path and not os.path.isabs(entra_config_path) and server_config_actual_path:
+                # Resolve relative to server config directory
+                server_config_dir = os.path.dirname(server_config_actual_path)
+                entra_config_path = os.path.join(server_config_dir, entra_config_path)
+            
             # Build response data with COMPREHENSIVE information about the running server
             app_info = {
                 "status": "Running",
@@ -1102,9 +1120,11 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 
                 # Include information about config file locations
                 "config_dir": os.environ.get("MYVNC_CONFIG_DIR", "Default"),
-                "server_config_file": os.environ.get("MYVNC_SERVER_CONFIG_FILE", "Default"),
-                "vnc_config_file": os.environ.get("MYVNC_VNC_CONFIG_FILE", "Default"),
-                "lsf_config_file": os.environ.get("MYVNC_LSF_CONFIG_FILE", "Default"),
+                "server_config_file": server_config_actual_path or "Unknown",
+                "vnc_config_file": vnc_config_actual_path or "Unknown",
+                "lsf_config_file": lsf_config_actual_path or "Unknown",
+                "ldap_config_file": ldap_config_path or "Not configured",
+                "entra_config_file": entra_config_path or "Not configured",
                 
                 # Include additional authentication details
                 "auth_available": {
@@ -1526,6 +1546,9 @@ def load_server_config():
     # Use a basic console logger until the full logging system is set up
     logger = get_logger()
     
+    # Store the actual path in the global variable
+    global server_config_actual_path
+    
     # Check for environment variable for server config file path
     env_config_path = os.environ.get("MYVNC_SERVER_CONFIG_FILE")
     
@@ -1553,11 +1576,15 @@ def load_server_config():
         with open(config_path, 'r') as f:
             config = json.load(f)
             logger.info(f"Successfully loaded config from: {config_path}")
+            # Set the global variable with the actual path that was used
+            server_config_actual_path = str(config_path)
             return config
     except (FileNotFoundError, json.JSONDecodeError, PermissionError) as e:
         logger.warning(f"Configuration file not found, invalid, or not readable: {e}")
         # Provide a basic default configuration
         logger.warning("Using default configuration")
+        # Reset the path to None since we're using default config
+        server_config_actual_path = None
         return {
             "host": "localhost",
             "port": 9143,
@@ -1571,6 +1598,9 @@ def load_lsf_config():
     """Load LSF configuration from JSON file"""
     # Use a basic console logger until the full logging system is set up
     logger = get_logger()
+    
+    # Store the actual path in the global variable
+    global lsf_config_actual_path
     
     # Check for environment variable for LSF config file path
     env_config_path = os.environ.get("MYVNC_LSF_CONFIG_FILE")
@@ -1599,10 +1629,14 @@ def load_lsf_config():
         with open(config_path, 'r') as f:
             config = json.load(f)
             logger.info(f"Successfully loaded LSF config from: {config_path}")
+            # Set the global variable with the actual path that was used
+            lsf_config_actual_path = str(config_path)
             return config
     except (FileNotFoundError, json.JSONDecodeError):
         logger.warning(f"LSF configuration file not found or invalid at {config_path}")
         logger.warning("Using default LSF configuration values")
+        # Reset the path to None since we're using default config
+        lsf_config_actual_path = None
         return {
             "default_settings": {
                 "queue": "interactive",
@@ -1663,6 +1697,10 @@ def run_server(host=None, port=None, directory=None, config=None):
     # Load configuration if not provided
     if config is None:
         config = load_server_config()
+    
+    # Load LSF and VNC configs too
+    lsf_config = load_lsf_config()
+    vnc_config = load_vnc_config()
     
     # Just get the existing logger rather than setting up logging again
     logger = get_logger()
@@ -1851,6 +1889,60 @@ def parse_args():
     parser.add_argument('--ssl-key', help='Path to SSL private key file for HTTPS')
     parser.add_argument('--ssl-ca-chain', help='Path to SSL CA chain bundle file for HTTPS')
     return parser.parse_args()
+
+def load_vnc_config():
+    """Load VNC configuration from JSON file"""
+    # Use a basic console logger until the full logging system is set up
+    logger = get_logger()
+    
+    # Store the actual path in the global variable
+    global vnc_config_actual_path
+    
+    # Check for environment variable for VNC config file path
+    env_config_path = os.environ.get("MYVNC_VNC_CONFIG_FILE")
+    
+    if env_config_path and os.path.exists(env_config_path):
+        config_path = Path(env_config_path)
+        logger.info(f"Using VNC config from environment variable: {config_path}")
+    else:
+        # Use default path
+        config_dir = os.environ.get("MYVNC_CONFIG_DIR")
+        if config_dir and os.path.exists(config_dir):
+            config_path = Path(config_dir) / "vnc_config.json"
+            # Check the source of the config directory
+            config_source = os.environ.get("MYVNC_CONFIG_SOURCE", "env")
+            if config_source == "cli":
+                logger.info(f"Using config directory from command-line argument: {config_dir}")
+            else:
+                logger.info(f"Using config directory from environment variable: {config_dir}")
+            logger.info(f"Constructed VNC config path: {config_path}")
+        else:
+            config_path = Path(__file__).parent.parent.parent / "config" / "vnc_config.json"
+            logger.info(f"Using default VNC config path: {config_path}")
+    
+    try:
+        logger.info(f"Loading VNC configuration from: {config_path}")
+        with open(config_path, 'r') as f:
+            config = json.load(f)
+            logger.info(f"Successfully loaded VNC config from: {config_path}")
+            # Set the global variable with the actual path that was used
+            vnc_config_actual_path = str(config_path)
+            return config
+    except (FileNotFoundError, json.JSONDecodeError):
+        logger.warning(f"VNC configuration file not found or invalid at {config_path}")
+        logger.warning("Using default VNC configuration values")
+        # Reset the path to None since we're using default config
+        vnc_config_actual_path = None
+        return {
+            "default_settings": {
+                "resolution": "1920x1080",
+                "window_manager": "gnome",
+                "color_depth": 24,
+                "name_prefix": "vncserver"
+            },
+            "available_window_managers": ["gnome", "kde", "xfce"],
+            "available_resolutions": ["1280x720", "1920x1080", "2560x1440"]
+        }
 
 if __name__ == '__main__':
     args = parse_args()
