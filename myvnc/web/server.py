@@ -1057,13 +1057,30 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 # If psutil not available, use a simpler approach
                 uptime = "Not available (psutil required)"
             
-            # Build response data
+            # Get current log file
+            log_file = get_current_log_file()
+            log_file_path = str(log_file.absolute()) if log_file else "Unknown"
+            
+            # Determine if we need to include port in URL (not needed for standard ports)
+            include_port = True
+            if ssl_enabled and port == 443:
+                include_port = False
+            elif not ssl_enabled and port == 80:
+                include_port = False
+                
+            # Create URL with proper port handling
+            if include_port:
+                url = f"https://{host}:{port}" if ssl_enabled else f"http://{host}:{port}"
+            else:
+                url = f"https://{host}" if ssl_enabled else f"http://{host}"
+            
+            # Build response data with COMPREHENSIVE information about the running server
             app_info = {
                 "status": "Running",
                 "pid": pid,
                 "host": host,
                 "port": port,
-                "url": f"https://{host}:{port}" if ssl_enabled else f"http://{host}:{port}",
+                "url": url,
                 "ssl_enabled": ssl_enabled,
                 "ssl_cert": ssl_cert if ssl_enabled else "",
                 "ssl_key": ssl_key if ssl_enabled else "",
@@ -1072,11 +1089,40 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 "auth_method": auth_method,
                 "auth_status": auth_status,
                 "log_directory": server_config.get("logdir", ""),
+                "log_file": log_file_path,
                 "data_directory": server_config.get("datadir", ""),
                 "uptime": uptime,
+                "uptime_seconds": uptime_seconds if 'uptime_seconds' in locals() else None,
                 "debug_mode": server_config.get("debug", False),
                 "python_executable": sys.executable,
-                "python_version": platform.python_version()
+                "python_version": platform.python_version(),
+                
+                # Include command line arguments used to start the server
+                "cli_args": sys.argv,
+                
+                # Include information about config file locations
+                "config_dir": os.environ.get("MYVNC_CONFIG_DIR", "Default"),
+                "server_config_file": os.environ.get("MYVNC_SERVER_CONFIG_FILE", "Default"),
+                "vnc_config_file": os.environ.get("MYVNC_VNC_CONFIG_FILE", "Default"),
+                "lsf_config_file": os.environ.get("MYVNC_LSF_CONFIG_FILE", "Default"),
+                
+                # Include additional authentication details
+                "auth_available": {
+                    "ldap": self._is_ldap_available(),
+                    "entra": self._is_entra_available()
+                },
+                
+                # Include information about the VNC and LSF configurations
+                "vnc_config": {
+                    "window_managers": self.config_manager.get_available_window_managers() if hasattr(self, 'config_manager') else [],
+                    "default_resolution": self.config_manager.get_vnc_defaults().get("resolution", "Unknown") if hasattr(self, 'config_manager') else "Unknown",
+                    "vncserver_path": self.config_manager.get_vnc_defaults().get("vncserver_path", "Unknown") if hasattr(self, 'config_manager') else "Unknown"
+                },
+                "lsf_config": {
+                    "default_queue": self.config_manager.get_lsf_defaults().get("queue", "Unknown") if hasattr(self, 'config_manager') else "Unknown",
+                    "default_cores": self.config_manager.get_lsf_defaults().get("num_cores", "Unknown") if hasattr(self, 'config_manager') else "Unknown",
+                    "default_memory_gb": self.config_manager.get_lsf_defaults().get("memory_gb", "Unknown") if hasattr(self, 'config_manager') else "Unknown"
+                }
             }
             
             # Send response
@@ -1092,6 +1138,22 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 "message": f"Error: {str(e)}"
             })
     
+    def _is_ldap_available(self):
+        """Check if LDAP module is available"""
+        try:
+            import ldap3
+            return True
+        except ImportError:
+            return False
+            
+    def _is_entra_available(self):
+        """Check if Microsoft Entra ID (MSAL) module is available"""
+        try:
+            import msal
+            return True
+        except ImportError:
+            return False
+
     def handle_debug(self):
         """Handle /debug/* requests"""
         path_parts = self.path.strip('/').split('/')
