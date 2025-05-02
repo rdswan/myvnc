@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 import json
 import os
+import logging
 from pathlib import Path
 
 class ConfigManager:
@@ -15,13 +16,30 @@ class ConfigManager:
             config_dir: Directory containing configuration files. 
                        If None, defaults to ../config relative to this file
         """
+        # Set up logging
+        self.logger = logging.getLogger('myvnc')
+        
         # Check for environment variable for config directory
         if config_dir is None:
             # Priority: Provided argument, environment variable, default path
-            self.config_dir = Path(os.environ.get("MYVNC_CONFIG_DIR", 
-                                   str(Path(__file__).parent.parent.parent / "config")))
+            env_config_dir = os.environ.get("MYVNC_CONFIG_DIR")
+            if env_config_dir:
+                self.config_dir = Path(env_config_dir)
+                # Check the source of the config directory
+                config_source = os.environ.get("MYVNC_CONFIG_SOURCE", "env")
+                if config_source == "cli":
+                    self.logger.info(f"ConfigManager: Using config directory from command-line argument: {env_config_dir}")
+                else:
+                    self.logger.info(f"ConfigManager: Using config directory from environment variable: {env_config_dir}")
+            else:
+                # Use default path
+                default_path = Path(__file__).parent.parent.parent / "config"
+                self.config_dir = default_path
+                self.logger.info(f"ConfigManager: Using default config directory: {default_path}")
         else:
+            # Explicit path provided to constructor
             self.config_dir = Path(config_dir)
+            self.logger.info(f"ConfigManager: Using explicitly provided config directory: {config_dir}")
         
         # Load configurations - use the default_prefix in filenames
         self.vnc_config = self._load_config("vnc_config.json", os.environ.get("MYVNC_VNC_CONFIG_FILE"))
@@ -44,26 +62,37 @@ class ConfigManager:
         # Priority: Environment variable path, config_dir/filename
         if env_path and os.path.exists(env_path):
             config_path = Path(env_path)
+            self.logger.info(f"ConfigManager: Loading {filename} from environment variable path: {config_path}")
         else:
             config_path = self.config_dir / filename
+            self.logger.info(f"ConfigManager: Loading {filename} from config directory: {config_path}")
             
         try:
             with open(config_path, 'r') as f:
-                return json.load(f)
+                config = json.load(f)
+                self.logger.info(f"ConfigManager: Successfully loaded {filename} from {config_path}")
+                return config
         except FileNotFoundError:
             # If the file has default_ prefix and is not found, try without prefix for backward compatibility
             if filename.startswith("default_"):
                 alt_filename = filename.replace("default_", "", 1)
                 alt_path = self.config_dir / alt_filename
+                self.logger.info(f"ConfigManager: Trying alternate filename: {alt_path}")
                 try:
                     with open(alt_path, 'r') as f:
-                        return json.load(f)
+                        config = json.load(f)
+                        self.logger.info(f"ConfigManager: Successfully loaded {alt_filename} from {alt_path}")
+                        return config
                 except FileNotFoundError:
+                    self.logger.error(f"ConfigManager: Configuration file {filename} not found at {config_path} (also tried {alt_path})")
                     raise RuntimeError(f"Configuration file {filename} not found at {config_path} (also tried {alt_path})")
                 except json.JSONDecodeError:
+                    self.logger.error(f"ConfigManager: Invalid JSON in configuration file {alt_filename}")
                     raise RuntimeError(f"Invalid JSON in configuration file {alt_filename}")
+            self.logger.error(f"ConfigManager: Configuration file {filename} not found at {config_path}")
             raise RuntimeError(f"Configuration file {filename} not found at {config_path}")
         except json.JSONDecodeError:
+            self.logger.error(f"ConfigManager: Invalid JSON in configuration file {filename}")
             raise RuntimeError(f"Invalid JSON in configuration file {filename}")
     
     def get_vnc_defaults(self):

@@ -872,6 +872,8 @@ def main():
     # Set environment variables from command-line arguments if provided
     if args.config_dir:
         os.environ["MYVNC_CONFIG_DIR"] = args.config_dir
+        # Track the source of the config directory
+        os.environ["MYVNC_CONFIG_SOURCE"] = "cli"
     if args.server_config_file:
         os.environ["MYVNC_SERVER_CONFIG_FILE"] = args.server_config_file
     if args.vnc_config_file:

@@ -1537,7 +1537,13 @@ def load_server_config():
         config_dir = os.environ.get("MYVNC_CONFIG_DIR")
         if config_dir and os.path.exists(config_dir):
             config_path = Path(config_dir) / "server_config.json"
-            logger.info(f"Using config directory from environment variable: {config_path}")
+            # Check the source of the config directory
+            config_source = os.environ.get("MYVNC_CONFIG_SOURCE", "env")
+            if config_source == "cli":
+                logger.info(f"Using config directory from command-line argument: {config_dir}")
+            else:
+                logger.info(f"Using config directory from environment variable: {config_dir}")
+            logger.info(f"Constructed config path: {config_path}")
         else:
             config_path = Path(__file__).parent.parent.parent / "config" / "server_config.json"
             logger.info(f"Using default server config path: {config_path}")
@@ -1577,7 +1583,13 @@ def load_lsf_config():
         config_dir = os.environ.get("MYVNC_CONFIG_DIR")
         if config_dir and os.path.exists(config_dir):
             config_path = Path(config_dir) / "lsf_config.json"
-            logger.info(f"Using config directory from environment variable: {config_path}")
+            # Check the source of the config directory
+            config_source = os.environ.get("MYVNC_CONFIG_SOURCE", "env")
+            if config_source == "cli":
+                logger.info(f"Using config directory from command-line argument: {config_dir}")
+            else:
+                logger.info(f"Using config directory from environment variable: {config_dir}")
+            logger.info(f"Constructed LSF config path: {config_path}")
         else:
             config_path = Path(__file__).parent.parent.parent / "config" / "lsf_config.json"
             logger.info(f"Using default LSF config path: {config_path}")
