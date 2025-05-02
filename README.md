@@ -40,6 +40,46 @@ It is fully Open Source via the Apache License 2.0
 3. Configure your server settings in `config/server_config.json`
 4. Configure your LSF settings in `config/lsf_config.json`
 
+## Configuration Options
+
+### Configuration File Paths
+
+The application provides multiple ways to specify configuration file locations:
+
+1. **Command Line Arguments**:
+   - `--config_dir`: Specify an alternative directory for all config files
+   - `--server_config_file`: Specify an alternative path for server_config.json
+   - `--vnc_config_file`: Specify an alternative path for vnc_config.json
+   - `--lsf_config_file`: Specify an alternative path for lsf_config.json
+
+2. **Environment Variables**:
+   - `MYVNC_CONFIG_DIR`: Specify an alternative directory for all config files
+   - `MYVNC_SERVER_CONFIG_FILE`: Specify an alternative path for server_config.json
+   - `MYVNC_VNC_CONFIG_FILE`: Specify an alternative path for vnc_config.json
+   - `MYVNC_LSF_CONFIG_FILE`: Specify an alternative path for lsf_config.json
+
+3. **Default Locations**:
+   - These are used if no command line arguments or environment variables are provided
+   - Default paths are relative to the application installation directory: `config/server_config.json`, etc.
+
+Priority order when resolving configuration files:
+1. Command line arguments (highest priority)
+2. Environment variables
+3. Default paths (lowest priority)
+
+Example usage:
+```bash
+# Using environment variables
+export MYVNC_CONFIG_DIR=/path/to/custom/config
+./manage.py start
+
+# Using command line arguments
+./manage.py --server_config_file=/path/to/custom/server_config.json start
+
+# Using CLI arguments with run_server.py
+./run_server.py --config_dir=/path/to/custom/config --port=9144
+```
+
 ## Server Management
 
 The `manage.py` script provides several commands to control the server:

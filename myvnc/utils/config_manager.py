@@ -15,21 +15,25 @@ class ConfigManager:
             config_dir: Directory containing configuration files. 
                        If None, defaults to ../config relative to this file
         """
+        # Check for environment variable for config directory
         if config_dir is None:
-            self.config_dir = Path(__file__).parent.parent.parent / "config"
+            # Priority: Provided argument, environment variable, default path
+            self.config_dir = Path(os.environ.get("MYVNC_CONFIG_DIR", 
+                                   str(Path(__file__).parent.parent.parent / "config")))
         else:
             self.config_dir = Path(config_dir)
         
         # Load configurations - use the default_prefix in filenames
-        self.vnc_config = self._load_config("vnc_config.json")
-        self.lsf_config = self._load_config("lsf_config.json")
+        self.vnc_config = self._load_config("vnc_config.json", os.environ.get("MYVNC_VNC_CONFIG_FILE"))
+        self.lsf_config = self._load_config("lsf_config.json", os.environ.get("MYVNC_LSF_CONFIG_FILE"))
     
-    def _load_config(self, filename):
+    def _load_config(self, filename, env_path=None):
         """
         Load a configuration file
         
         Args:
             filename: Name of the configuration file
+            env_path: Path from environment variable if available
             
         Returns:
             Dict containing the configuration
@@ -37,7 +41,12 @@ class ConfigManager:
         Raises:
             RuntimeError: If the file is not found or contains invalid JSON
         """
-        config_path = self.config_dir / filename
+        # Priority: Environment variable path, config_dir/filename
+        if env_path and os.path.exists(env_path):
+            config_path = Path(env_path)
+        else:
+            config_path = self.config_dir / filename
+            
         try:
             with open(config_path, 'r') as f:
                 return json.load(f)

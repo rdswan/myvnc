@@ -1463,7 +1463,22 @@ def load_server_config():
     """Load server configuration from JSON file"""
     # Use a basic console logger until the full logging system is set up
     logger = get_logger()
-    config_path = Path(__file__).parent.parent.parent / "config" / "server_config.json"
+    
+    # Check for environment variable for server config file path
+    env_config_path = os.environ.get("MYVNC_SERVER_CONFIG_FILE")
+    
+    if env_config_path and os.path.exists(env_config_path):
+        config_path = Path(env_config_path)
+        logger.info(f"Using server config from environment variable: {config_path}")
+    else:
+        # Use default path
+        config_dir = os.environ.get("MYVNC_CONFIG_DIR")
+        if config_dir and os.path.exists(config_dir):
+            config_path = Path(config_dir) / "server_config.json"
+            logger.info(f"Using config directory from environment variable: {config_path}")
+        else:
+            config_path = Path(__file__).parent.parent.parent / "config" / "server_config.json"
+            logger.info(f"Using default server config path: {config_path}")
     
     try:
         logger.info(f"Loading configuration from: {config_path}")
@@ -1488,16 +1503,31 @@ def load_lsf_config():
     """Load LSF configuration from JSON file"""
     # Use a basic console logger until the full logging system is set up
     logger = get_logger()
-    default_config_path = Path(__file__).parent.parent.parent / "config" / "lsf_config.json"
+    
+    # Check for environment variable for LSF config file path
+    env_config_path = os.environ.get("MYVNC_LSF_CONFIG_FILE")
+    
+    if env_config_path and os.path.exists(env_config_path):
+        config_path = Path(env_config_path)
+        logger.info(f"Using LSF config from environment variable: {config_path}")
+    else:
+        # Use default path
+        config_dir = os.environ.get("MYVNC_CONFIG_DIR")
+        if config_dir and os.path.exists(config_dir):
+            config_path = Path(config_dir) / "lsf_config.json"
+            logger.info(f"Using config directory from environment variable: {config_path}")
+        else:
+            config_path = Path(__file__).parent.parent.parent / "config" / "lsf_config.json"
+            logger.info(f"Using default LSF config path: {config_path}")
     
     try:
-        logger.info(f"Loading LSF configuration from: {default_config_path}")
-        with open(default_config_path, 'r') as f:
+        logger.info(f"Loading LSF configuration from: {config_path}")
+        with open(config_path, 'r') as f:
             config = json.load(f)
-            logger.info(f"Successfully loaded LSF config from: {default_config_path}")
+            logger.info(f"Successfully loaded LSF config from: {config_path}")
             return config
     except (FileNotFoundError, json.JSONDecodeError):
-        logger.warning(f"LSF configuration file not found or invalid at {default_config_path}")
+        logger.warning(f"LSF configuration file not found or invalid at {config_path}")
         logger.warning("Using default LSF configuration values")
         return {
             "default_settings": {

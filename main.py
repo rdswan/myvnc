@@ -32,11 +32,28 @@ def parse_args():
     parser.add_argument('--auth', choices=['', 'Entra'], default=None, 
                       help='Authentication method: empty for none, "Entra" for Microsoft Entra ID')
     parser.add_argument('--logdir', help='Path to log directory (overrides config file)')
+    
+    # Add configuration file path arguments
+    parser.add_argument('--config_dir', help='Path to config directory (env var: MYVNC_CONFIG_DIR)')
+    parser.add_argument('--server_config_file', help='Path to server config file (env var: MYVNC_SERVER_CONFIG_FILE)')
+    parser.add_argument('--vnc_config_file', help='Path to VNC config file (env var: MYVNC_VNC_CONFIG_FILE)')
+    parser.add_argument('--lsf_config_file', help='Path to LSF config file (env var: MYVNC_LSF_CONFIG_FILE)')
+    
     return parser.parse_args()
 
 if __name__ == "__main__":
     # Parse command line arguments
     args = parse_args()
+    
+    # Set environment variables from command-line arguments if provided
+    if args.config_dir:
+        os.environ["MYVNC_CONFIG_DIR"] = args.config_dir
+    if args.server_config_file:
+        os.environ["MYVNC_SERVER_CONFIG_FILE"] = args.server_config_file
+    if args.vnc_config_file:
+        os.environ["MYVNC_VNC_CONFIG_FILE"] = args.vnc_config_file
+    if args.lsf_config_file:
+        os.environ["MYVNC_LSF_CONFIG_FILE"] = args.lsf_config_file
     
     # Load configuration
     config = load_server_config()

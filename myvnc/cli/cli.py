@@ -211,54 +211,69 @@ def start_server(args):
         sys.exit(1)
 
 def main():
-    """Main CLI entrypoint"""
-    parser = argparse.ArgumentParser(description="MyVNC Manager CLI")
-    subparsers = parser.add_subparsers(dest="command", help="Command to run")
+    """Main entry point for the CLI"""
+    parser = argparse.ArgumentParser(description="MyVNC CLI")
+    
+    # Server-wide configuration
+    parser.add_argument('--debug', action='store_true', help='Enable debug logging')
+    
+    # Configuration paths
+    parser.add_argument('--config_dir', help='Path to config directory (env var: MYVNC_CONFIG_DIR)')
+    parser.add_argument('--server_config_file', help='Path to server config file (env var: MYVNC_SERVER_CONFIG_FILE)')
+    parser.add_argument('--vnc_config_file', help='Path to VNC config file (env var: MYVNC_VNC_CONFIG_FILE)')
+    parser.add_argument('--lsf_config_file', help='Path to LSF config file (env var: MYVNC_LSF_CONFIG_FILE)')
+    
+    # Subparsers for commands
+    subparsers = parser.add_subparsers(dest='command', help='Command to execute')
     
     # List command
-    list_parser = subparsers.add_parser("list", help="List active VNC sessions")
+    list_parser = subparsers.add_parser('list', help='List active VNC sessions')
     
     # Create command
-    create_parser = subparsers.add_parser("create", help="Create a new VNC session")
-    create_parser.add_argument("--name", help="Name for the VNC session")
-    create_parser.add_argument("--resolution", help="Resolution for the VNC session")
-    create_parser.add_argument("--window-manager", help="Window manager for the VNC session")
-    create_parser.add_argument("--color-depth", type=int, help="Color depth for the VNC session")
-    create_parser.add_argument("--site", help="Site for the VNC session")
-    create_parser.add_argument("--queue", help="LSF queue to use")
-    create_parser.add_argument("--cores", type=int, help="Number of cores to allocate")
-    create_parser.add_argument("--memory", type=int, help="Memory to allocate in GB")
-    create_parser.add_argument("--vncserver-path", help="Path to vncserver")
+    create_parser = subparsers.add_parser('create', help='Create a new VNC session')
+    create_parser.add_argument('--name', help='Session name')
+    create_parser.add_argument('--resolution', help='Display resolution (e.g., 1920x1080)')
+    create_parser.add_argument('--window_manager', '--wm', dest='window_manager', help='Window manager (e.g., gnome, kde)')
+    create_parser.add_argument('--color_depth', type=int, help='Color depth (default: 24)')
+    create_parser.add_argument('--site', help='Site location (e.g., Toronto, Austin)')
+    create_parser.add_argument('--vncserver_path', help='Path to vncserver executable')
+    create_parser.add_argument('--queue', help='LSF queue')
+    create_parser.add_argument('--cores', type=int, help='Number of CPU cores')
+    create_parser.add_argument('--memory', type=int, help='Memory in GB')
     
     # Kill command
-    kill_parser = subparsers.add_parser("kill", help="Kill a VNC session")
-    kill_parser.add_argument("job_id", help="Job ID to kill")
-    
-    # Server command
-    server_parser = subparsers.add_parser("server", help="Start the web server")
-    server_parser.add_argument("--host", help="Host to bind to")
-    server_parser.add_argument("--port", type=int, help="Port to bind to")
-    server_parser.add_argument("--config", help="Path to custom config file")
-    
-    # Info command
-    info_parser = subparsers.add_parser("info", help="Display server information")
+    kill_parser = subparsers.add_parser('kill', help='Kill a VNC session')
+    kill_parser.add_argument('job_id', help='Job ID to kill')
     
     # Parse arguments
     args = parser.parse_args()
     
-    # Run appropriate command
-    if args.command == "list":
+    # Set environment variables from command-line arguments if provided
+    if args.config_dir:
+        os.environ["MYVNC_CONFIG_DIR"] = args.config_dir
+    if args.server_config_file:
+        os.environ["MYVNC_SERVER_CONFIG_FILE"] = args.server_config_file
+    if args.vnc_config_file:
+        os.environ["MYVNC_VNC_CONFIG_FILE"] = args.vnc_config_file
+    if args.lsf_config_file:
+        os.environ["MYVNC_LSF_CONFIG_FILE"] = args.lsf_config_file
+    
+    # Configure logging
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+    
+    # Execute command
+    if args.command == 'list':
         list_vnc_sessions()
-    elif args.command == "create":
+    elif args.command == 'create':
         create_vnc_session(args)
-    elif args.command == "kill":
+    elif args.command == 'kill':
         kill_vnc_session(args)
-    elif args.command == "server":
-        start_server(args)
-    elif args.command == "info":
-        server_info()
     else:
         parser.print_help()
+        sys.exit(1)
 
 if __name__ == "__main__":
     main() 

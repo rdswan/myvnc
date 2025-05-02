@@ -610,14 +610,61 @@ def server_status():
     logger.info(f"  Current log: {server_log_file if server_log_file else 'Unknown'}")
     logger.info(f"  Uptime: {uptime}")
 
+def parse_args():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(description="MyVNC Server Management")
+    
+    # Add configuration file path arguments
+    parser.add_argument('--config_dir', help='Path to config directory (env var: MYVNC_CONFIG_DIR)')
+    parser.add_argument('--server_config_file', help='Path to server config file (env var: MYVNC_SERVER_CONFIG_FILE)')
+    parser.add_argument('--vnc_config_file', help='Path to VNC config file (env var: MYVNC_VNC_CONFIG_FILE)')
+    parser.add_argument('--lsf_config_file', help='Path to LSF config file (env var: MYVNC_LSF_CONFIG_FILE)')
+    
+    # Commands
+    subparsers = parser.add_subparsers(dest='command', help='Server management commands')
+    
+    # Start command
+    start_parser = subparsers.add_parser('start', help='Start the MyVNC server')
+    start_parser.add_argument('--host', help='Host to bind to (overrides config file)')
+    start_parser.add_argument('--port', type=int, help='Port to bind to (overrides config file)')
+    start_parser.add_argument('--auth', choices=['', 'Entra'], default=None, 
+                          help='Authentication method: empty for none, "Entra" for Microsoft Entra ID')
+    start_parser.add_argument('--nohup', action='store_true', help='Run server in background with nohup')
+    
+    # Stop command
+    subparsers.add_parser('stop', help='Stop the MyVNC server')
+    
+    # Restart command
+    restart_parser = subparsers.add_parser('restart', help='Restart the MyVNC server')
+    restart_parser.add_argument('--host', help='Host to bind to (overrides config file)')
+    restart_parser.add_argument('--port', type=int, help='Port to bind to (overrides config file)')
+    restart_parser.add_argument('--auth', choices=['', 'Entra'], default=None, 
+                            help='Authentication method: empty for none, "Entra" for Microsoft Entra ID')
+    restart_parser.add_argument('--nohup', action='store_true', help='Run server in background with nohup')
+    
+    # Status command
+    subparsers.add_parser('status', help='Check the status of the MyVNC server')
+    
+    return parser.parse_args()
+
 def main():
-    """Main entry point"""
-    parser = argparse.ArgumentParser(description="MyVNC Server Management Script")
-    parser.add_argument('command', choices=['start', 'stop', 'restart', 'status'],
-                      help='Command to execute')
+    """Main entry point for the script"""
+    args = parse_args()
     
-    args = parser.parse_args()
+    # Set environment variables from command-line arguments if provided
+    if args.config_dir:
+        os.environ["MYVNC_CONFIG_DIR"] = args.config_dir
+    if args.server_config_file:
+        os.environ["MYVNC_SERVER_CONFIG_FILE"] = args.server_config_file
+    if args.vnc_config_file:
+        os.environ["MYVNC_VNC_CONFIG_FILE"] = args.vnc_config_file
+    if args.lsf_config_file:
+        os.environ["MYVNC_LSF_CONFIG_FILE"] = args.lsf_config_file
     
+    # Set up logging
+    global logger
+    logger = setup_logging_for_manage()
+
     if args.command == 'start':
         start_server()
     elif args.command == 'stop':
