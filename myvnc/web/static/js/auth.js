@@ -35,6 +35,17 @@ document.addEventListener('DOMContentLoaded', function() {
     if (logoutBtn) {
         logoutBtn.addEventListener('click', handleLogout);
     }
+    
+    // Close dropdowns when clicking outside
+    document.addEventListener('click', function(e) {
+        const dropdowns = document.getElementsByClassName('dropdown-content');
+        for (let i = 0; i < dropdowns.length; i++) {
+            const openDropdown = dropdowns[i];
+            if (openDropdown.classList.contains('show')) {
+                openDropdown.classList.remove('show');
+            }
+        }
+    });
 });
 
 /**
@@ -152,6 +163,10 @@ function updateUserInfo(userData) {
         const nameSpan = document.createElement('div');
         nameSpan.className = 'user-name';
         nameSpan.innerHTML = `${displayName} <i class="fas fa-chevron-down"></i>`;
+        nameSpan.addEventListener('click', function(e) {
+            e.stopPropagation();
+            dropdownContent.classList.toggle('show');
+        });
         userDropdown.appendChild(nameSpan);
         
         // Create dropdown content
