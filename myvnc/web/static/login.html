@@ -3,13 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tenstorrent VNC Manager - Login</title>
+    <title>MyVNC - Login</title>
     <link rel="stylesheet" href="css/styles.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@300;500;700&display=swap" rel="stylesheet">
     <style>
+        .user-info {
+            display: flex;
+            align-items: center;
+            margin-left: auto;
+            gap: 1rem;
+            color: white;
+        }
+        
+        .user-name {
+            font-weight: 500;
+        }
+        
+        .button.small {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.8rem;
+        }
+        
         .login-container {
             display: flex;
             flex-direction: column;
@@ -17,56 +34,75 @@
             justify-content: center;
             min-height: calc(100vh - 150px); /* Account for header and footer */
             padding: 20px;
+            margin-top: 30px; /* Added margin to create space between header and login box */
+            position: relative; /* Ensure proper stacking context */
+            z-index: 1; /* Make sure the login container is above other elements except the header */
         }
         
         .login-card {
             background-color: white;
             border-radius: var(--border-radius);
-            box-shadow: var(--shadow);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.08);
             width: 100%;
             max-width: 400px;
             padding: 2rem;
+            transition: box-shadow 0.3s ease;
+        }
+        
+        .login-card:hover {
+            box-shadow: 0 15px 30px rgba(120, 104, 176, 0.1);
         }
         
         .login-logo {
             text-align: center;
             margin-bottom: 1.5rem;
-            font-size: 1.8rem;
+            font-size: 2.2rem;
             color: var(--primary-color);
         }
         
         .login-title {
             text-align: center;
-            margin-bottom: 1.5rem;
-            font-size: 1.5rem;
+            margin-bottom: 1.8rem;
+            font-size: 1.6rem;
             color: var(--primary-color);
+            font-weight: 600;
         }
         
         .login-form {
             display: flex;
             flex-direction: column;
-            gap: 1rem;
+            gap: 1.2rem;
         }
         
         .login-error {
             background-color: rgba(240, 79, 94, 0.1);
             color: var(--danger-color);
-            padding: 0.75rem;
+            padding: 0.9rem;
             border-radius: var(--border-radius);
-            margin-bottom: 1rem;
+            margin-bottom: 1.2rem;
             display: none;
+            font-size: 0.95rem;
+            border-left: 3px solid var(--danger-color);
         }
         
         .login-form button {
-            margin-top: 1rem;
+            margin-top: 1.2rem;
+            padding: 0.9rem;
+            font-size: 1rem;
+            transition: background-color 0.2s ease;
+        }
+        
+        .login-form button:hover {
+            background-color: var(--primary-dark);
         }
         
         .login-divider {
             display: flex;
             align-items: center;
             text-align: center;
-            margin: 1.5rem 0;
-            color: var(--text-secondary);
+            margin: 1.8rem 0;
+            color: var(--text-light);
+            font-size: 0.9rem;
         }
         
         .login-divider::before, .login-divider::after {
@@ -76,17 +112,17 @@
         }
         
         .login-divider::before {
-            margin-right: 0.5rem;
+            margin-right: 0.8rem;
         }
         
         .login-divider::after {
-            margin-left: 0.5rem;
+            margin-left: 0.8rem;
         }
         
         .sso-button {
-            display: block;
+            display: flex;
             width: 100%;
-            padding: 0.75rem;
+            padding: 0.9rem;
             border-radius: var(--border-radius);
             background-color: #0078d4;
             color: white;
@@ -94,24 +130,89 @@
             font-weight: 500;
             cursor: pointer;
             border: none;
-            transition: background-color 0.3s;
+            transition: all 0.3s ease;
             margin-top: 1rem;
             text-decoration: none;
+            justify-content: center;
+            align-items: center;
         }
         
         .sso-button:hover {
             background-color: #0066b3;
+            box-shadow: 0 4px 8px rgba(0, 120, 212, 0.25);
         }
         
         .sso-button i {
-            margin-right: 0.5rem;
+            margin-right: 0.7rem;
+            font-size: 1.1rem;
+        }
+        
+        .input-with-icon {
+            position: relative;
+            width: 100%;
+        }
+        
+        .input-with-icon:focus-within {
+            /* Remove the transform effect that causes movement */
+        }
+        
+        .input-with-icon .icon-left {
+            position: absolute;
+            left: 0.85rem;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--primary-color);
+            font-size: 1rem;
+            transition: all 0.3s ease;
+        }
+        
+        .input-with-icon input {
+            width: 100%;
+            box-sizing: border-box;
+            height: 3rem;
+            font-size: 1rem;
+            padding-right: 1rem;
+        }
+        
+        .input-with-icon input:focus + .icon-left {
+            color: var(--primary-dark);
+        }
+        
+        .button.primary {
+            background-color: var(--primary-color);
+            color: white;
+            padding: 0.9rem;
+            font-size: 1rem;
+            font-weight: 500;
+            border-radius: var(--border-radius);
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 4px rgba(120, 104, 176, 0.2);
+        }
+        
+        .button.primary:hover {
+            background-color: var(--primary-dark);
+            box-shadow: 0 4px 8px rgba(120, 104, 176, 0.3);
+        }
+        
+        .login-form .form-group input {
+            width: 100%;
+            height: 3rem;
+            box-sizing: border-box;
+            padding: 0.75rem 1rem 0.75rem 2.5rem;
+            font-size: 1rem;
+            line-height: 1.5;
         }
     </style>
 </head>
 <body>
     <header class="header">
         <div class="header-content">
-            <h1 class="app-title"><i class="fas fa-desktop"></i> VNC Manager</h1>
+            <div class="logo-container">
+                <a href="https://tenstorrent.com/" target="_blank" title="Visit Tenstorrent.com">
+                    <img src="img/tt-logo.png" alt="Tenstorrent Logo" class="tt-logo">
+                </a>
+                <h1 class="app-title">MyVNC</h1>
+            </div>
         </div>
     </header>
     
@@ -148,9 +249,9 @@
                 </button>
             </form>
             
-            <div class="login-divider">OR</div>
+            <div class="login-divider" id="login-divider">OR</div>
             
-            <a href="/auth/entra" class="sso-button">
+            <a href="/auth/entra" class="sso-button" id="entra-sso-button">
                 <i class="fab fa-microsoft"></i> Sign in with Microsoft Entra ID
             </a>
         </div>
@@ -164,6 +265,8 @@
         document.addEventListener('DOMContentLoaded', function() {
             const loginForm = document.getElementById('login-form');
             const errorMessage = document.getElementById('login-error');
+            const loginDivider = document.getElementById('login-divider');
+            const entraSsoButton = document.getElementById('entra-sso-button');
             
             // Check for error parameter in URL
             const urlParams = new URLSearchParams(window.location.search);
@@ -171,6 +274,130 @@
                 errorMessage.textContent = decodeURIComponent(urlParams.get('error'));
                 errorMessage.style.display = 'block';
             }
+            
+            function hideError() {
+                errorMessage.style.display = 'none';
+            }
+            
+            // Show error message with option to retry
+            function showError(message, canRetry = true) {
+                errorMessage.innerHTML = message;
+                
+                if (canRetry) {
+                    errorMessage.innerHTML += '<br><a href="#" id="retry-config" style="color: #fff; text-decoration: underline; margin-top: 5px; display: inline-block;">Click here to retry</a>';
+                    // Add event listener after DOM update
+                    setTimeout(() => {
+                        const retryLink = document.getElementById('retry-config');
+                        if (retryLink) {
+                            retryLink.addEventListener('click', function(e) {
+                                e.preventDefault();
+                                hideError();
+                                fetchServerConfig();
+                            });
+                        }
+                    }, 0);
+                }
+                
+                errorMessage.style.display = 'block';
+            }
+            
+            // Handle server config response
+            function handleConfigResponse(config) {
+                console.log('Server config loaded successfully:', config);
+                const authMethod = (config.authentication || '').toLowerCase();
+                
+                // Adjust the login UI based on the authentication method
+                if (authMethod === 'ldap') {
+                    // For LDAP, show username/password login but hide SSO option
+                    loginDivider.style.display = 'none';
+                    entraSsoButton.style.display = 'none';
+                    
+                    // Update the login form title to indicate LDAP
+                    document.querySelector('.login-title').textContent = 'Login with LDAP';
+                    
+                    // Check if LDAP is available
+                    if (config.hasOwnProperty('ldap_available') && !config.ldap_available) {
+                        showError('LDAP authentication is configured but the LDAP module is not available on the server.', false);
+                    } else {
+                        hideError();
+                    }
+                } else if (authMethod === 'entra') {
+                    // For Entra, show both login options
+                    loginDivider.style.display = 'flex';
+                    entraSsoButton.style.display = 'block';
+                    
+                    // Update the login form title
+                    document.querySelector('.login-title').textContent = 'Login to VNC Manager';
+                    
+                    // Check if MSAL is available
+                    if (config.hasOwnProperty('msal_available') && !config.msal_available) {
+                        showError('Microsoft Entra ID authentication is configured but the MSAL module is not available on the server.', false);
+                    } else {
+                        hideError();
+                    }
+                } else {
+                    // If no authentication is configured, show a message
+                    document.querySelector('.login-title').textContent = 'Authentication Error';
+                    showError('Authentication is not properly configured on the server.', false);
+                    loginForm.style.display = 'none';
+                    loginDivider.style.display = 'none';
+                    entraSsoButton.style.display = 'none';
+                }
+                
+                // Log the configuration for debugging
+                console.log('Server config:', config);
+            }
+            
+            // Check server configuration to determine authentication methods
+            function fetchServerConfig(attempt = 1) {
+                const maxAttempts = 3;
+                
+                fetch('/api/server/config', {
+                    // Don't follow redirects automatically
+                    redirect: 'manual'
+                })
+                    .then(response => {
+                        // Handle redirects manually - if we're redirected to /login, use default config
+                        if (response.type === 'opaqueredirect' || response.status === 302) {
+                            console.log('Server redirected to login page, using default configuration');
+                            return {
+                                authentication: 'entra',
+                                auth_enabled: true,
+                                msal_available: true,
+                                note: 'This is fallback data because the API required authentication'
+                            };
+                        }
+                        
+                        if (!response.ok) {
+                            throw new Error(`Server error: ${response.status}`);
+                        }
+                        
+                        return response.json();
+                    })
+                    .then(config => handleConfigResponse(config))
+                    .catch(error => {
+                        console.error(`Error fetching server config (attempt ${attempt}/${maxAttempts}):`, error);
+                        
+                        if (attempt < maxAttempts) {
+                            // Try again after a delay
+                            console.log(`Retrying in ${attempt * 1000}ms...`);
+                            setTimeout(() => fetchServerConfig(attempt + 1), attempt * 1000);
+                        } else {
+                            // Show a more helpful error message after all retries fail
+                            if (error.message && error.message.includes('Server error')) {
+                                showError(`Error connecting to server (${error.message}). Please try again later or contact your administrator.`);
+                            } else {
+                                showError('Error connecting to server. Please try again later.');
+                            }
+                            
+                            // Keep the login form visible so users can still try to log in
+                            document.querySelector('.login-title').textContent = 'Login to VNC Manager';
+                        }
+                    });
+            }
+            
+            // Start the config fetch process
+            fetchServerConfig();
             
             loginForm.addEventListener('submit', async function(event) {
                 event.preventDefault();

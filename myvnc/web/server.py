@@ -34,7 +34,31 @@ from myvnc.utils.auth_manager import AuthManager
 from myvnc.utils.lsf_manager import LSFManager
 from myvnc.utils.config_manager import ConfigManager
 from myvnc.utils.vnc_manager import VNCManager
+from myvnc.utils.db_manager import DatabaseManager
 from myvnc.utils.log_manager import setup_logging, get_logger, get_current_log_file
+
+def setup_logger():
+    """Set up detailed logging configuration"""
+    # Create logger
+    logger = logging.getLogger('myvnc')
+    logger.setLevel(logging.DEBUG)
+    
+    # Create console handler with a higher log level
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+    
+    # Create formatter
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    
+    # Add formatter to handlers
+    console_handler.setFormatter(formatter)
+    
+    # Add handlers to the logger
+    logger.addHandler(console_handler)
+    
+    return logger
+
+logger = setup_logger()
 
 def get_fully_qualified_hostname(host):
     """Get the fully qualified domain name for a host"""
@@ -50,9 +74,7 @@ def get_fully_qualified_hostname(host):
             if fqdn != 'localhost' and fqdn != '127.0.0.1':
                 return fqdn
         except Exception as e:
-            logger = get_logger()
-            if logger:
-                logger.warning(f"Could not get FQDN: {e}")
+            logger.warning(f"Could not get FQDN: {e}")
     elif host.count('.') == 0:  # If host is a simple hostname without domain
         try:
             # Try to get full domain by running hostname -f command
@@ -74,9 +96,7 @@ def get_fully_qualified_hostname(host):
                 if domain:
                     return f"{host}.{domain}"
         except Exception as e:
-            logger = get_logger()
-            if logger:
-                logger.warning(f"Could not get FQDN for {host}: {e}")
+            logger.warning(f"Could not get FQDN for {host}: {e}")
     
     # Return the original host if no FQDN could be determined
     return host
@@ -111,6 +131,14 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         self.lsf_manager = LSFManager()
         self.auth_manager = AuthManager()
         self.vnc_manager = VNCManager()
+        
+        # Get data directory from configuration
+        server_config = load_server_config()
+        data_dir = server_config.get("datadir", "/localdev/myvnc/data")
+        
+        # Initialize database manager with the correct data directory
+        self.db_manager = DatabaseManager(data_dir=data_dir)
+        
         self.directory = os.path.join(os.path.dirname(__file__), "static")
         self.logger = get_logger()
         
@@ -121,40 +149,139 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         
         super().__init__(*args, **kwargs)
     
+    def is_auth_enabled(self):
+        """Check if authentication is enabled and available"""
+        auth_method = self.authentication_enabled.lower() if self.authentication_enabled else ""
+        
+        # Check if authentication method is configured
+        if auth_method not in ["entra", "ldap"]:
+            self.logger.debug(f"Authentication disabled: method '{auth_method}' not configured")
+            return False
+            
+        # For LDAP, check if LDAP module is available
+        if auth_method == "ldap":
+            try:
+                import ldap3
+                self.logger.debug("LDAP authentication: module available")
+                return True
+            except ImportError:
+                self.logger.warning("LDAP authentication configured but ldap3 module not available")
+                return False
+        
+        # For Entra, check if MSAL module is available
+        if auth_method == "entra":
+            try:
+                import msal
+                self.logger.debug("Entra authentication: MSAL module available")
+                return True
+            except ImportError:
+                self.logger.warning("Entra authentication configured but msal module not available")
+                return False
+                
+        # If we get here, the configured authentication method is invalid
+        self.logger.warning(f"Unknown authentication method configured: {auth_method}")
+        return False
+    
     def do_GET(self):
         """Handle GET requests"""
         # Parse URL path
         parsed_path = urlparse(self.path)
         path = parsed_path.path
         
-        # Log the request
+        # Log the request with more details
         client_address = self.client_address[0] if hasattr(self, 'client_address') and self.client_address else 'unknown'
         self.logger.info(f"GET request from {client_address}: {path}")
+        self.logger.debug(f"Request headers: {self.headers}")
+        self.logger.debug(f"Cookie header: {self.headers.get('Cookie', 'None')}")
         
-        # Only check authentication if it's enabled
-        if self.authentication_enabled and self.authentication_enabled.lower() == "entra":
-            # Check authentication for all paths except login page and assets
-            if not path.startswith("/login") and not path.startswith("/auth/") and not self._is_public_asset(path):
-                is_authenticated, _ = self.check_auth()
-                if not is_authenticated:
-                    # Redirect to login page
-                    self.logger.info(f"Unauthenticated request to {path}, redirecting to login")
-                    self.send_response(302)
-                    self.send_header("Location", "/login")
-                    self.end_headers()
-                    return
+        # Check if authentication is enabled and available
+        auth_enabled = self.is_auth_enabled()
+        self.logger.debug(f"Authentication enabled: {auth_enabled}")
         
         # Special case: redirect /login to / if authentication is disabled
-        if path == "/login" and (not self.authentication_enabled or self.authentication_enabled.lower() != "entra"):
+        if path == "/login" and not auth_enabled:
+            self.logger.info(f"Login page requested but authentication is disabled, redirecting to main page")
             self.send_response(302)
             self.send_header("Location", "/")
             self.end_headers()
             return
-            
+        
+        # Server config endpoint should always be accessible without authentication
+        # This is needed for the login page and for system status checks
+        if path == "/api/server/config" or path == "/api/config/server":
+            self.logger.info(f"Allowing access to server config without authentication")
+            self.handle_server_config()
+            return
+        
+        # Allow access to login error page without authentication
+        if path == "/login_error" or path == "/login_error.html":
+            self.logger.info(f"Serving login error page")
+            self.serve_file("login_error.html")
+            return
+        
+        # Only check authentication if it's enabled
+        if auth_enabled:
+            # Check authentication for all paths except login page and assets
+            if not path.startswith("/login") and not path.startswith("/auth/") and not self._is_public_asset(path):
+                session_id = self.get_session_cookie()
+                if not session_id:
+                    self.logger.warning(f"No session cookie found for request to {path}, redirecting to login")
+                    self.send_response(302)
+                    # Use not_authenticated error instead of session_expired for initial load
+                    self.send_header("Location", "/login?error=not_authenticated")
+                    self.end_headers()
+                    return
+                
+                success, message, session = self.auth_manager.validate_session(session_id)
+                if not success:
+                    self.logger.warning(f"Invalid session for request to {path}: {message}, redirecting to login")
+                    self.send_response(302)
+                    self.send_header("Location", "/login?error=session_expired")
+                    self.end_headers()
+                    return
+                
+                self.logger.info(f"Authenticated request from {session.get('username', 'unknown')} to {path}")
+            else:
+                self.logger.debug(f"Skipping authentication check for {path} (public path)")
+        
         # Handle specific paths
         if path == "/":
+            # Check for session ID in query parameters (fallback for cookie issues)
+            query_params = parse_qs(parsed_path.query)
+            direct_session_id = query_params.get('sid', [''])[0]
+            
+            if direct_session_id:
+                self.logger.info(f"Found direct session ID in URL, setting cookie")
+                
+                # Check if the session is valid before setting cookie
+                success, message, session = self.auth_manager.validate_session(direct_session_id)
+                if success:
+                    # Set the session cookie directly
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html")
+                    cookie = f"session_id={direct_session_id}; Path=/; Max-Age={self.auth_manager.session_expiry}"
+                    username = session.get('username', 'user')
+                    username_cookie = f"username={username}; Path=/; Max-Age={self.auth_manager.session_expiry}"
+                    self.send_header("Set-Cookie", cookie)
+                    self.send_header("Set-Cookie", username_cookie)
+                    self.end_headers()
+                    
+                    # Read and serve the index.html file
+                    with open(os.path.join(self.directory, "index.html"), 'rb') as f:
+                        content = f.read()
+                    self.wfile.write(content)
+                    return
+                else:
+                    self.logger.warning(f"Direct session ID is invalid: {message}")
+                    # If session ID is invalid, redirect to login page
+                    self.send_response(302)
+                    self.send_header("Location", "/login?error=invalid_session")
+                    self.end_headers()
+                    return
+            
+            # Normal handling
             self.serve_file("index.html")
-        elif path == "/login" and self.authentication_enabled and self.authentication_enabled.lower() == "entra":
+        elif path == "/login" and auth_enabled:
             self.serve_file("login.html")
         elif path == "/session" or path == "/api/auth/session":
             self.handle_session()
@@ -162,8 +289,6 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.handle_vnc_sessions()
         elif path == "/api/lsf/config" or path == "/api/config/lsf":
             self.handle_lsf_config()
-        elif path == "/api/server/config" or path == "/api/config/server":
-            self.handle_server_config()
         elif path == "/api/config/vnc":
             self.handle_vnc_config()
         elif path == "/api/debug":
@@ -172,10 +297,15 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.handle_debug_commands()
         elif path == "/api/debug/environment":
             self.handle_debug_environment()
-        elif path == "/auth/entra" and self.authentication_enabled and self.authentication_enabled.lower() == "entra":
+        elif path == "/auth/entra" and auth_enabled and self.authentication_enabled.lower() == "entra":
             self.handle_auth_entra()
-        elif path == "/auth/callback" and self.authentication_enabled and self.authentication_enabled.lower() == "entra":
+        elif path == "/auth/callback" and auth_enabled and self.authentication_enabled.lower() == "entra":
             self.handle_auth_callback()
+        elif path == "/api/auth/ldap/diagnose" and auth_enabled and self.authentication_enabled.lower() == "ldap":
+            self.ldap_diagnostics()
+        # New User Settings API endpoint
+        elif path == "/api/user/settings":
+            self.handle_user_settings()
         else:
             # Try to serve static file
             super().do_GET()
@@ -183,14 +313,30 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
     def do_POST(self):
         """Handle POST requests"""
         # Parse URL path
-        path = urlparse(self.path).path
+        parsed_path = urlparse(self.path)
+        path = parsed_path.path
         
         # Log the request
         client_address = self.client_address[0] if hasattr(self, 'client_address') and self.client_address else 'unknown'
         self.logger.info(f"POST request from {client_address}: {path}")
         
+        # Special handling for POST to root (/) - this is our login redirect handler
+        if path == "/":
+            self.logger.info("Handling login redirect to main page")
+            # Just serve the index page - cookies should already be set from login
+            self.serve_file("index.html")
+            return
+            
+        # Handle logout requests - always allow these without authentication checks
+        if path == "/api/logout" or path == "/api/auth/logout":
+            self.handle_logout()
+            return
+            
+        # Check if authentication is enabled and available
+        auth_enabled = self.is_auth_enabled()
+        
         # Only check authentication if it's enabled
-        if self.authentication_enabled and self.authentication_enabled.lower() == "entra":
+        if auth_enabled:
             # Allow login without authentication
             if path == "/api/auth/login" or path == "/api/login":
                 self.handle_login()
@@ -198,18 +344,13 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             
             # Check authentication for all other paths
             if not path.startswith("/auth/"):
-                is_authenticated, _ = self.check_auth()
-                if not is_authenticated:
+                auth_result = self.check_auth()
+                if not auth_result[0]:  # Using index since it returns (success, message, session)
                     self.send_json_response({
                         "success": False,
                         "message": "Authentication required"
                     }, 401)
                     return
-            
-            # Handle specific authentication paths
-            if path == "/api/logout" or path == "/api/auth/logout":
-                self.handle_logout()
-                return
         
         # Handle generic paths (always accessible)
         if path == "/api/vnc/start" or path == "/api/vnc/create":
@@ -218,9 +359,11 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.handle_vnc_stop()
         elif path == "/api/vnc/copy":
             self.handle_vnc_copy()
+        # New User Settings API endpoint
+        elif path == "/api/user/settings":
+            self.handle_user_settings()
         else:
-            self.send_response(404)
-            self.end_headers()
+            self.send_error_response(f"Unknown endpoint: {path}", 404)
     
     def serve_file(self, filename):
         """Serve a file from the static directory"""
@@ -237,29 +380,85 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.logger.error(f"Error serving file {filename}: {str(e)}")
             self.send_error(500)
     
-    def check_auth(self):
-        """Check if user is authenticated"""
-        session_id = self.get_session_cookie()
-        if not session_id:
-            return False, None
-        
-        success, message, session = self.auth_manager.validate_session(session_id)
-        if not success:
-            return False, None
-        
-        return True, session
-    
     def get_session_cookie(self):
         """Get session cookie from request"""
         cookies = {}
         if "Cookie" in self.headers:
-            for cookie in self.headers["Cookie"].split(";"):
-                try:
-                    name, value = cookie.strip().split("=", 1)
-                    cookies[name] = value
-                except ValueError:
-                    pass
-        return cookies.get("session_id")
+            cookie_header = self.headers["Cookie"]
+            self.logger.debug(f"Found Cookie header: {cookie_header}")
+            
+            # Try to parse cookies properly
+            try:
+                # First try to parse session_id using regex directly - more reliable
+                import re
+                session_match = re.search(r'(?:^|;)\s*session_id=([^;]+)', cookie_header)
+                if session_match:
+                    session_id = session_match.group(1)
+                    self.logger.debug(f"Extracted session_id directly: {session_id[:8] if len(session_id) > 8 else session_id}")
+                    return session_id
+                
+                # If direct extraction failed, try standard parsing
+                for cookie in cookie_header.split(";"):
+                    try:
+                        if "=" in cookie:
+                            name, value = cookie.strip().split("=", 1)
+                            name = name.strip()
+                            # Only store cookies we care about to avoid memory issues
+                            if name in ["session_id", "username"]:
+                                cookies[name] = value
+                                if name == "session_id":
+                                    self.logger.debug(f"Parsed session_id cookie: {value[:8] if len(value) > 8 else value}")
+                    except ValueError:
+                        self.logger.warning(f"Malformed cookie: {cookie}")
+            except Exception as e:
+                self.logger.error(f"Error parsing cookies: {str(e)}")
+        else:
+            self.logger.debug("No Cookie header found in request")
+        
+        session_id = cookies.get("session_id")
+        if session_id:
+            self.logger.debug(f"Session ID from cookie: {session_id[:8]}...")
+        else:
+            self.logger.debug("No session_id cookie found")
+        return session_id
+    
+    def check_auth(self):
+        """Check if user is authenticated using session cookie"""
+        # Check for session cookie
+        session_id = self.get_session_cookie()
+        
+        # More detailed logging to diagnose cookie issues
+        if not session_id:
+            self.logger.warning("No session cookie found in request")
+            cookie_header = self.headers.get('Cookie', 'None')
+            self.logger.warning(f"Cookie header: {cookie_header}")
+            return False, "No session cookie found", None
+        
+        # Debug the session ID
+        if isinstance(session_id, str) and len(session_id) > 8:
+            self.logger.debug(f"Validating session ID: {session_id[:8]}...")
+        else:
+            self.logger.debug(f"Validating session ID: {session_id}")
+        
+        # Check all available cookies for debugging
+        cookie_header = self.headers.get('Cookie', '')
+        all_cookies = []
+        for cookie in cookie_header.split(';'):
+            if '=' in cookie:
+                name, value = cookie.strip().split('=', 1)
+                all_cookies.append(f"{name}={value[:8] if len(value) > 8 else value}")
+        
+        self.logger.debug(f"All cookies in request: {all_cookies}")
+        
+        # Validate session with auth manager
+        success, message, session = self.auth_manager.validate_session(session_id)
+        
+        if success:
+            self.logger.debug(f"Session valid for user: {session.get('username', 'unknown')}")
+            return True, message, session
+        else:
+            self.logger.warning(f"Session validation failed: {message}")
+            return False, message, None
     
     def handle_login(self):
         """Handle login requests"""
@@ -273,23 +472,58 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             username = data.get("username", "")
             password = data.get("password", "")
             
+            # Log the login attempt (without password)
+            self.logger.info(f"Login attempt for user: {username}")
+            
             # Authenticate user
             success, message, session_id = self.auth_manager.authenticate(username, password)
             
             if success:
-                # Set session cookie
+                # Get hostname for cookie domain
+                host = self.headers.get("Host", "").split(":")[0]
+                self.logger.info(f"Login successful for {username}, setting cookie for host: {host}")
+                
+                # Set session cookie with detailed logging - safely handle slicing
+                if isinstance(session_id, str):
+                    session_preview = session_id[:8] if len(session_id) > 8 else session_id
+                    self.logger.debug(f"Setting session cookie: session_id={session_preview}..., Max-Age={self.auth_manager.session_expiry}")
+                else:
+                    self.logger.debug(f"Setting session cookie with non-string session_id type: {type(session_id)}")
+                
+                # Create browser-compatible session cookie without restrictive flags
+                cookie = f"session_id={session_id}; Path=/; Max-Age={self.auth_manager.session_expiry}"
+                username_cookie = f"username={username}; Path=/; Max-Age={self.auth_manager.session_expiry}"
+                self.logger.debug(f"Cookie being set: {cookie}")
+                
+                # Get the actual session to log expiry details
+                _, _, session = self.auth_manager.validate_session(session_id)
+                if session and 'expiry' in session:
+                    expiry_time = session['expiry']
+                    self.logger.info(f"Session expires at: {time.ctime(expiry_time)}")
+                
+                # Send response with cookies
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
-                self.send_header("Set-Cookie", f"session_id={session_id}; Path=/; HttpOnly; SameSite=Strict; Max-Age={self.auth_manager.session_expiry}")
+                self.send_header("Set-Cookie", cookie)
+                self.send_header("Set-Cookie", username_cookie)
                 self.end_headers()
                 
-                # Send success response
-                self.wfile.write(json.dumps({
+                # Send success response with session ID included
+                response_data = {
                     "success": True,
-                    "message": message
-                }).encode())
+                    "message": message,
+                    "session_id": session_id,  # Include session ID in response
+                    "username": username
+                }
+                self.wfile.write(json.dumps(response_data).encode())
+                # Log the response without causing errors on session_id slicing
+                if isinstance(session_id, str) and len(session_id) > 8:
+                    self.logger.info(f"Login response sent for user {username} with session {session_id[:8]}...")
+                else:
+                    self.logger.info(f"Login response sent for user {username}")
             else:
                 # Send error response
+                self.logger.warning(f"Login failed for user {username}: {message}")
                 self.send_json_response({
                     "success": False,
                     "message": message
@@ -297,6 +531,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 
         except Exception as e:
             # Send error response for any exceptions
+            self.logger.error(f"Login error: {str(e)}")
+            self.logger.error(traceback.format_exc())
             self.send_json_response({
                 "success": False,
                 "message": f"Login error: {str(e)}"
@@ -308,71 +544,113 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             # Get session ID from cookie
             session_id = self.get_session_cookie()
             
+            # Attempt to log out the user with auth manager
+            success = False
+            message = "No active session"
+            
             if session_id:
-                # Logout user
-                success, message = self.auth_manager.logout(session_id)
-                
-                # Send response
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Set-Cookie", "session_id=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0")
-                self.end_headers()
-                
-                self.wfile.write(json.dumps({
-                    "success": success,
-                    "message": message
-                }).encode())
-            else:
-                # No session to logout
-                self.send_json_response({
-                    "success": True,
-                    "message": "No active session"
-                })
+                try:
+                    # Try to logout actual session if exists
+                    success, message = self.auth_manager.logout(session_id)
+                except Exception as e:
+                    self.logger.warning(f"Error during logout process: {str(e)}")
+            
+            # Clear session cookie regardless of success
+            self.logger.info("Clearing session cookie")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            
+            # Set expired cookie to clear it from browser
+            self.send_header("Set-Cookie", "session_id=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:01 GMT")
+            self.end_headers()
+            
+            # Send success response
+            response_data = {
+                "success": True,  # Always report success to client
+                "message": message if success else "Logged out"
+            }
+            self.wfile.write(json.dumps(response_data).encode())
                 
         except Exception as e:
-            # Send error response for any exceptions
-            self.send_json_response({
-                "success": False,
-                "message": f"Logout error: {str(e)}"
-            }, 500)
+            # Log error but still try to clear cookie
+            self.logger.error(f"Logout error: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            
+            # Try to clear cookie even on error
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Set-Cookie", "session_id=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:01 GMT")
+            self.end_headers()
+            
+            # Send error message
+            self.wfile.write(json.dumps({
+                "success": True,  # Still report success to ensure client redirects
+                "message": "Logged out (with errors)"
+            }).encode())
     
     def handle_session(self):
         """Handle session validation requests"""
         try:
+            client_ip = self.client_address[0] if hasattr(self, 'client_address') else 'unknown'
+            self.logger.info(f"Session check from {client_ip}, headers: {self.headers.get('User-Agent', 'unknown agent')}")
+            self.logger.debug(f"Cookie header: {self.headers.get('Cookie', 'None')}")
+            
             # If authentication is disabled, return as authenticated with a generic user
-            if not self.authentication_enabled or self.authentication_enabled.lower() != "entra":
+            auth_method = self.authentication_enabled.lower() if self.authentication_enabled else ""
+            if not auth_method:
                 self.logger.info("Session check with authentication disabled, returning anonymous user")
                 self.send_json_response({
                     "authenticated": True,
                     "username": "anonymous",
                     "display_name": "Anonymous User",
                     "email": "",
-                    "groups": []
+                    "groups": [],
+                    "auth_method": ""
                 })
                 return
                 
             # Check if user is authenticated
-            is_authenticated, session = self.check_auth()
+            session_id = self.get_session_cookie()
+            if not session_id:
+                self.logger.warning("Session check failed: No session cookie found")
+                self.send_json_response({
+                    "authenticated": False,
+                    "message": "No session cookie found. Please log in."
+                }, 401)
+                return
             
-            if is_authenticated:
+            # Log session ID for tracking
+            self.logger.debug(f"Validating session ID: {session_id[:8] if isinstance(session_id, str) and len(session_id) > 8 else session_id}...")
+            
+            # Validate session
+            success, message, session = self.auth_manager.validate_session(session_id)
+            
+            if success and session:
                 # Send user data
-                self.logger.info(f"Session check: Authenticated user {session.get('username', '')}")
+                username = session.get('username', '')
+                display_name = session.get('display_name', username) or username  # Ensure display_name is not empty
+                
+                self.logger.info(f"Session check: Authenticated user {username}")
                 self.send_json_response({
                     "authenticated": True,
-                    "username": session.get("username", ""),
-                    "display_name": session.get("display_name", ""),
+                    "username": username,
+                    "display_name": display_name,
                     "email": session.get("email", ""),
-                    "groups": session.get("groups", [])
+                    "groups": session.get("groups", []),
+                    "auth_method": auth_method
                 })
             else:
                 # Send unauthenticated response
-                self.logger.info("Session check: Not authenticated")
+                self.logger.warning(f"Session check: Not authenticated - {message}")
                 self.send_json_response({
-                    "authenticated": False
+                    "authenticated": False,
+                    "message": message
                 }, 401)
                 
         except Exception as e:
             # Send error response for any exceptions
+            self.logger.error(f"Session error: {str(e)}")
+            self.logger.error(traceback.format_exc())
             self.send_json_response({
                 "authenticated": False,
                 "message": f"Session error: {str(e)}"
@@ -418,9 +696,9 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 success, message, session_id = self.auth_manager.handle_auth_code(code)
                 
                 if success:
-                    # Set session cookie and redirect to home page
+                    # Set session cookie and redirect to home page - use standard cookie without restrictive flags
                     self.send_response(302)
-                    self.send_header("Set-Cookie", f"session_id={session_id}; Path=/; HttpOnly; SameSite=Strict; Max-Age={self.auth_manager.session_expiry}")
+                    self.send_header("Set-Cookie", f"session_id={session_id}; Path=/; Max-Age={self.auth_manager.session_expiry}")
                     self.send_header("Location", "/")
                     self.end_headers()
                 else:
@@ -516,15 +794,38 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
     def handle_server_config(self):
         """Handle server configuration request"""
         try:
-            self.logger.info("Handling server configuration request")
-            # Return the server configuration (excluding sensitive information)
-            server_config = load_server_config()
-            # Remove any sensitive fields if needed
-            self.logger.debug(f"Sending server config: {server_config}")
-            self.send_json_response(server_config)
+            self.logger.debug("Starting handle_server_config method")
+            config = self.server_config.copy()
+            
+            # Add auth config status to the response
+            auth_method = config.get('authentication', '').lower()
+            auth_enabled = self.is_auth_enabled()
+            config['auth_enabled'] = auth_enabled
+            
+            # Add extra information for debugging
+            if not auth_enabled and auth_method in ['entra', 'ldap']:
+                # Authentication is configured but not available (missing modules)
+                if auth_method == 'ldap':
+                    try:
+                        import ldap3
+                        config['ldap_available'] = True
+                    except ImportError:
+                        config['ldap_available'] = False
+                        
+                if auth_method == 'entra':
+                    try:
+                        import msal
+                        config['msal_available'] = True
+                    except ImportError:
+                        config['msal_available'] = False
+            
+            self.logger.debug(f"Sending server config response: {config}")
+            self.send_json_response(config)
+            self.logger.debug("Finished sending server config response")
         except Exception as e:
-            self.logger.error(f"Error handling server config request: {str(e)}")
-            self.send_error_response(str(e))
+            self.logger.error(f"Error getting server config: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            self.send_error_response(f"Failed to get server configuration: {str(e)}")
     
     def handle_debug_commands(self):
         """Handle /debug/commands endpoint to display command history"""
@@ -614,20 +915,31 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
     def send_json_response(self, data, status=200):
         """Send JSON response to client"""
         self.logger.debug(f"Sending JSON response with status {status}")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
-        self.end_headers()
-        
-        # Log a brief summary of the data if it's large
-        if isinstance(data, list) and len(data) > 5:
-            self.logger.debug(f"Response data: list with {len(data)} items")
-        elif isinstance(data, dict) and len(data) > 10:
-            self.logger.debug(f"Response data: dictionary with {len(data)} keys")
-        else:
-            self.logger.debug(f"Response data: {data}")
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+            self.end_headers()
             
-        self.wfile.write(json.dumps(data).encode())
+            # Convert data to JSON string first to catch encoding errors
+            json_data = json.dumps(data)
+            self.logger.debug(f"JSON data length: {len(json_data)} bytes")
+            
+            # Log a brief summary of the data if it's large
+            if isinstance(data, list) and len(data) > 5:
+                self.logger.debug(f"Response data: list with {len(data)} items")
+            elif isinstance(data, dict) and len(data) > 10:
+                keys = list(data.keys())[:10]
+                self.logger.debug(f"Response data: dictionary with {len(data)} keys, first keys: {keys}")
+            else:
+                self.logger.debug(f"Response data: {data}")
+                
+            # Write the data to the response
+            self.wfile.write(json_data.encode())
+            self.logger.debug("JSON response sent successfully")
+        except Exception as e:
+            self.logger.error(f"Error in send_json_response: {str(e)}")
+            self.logger.error(traceback.format_exc())
     
     def send_error_response(self, message, status_code=500):
         """Send an error response"""
@@ -829,6 +1141,124 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 "message": error_msg
             }, 500)
 
+    def ldap_diagnostics(self):
+        """Run LDAP diagnostic tests and return results"""
+        try:
+            # Check if LDAP is the configured authentication method
+            if self.authentication_enabled.lower() != 'ldap':
+                return self.send_json_response({
+                    'success': False,
+                    'message': f'LDAP is not the configured authentication method. Current method: {self.authentication_enabled}'
+                }, 400)
+                
+            # Run the diagnostics
+            self.logger.info("Running LDAP diagnostics...")
+            results = self.auth_manager.ldap_manager.run_diagnostics()
+            
+            # Return the results
+            return self.send_json_response({
+                'success': True,
+                'results': results
+            })
+        except Exception as e:
+            self.logger.error(f"Error running LDAP diagnostics: {str(e)}")
+            return self.send_json_response({
+                'success': False,
+                'message': f'Error running LDAP diagnostics: {str(e)}'
+            }, 500)
+
+    def handle_user_settings(self):
+        """Handle GET and POST for user settings"""
+        # Check authentication if enabled
+        if self.is_auth_enabled():
+            is_authenticated, message, session = self.check_auth()
+            if not is_authenticated:
+                self.send_error_response("Authentication required", 401)
+                return
+            
+            # Get username from session
+            username = session.get("username", "unknown")
+        else:
+            # If authentication is disabled, use system username
+            username = os.environ.get("USER", "unknown")
+        
+        # Handle GET or POST
+        if self.command == "GET":
+            self.handle_get_user_settings(username)
+        elif self.command == "POST":
+            self.handle_post_user_settings(username)
+    
+    def handle_get_user_settings(self, username):
+        """Handle GET request for user settings"""
+        try:
+            # Get user settings from database
+            self.logger.info(f"Getting user settings for {username}")
+            settings = self.db_manager.get_user_settings(username)
+            
+            # Log the settings for debugging
+            self.logger.info(f"Retrieved settings for {username}: {json.dumps(settings)}")
+            
+            # Check specifically for VNC settings
+            if 'vnc_settings' in settings:
+                self.logger.info(f"VNC settings found: {json.dumps(settings['vnc_settings'])}")
+            else:
+                self.logger.warning(f"No VNC settings found for user {username}")
+            
+            # Send response
+            response = {
+                "success": True,
+                "settings": settings
+            }
+            
+            self.logger.info(f"Sending user settings response: {json.dumps(response)}")
+            self.send_json_response(response)
+            
+        except Exception as e:
+            self.logger.error(f"Error getting user settings: {str(e)}")
+            self.send_error_response(f"Error getting user settings: {str(e)}")
+    
+    def handle_post_user_settings(self, username):
+        """Handle POST request for user settings"""
+        try:
+            # Get content length
+            content_length = int(self.headers.get('Content-Length', 0))
+            
+            # Read and parse request body
+            post_data = self.rfile.read(content_length).decode('utf-8')
+            data = json.loads(post_data)
+            
+            # Validate settings
+            if not isinstance(data, dict) or "settings" not in data:
+                self.send_error_response("Invalid request: 'settings' field is required", 400)
+                return
+            
+            settings = data["settings"]
+            
+            # Validate settings structure
+            if not isinstance(settings, dict):
+                self.send_error_response("Invalid request: 'settings' must be an object", 400)
+                return
+            
+            # Save user settings
+            success = self.db_manager.save_user_settings(username, settings)
+            
+            if success:
+                # Send success response
+                response = {
+                    "success": True,
+                    "message": "Settings saved successfully"
+                }
+                self.send_json_response(response)
+            else:
+                self.send_error_response("Failed to save settings", 500)
+                
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Invalid JSON in request: {str(e)}")
+            self.send_error_response(f"Invalid JSON in request: {str(e)}", 400)
+        except Exception as e:
+            self.logger.error(f"Error saving user settings: {str(e)}")
+            self.send_error_response(f"Error saving user settings: {str(e)}", 500)
+
 def load_server_config():
     """Load server configuration from JSON file"""
     # Use only the default_server_config.json file
@@ -993,8 +1423,12 @@ def run_server(host=None, port=None, directory=None, config=None):
     logger.info(f"Using static directory: {directory}")
     
     # Ensure data directory exists
-    data_dir = Path(__file__).parent.parent / "data"
-    data_dir.mkdir(exist_ok=True)
+    data_dir = config.get("datadir", "myvnc/data")
+    
+    # Create the directory if it doesn't exist
+    if not os.path.exists(data_dir):
+        os.makedirs(data_dir, exist_ok=True)
+    
     logger.info(f"Ensuring data directory exists: {data_dir}")
     
     # Set serving directory
@@ -1031,6 +1465,7 @@ def run_server(host=None, port=None, directory=None, config=None):
         # Check for SSL certificate and key files in config
         ssl_cert = config.get("ssl_cert")
         ssl_key = config.get("ssl_key")
+        ssl_ca_chain = config.get("ssl_ca_chain")
         use_https = ssl_cert and ssl_key and os.path.exists(ssl_cert) and os.path.exists(ssl_key)
         
         # Create HTTP or HTTPS server based on SSL configuration
@@ -1046,19 +1481,48 @@ def run_server(host=None, port=None, directory=None, config=None):
         if use_https:
             # Create SSL context with more permissive settings
             ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+            
+            # Load cert chain - first load the cert and key
             ssl_context.load_cert_chain(certfile=ssl_cert, keyfile=ssl_key)
-
-            ## Verify client certificates
-            ssl_context.check_hostname = True
-            ssl_context.verify_mode = ssl.CERT_REQUIRED
-
-            ## Don't verify client certificates
-            #ssl_context.check_hostname = False
-            #ssl_context.verify_mode = ssl.CERT_NONE
+            
+            # If CA chain bundle is provided and exists, load it separately
+            if ssl_ca_chain and os.path.exists(ssl_ca_chain):
+                try:
+                    # Try to load CA chain file using file path directly
+                    ssl_context.load_verify_locations(cafile=ssl_ca_chain)
+                    logger.info(f"SSL enabled with certificate: {ssl_cert}, key: {ssl_key}, CA chain: {ssl_ca_chain}")
+                except Exception as e:
+                    logger.warning(f"Failed to load CA chain bundle: {str(e)}")
+                    # Try alternate method of loading CA chain
+                    try:
+                        with open(ssl_ca_chain, 'rb') as ca_file:
+                            ca_data = ca_file.read()
+                            # Create a temporary file with the correct format
+                            import tempfile
+                            with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                                temp_path = temp_file.name
+                                temp_file.write(ca_data)
+                            
+                            # Try to load from the temp file
+                            ssl_context.load_verify_locations(cafile=temp_path)
+                            logger.info(f"SSL enabled with certificate: {ssl_cert}, key: {ssl_key}, CA chain: {ssl_ca_chain} (via temp file)")
+                            
+                            # Clean up temp file
+                            try:
+                                os.unlink(temp_path)
+                            except:
+                                pass
+                    except Exception as e2:
+                        logger.warning(f"Failed to load CA chain bundle (alternate method): {str(e2)}")
+                        logger.info(f"SSL enabled with certificate: {ssl_cert}, key: {ssl_key}")
+            else:
+                logger.info(f"SSL enabled with certificate: {ssl_cert}, key: {ssl_key}")
+            
+            ssl_context.check_hostname = False
+            ssl_context.verify_mode = ssl.CERT_NONE  # Don't verify client certificates
             
             # Wrap the socket with SSL
             httpd.socket = ssl_context.wrap_socket(httpd.socket, server_side=True)
-            logger.info(f"SSL enabled with certificate: {ssl_cert}, key: {ssl_key}")
             
             # Log server startup with HTTPS
             logger.info(f"Server started - accessible at https://{fqdn_host}:{port}")
@@ -1098,6 +1562,7 @@ def parse_args():
     parser.add_argument('--config', help='Path to server configuration file')
     parser.add_argument('--ssl-cert', help='Path to SSL certificate file for HTTPS')
     parser.add_argument('--ssl-key', help='Path to SSL private key file for HTTPS')
+    parser.add_argument('--ssl-ca-chain', help='Path to SSL CA chain bundle file for HTTPS')
     return parser.parse_args()
 
 if __name__ == '__main__':
@@ -1121,5 +1586,8 @@ if __name__ == '__main__':
     
     if args.ssl_key:
         config["ssl_key"] = args.ssl_key
+    
+    if args.ssl_ca_chain:
+        config["ssl_ca_chain"] = args.ssl_ca_chain
     
     run_server(host=args.host, port=args.port, config=config) 

@@ -159,7 +159,7 @@ def setup_logging(config=None):
         logger.handlers.clear()
     
     # Set format for log messages
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s')
     
     # Add console handler if one doesn't already exist
     has_console_handler = False
@@ -174,6 +174,8 @@ def setup_logging(config=None):
     if not has_console_handler:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setFormatter(formatter)
+        # Always show at least INFO level in console
+        console_handler.setLevel(logging.INFO)
         logger.addHandler(console_handler)
     
     # Create a log file
@@ -193,9 +195,15 @@ def setup_logging(config=None):
         # Ensure log directory exists
         logdir_path.mkdir(exist_ok=True, parents=True)
         
-        # Create log file with PID instead of timestamp
-        pid = os.getpid()
-        log_file = logdir_path / f'myvnc_{pid}.log'
+        # Check for special manage.py PID in environment
+        if 'MYVNC_MANAGE_PID' in os.environ:
+            manage_pid = os.environ['MYVNC_MANAGE_PID']
+            log_file = logdir_path / f'myvnc_{manage_pid}.log'
+        else:
+            # Create log file with PID instead of timestamp
+            pid = os.getpid()
+            log_file = logdir_path / f'myvnc_{pid}.log'
+        
         current_log_file = log_file
         
         full_path = log_file.absolute()
@@ -204,6 +212,8 @@ def setup_logging(config=None):
         if not has_file_handler:
             file_handler = logging.FileHandler(str(full_path))
             file_handler.setFormatter(formatter)
+            # Always log at DEBUG level to the file
+            file_handler.setLevel(logging.DEBUG)
             logger.addHandler(file_handler)
         
             # Open the log file for stdout/stderr redirection
@@ -231,6 +241,51 @@ def setup_logging(config=None):
         if config and isinstance(config, dict) and 'debug' in config:
             debug_status = "enabled" if config['debug'] else "disabled"
             logger.info(f"Debug logging is {debug_status}")
+        
+        # Set up LDAP debug logging if authentication method is LDAP
+        if config and isinstance(config, dict) and config.get('authentication', '').lower() == 'ldap':
+            # Enable detailed LDAP logs 
+            ldap_logger = logging.getLogger('ldap')
+            ldap_logger.setLevel(logging.DEBUG)
+            
+            # Add dedicated LDAP file handler for more details
+            ldap_log_file = logdir_path / f'ldap_debug_{pid}.log'
+            try:
+                ldap_file_handler = logging.FileHandler(str(ldap_log_file))
+                ldap_file_handler.setFormatter(formatter)
+                ldap_file_handler.setLevel(logging.DEBUG)
+                ldap_logger.addHandler(ldap_file_handler)
+                logger.info(f"LDAP debug logging enabled at: {ldap_log_file}")
+            except Exception as e:
+                logger.error(f"Could not set up LDAP debug log file: {str(e)}")
+            
+            # Also add LDAP logs to the main log
+            ldap_logger.addHandler(file_handler)
+            
+            # Log LDAP availability
+            try:
+                # Try to determine LDAP status 
+                has_ldap = False
+                has_ldap3 = False
+                
+                try:
+                    import ldap
+                    has_ldap = True
+                    logger.info("python-ldap module is available")
+                except ImportError:
+                    logger.warning("python-ldap module is not available")
+                
+                try:
+                    import ldap3
+                    has_ldap3 = True 
+                    logger.info("ldap3 module is available")
+                except ImportError:
+                    logger.warning("ldap3 module is not available")
+                
+                if not has_ldap and not has_ldap3:
+                    logger.error("No LDAP modules are available - authentication will fail")
+            except Exception as e:
+                logger.error(f"Error checking LDAP module availability: {str(e)}")
             
     except Exception as e:
         # If we can't set up file logging, log to console
@@ -250,6 +305,50 @@ def get_logger():
             # Import here to avoid circular imports
             from myvnc.web.server import load_server_config
             config = load_server_config()
+            
+            # Check if there's a running server whose log we should use
+            try:
+                import psutil
+                
+                # Look for any process that might be our server
+                for proc in psutil.process_iter(['pid', 'cmdline']):
+                    try:
+                        cmdline = ' '.join(proc.info['cmdline'] or [])
+                        if "python" in cmdline and "main.py" in cmdline:
+                            # We found a server process, check if it has a log file
+                            log_path = config.get('logdir', '/tmp')
+                            potential_log = os.path.join(log_path, f"myvnc_{proc.info['pid']}.log")
+                            if os.path.exists(potential_log):
+                                # Use the existing log file for this process
+                                logger = logging.getLogger('myvnc')
+                                # Re-initialize the logger with this file
+                                logger.handlers.clear()  # Remove any existing handlers
+                                formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+                                
+                                # Create file handler for existing log file
+                                file_handler = logging.FileHandler(potential_log)
+                                file_handler.setFormatter(formatter)
+                                logger.addHandler(file_handler)
+                                
+                                # Also add console handler
+                                console_handler = logging.StreamHandler(sys.stdout)
+                                console_handler.setFormatter(formatter)
+                                logger.addHandler(console_handler)
+                                
+                                # Set global variables
+                                global current_log_file
+                                current_log_file = potential_log
+                                
+                                # Return the reused logger
+                                return logger
+                    except Exception:
+                        # Ignore errors when checking processes
+                        pass
+            except ImportError:
+                # psutil not available, skip this part
+                pass
+                
+            # If we get here, either there's no running server or we couldn't reuse its log
             logger = setup_logging(config=config)
         except ImportError:
             # If we can't import the server module, use default config

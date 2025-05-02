@@ -1,13 +1,17 @@
 {
     "host": "localhost",
-    "port": 9143,
+    "port": 9123,
     "debug": true,
     "max_connections": 5,
     "timeout": 30,
     "authentication": "",
-    "auth_notes": "To enable Entra SSO, set authentication to 'Entra'",
+    "auth_notes": "To enable authentication, set 'authentication' to either 'Entra' or 'LDAP'",
+    "datadir": "/localdev/myvnc/data",
     "logdir": "/localdev/myvnc/logs",
-    "ssl_cert": "/proj_risc/user_dev/bswan/tools_src/myvnc/config/ssl/cert.pem",
-    "ssl_key": "/proj_risc/user_dev/bswan/tools_src/myvnc/config/ssl/key.pem",
-    "ssl_notes": "To enable HTTPS, set ssl_cert and ssl_key to valid file paths"
+    "ldap_config": "",
+    "entra_config": "",
+    "ssl_cert": "",
+    "ssl_key": "",
+    "ssl_ca_chain": "",
+    "ssl_notes": "To enable HTTPS, set ssl_cert and ssl_key to valid file paths. Optionally set ssl_ca_chain for intermediate certificates."
 }

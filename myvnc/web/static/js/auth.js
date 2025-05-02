@@ -35,6 +35,17 @@ document.addEventListener('DOMContentLoaded', function() {
     if (logoutBtn) {
         logoutBtn.addEventListener('click', handleLogout);
     }
+    
+    // Close dropdowns when clicking outside
+    document.addEventListener('click', function(e) {
+        const dropdowns = document.getElementsByClassName('dropdown-content');
+        for (let i = 0; i < dropdowns.length; i++) {
+            const openDropdown = dropdowns[i];
+            if (openDropdown.classList.contains('show')) {
+                openDropdown.classList.remove('show');
+            }
+        }
+    });
 });
 
 /**
@@ -79,11 +90,27 @@ function checkAuthentication() {
                     groups: data.groups || []
                 };
                 updateUserInfo(data);
+                
+                // Dispatch an event to notify other scripts that the user is authenticated
+                const authEvent = new CustomEvent('userAuthenticated', { 
+                    detail: { 
+                        username: data.username,
+                        authenticated: true 
+                    } 
+                });
+                document.dispatchEvent(authEvent);
             } else {
                 // User is not authenticated, redirect to login page
                 // Only redirect if not on the login page already
                 if (!window.location.pathname.startsWith('/login')) {
-                    window.location.href = '/login';
+                    // Check if session expired and add query parameter
+                    if (data.reason === 'expired') {
+                        console.log('Session expired, redirecting to login page');
+                        window.location.href = '/login?error=session_expired';
+                    } else {
+                        console.log('Not authenticated, redirecting to login page');
+                        window.location.href = '/login';
+                    }
                 }
             }
         })
@@ -98,6 +125,15 @@ function checkAuthentication() {
                 groups: []
             };
             updateUserInfo(currentUser);
+            
+            // Dispatch event for anonymous user
+            const authEvent = new CustomEvent('userAuthenticated', { 
+                detail: { 
+                    username: 'anonymous',
+                    authenticated: false
+                } 
+            });
+            document.dispatchEvent(authEvent);
         });
 }
 
@@ -115,29 +151,73 @@ function updateUserInfo(userData) {
     // Create user info display
     const displayName = userData.display_name || userData.username;
     
-    // Add user name span
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'user-name';
-    nameSpan.textContent = displayName;
-    userInfoContainer.appendChild(nameSpan);
-    
-    // Only add logout button if NOT anonymous user
+    // Only show user dropdown if not anonymous user
     if (userData.username && userData.username !== 'anonymous') {
-        console.log('Showing logout button for authenticated user:', userData.username);
+        console.log('Showing user dropdown for authenticated user:', userData.username);
         
-        // Create small space between name and button
-        userInfoContainer.appendChild(document.createTextNode(' '));
+        // Create user dropdown container
+        const userDropdown = document.createElement('div');
+        userDropdown.className = 'user-dropdown';
         
-        // Create logout button
-        const logoutBtn = document.createElement('button');
-        logoutBtn.id = 'logout-btn';
-        logoutBtn.className = 'button small';
-        logoutBtn.textContent = 'Logout';
-        logoutBtn.addEventListener('click', handleLogout);
+        // Add user name span with dropdown icon
+        const nameSpan = document.createElement('div');
+        nameSpan.className = 'user-name';
+        nameSpan.innerHTML = `${displayName} <i class="fas fa-chevron-down"></i>`;
+        nameSpan.addEventListener('click', function(e) {
+            e.stopPropagation();
+            dropdownContent.classList.toggle('show');
+        });
+        userDropdown.appendChild(nameSpan);
         
-        userInfoContainer.appendChild(logoutBtn);
+        // Create dropdown content
+        const dropdownContent = document.createElement('div');
+        dropdownContent.className = 'dropdown-content';
+        
+        // Add settings option
+        const settingsLink = document.createElement('a');
+        settingsLink.href = '#';
+        settingsLink.innerHTML = '<i class="fas fa-cog"></i> Settings';
+        settingsLink.addEventListener('click', function(e) {
+            e.preventDefault();
+            showSettingsModal();
+        });
+        dropdownContent.appendChild(settingsLink);
+        
+        // Add logout option
+        const logoutLink = document.createElement('a');
+        logoutLink.href = '#';
+        logoutLink.innerHTML = '<i class="fas fa-sign-out-alt"></i> Logout';
+        logoutLink.addEventListener('click', function(e) {
+            e.preventDefault();
+            handleLogout();
+        });
+        dropdownContent.appendChild(logoutLink);
+        
+        // Add dropdown content to user dropdown
+        userDropdown.appendChild(dropdownContent);
+        
+        // Add user dropdown to container
+        userInfoContainer.appendChild(userDropdown);
     } else {
-        console.log('Not showing logout button for anonymous user');
+        console.log('Showing anonymous user info');
+        
+        // Add simple user name for anonymous user
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'user-name';
+        nameSpan.textContent = displayName;
+        userInfoContainer.appendChild(nameSpan);
+    }
+}
+
+/**
+ * Show the settings modal
+ */
+function showSettingsModal() {
+    // This function is implemented in settings.js
+    if (typeof openSettingsModal === 'function') {
+        openSettingsModal();
+    } else {
+        console.error('Settings modal function not found');
     }
 }
 
@@ -166,6 +246,15 @@ function handleLoginSubmit(event) {
         return;
     }
     
+    console.log('Sending login request for user:', username);
+    
+    // Show loading indicator if available
+    const submitButton = document.querySelector('#login-form button[type="submit"]');
+    if (submitButton) {
+        submitButton.disabled = true;
+        submitButton.textContent = 'Signing in...';
+    }
+    
     // Send login request
     fetch('/api/login', {
         method: 'POST',
@@ -174,16 +263,48 @@ function handleLoginSubmit(event) {
         },
         body: JSON.stringify({ username, password })
     })
-    .then(response => response.json())
+    .then(response => {
+        if (!response.ok) {
+            console.error('Login request failed with status:', response.status);
+            throw new Error(`Login request failed with status: ${response.status}`);
+        }
+        return response.json();
+    })
     .then(data => {
+        console.log('Login response:', data);
+        
         if (data.success) {
-            // Redirect to home page on successful login
-            window.location.href = '/';
+            // Check if we received a session ID in the response
+            if (data.session_id) {
+                console.log('Received session ID, redirecting to home page');
+                
+                // Use a small delay to ensure cookies are set before redirect
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 100);
+            } else {
+                console.error('Login successful but no session ID provided');
+                if (errorContainer) {
+                    errorContainer.textContent = 'Login was successful but no session was created. Please try again.';
+                    errorContainer.style.display = 'block';
+                }
+                // Reset submit button
+                if (submitButton) {
+                    submitButton.disabled = false;
+                    submitButton.textContent = 'Sign In';
+                }
+            }
         } else {
+            console.error('Login failed:', data.message);
             // Display error message
             if (errorContainer) {
                 errorContainer.textContent = data.message || 'Login failed. Please try again.';
                 errorContainer.style.display = 'block';
+            }
+            // Reset submit button
+            if (submitButton) {
+                submitButton.disabled = false;
+                submitButton.textContent = 'Sign In';
             }
         }
     })
@@ -192,6 +313,11 @@ function handleLoginSubmit(event) {
         if (errorContainer) {
             errorContainer.textContent = 'An error occurred during login. Please try again.';
             errorContainer.style.display = 'block';
+        }
+        // Reset submit button
+        if (submitButton) {
+            submitButton.disabled = false;
+            submitButton.textContent = 'Sign In';
         }
     });
 }

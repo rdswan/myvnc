@@ -20,11 +20,165 @@
         
         .user-name {
             font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+        
+        .user-name:hover {
+            color: var(--color-accent);
+        }
+
+        .user-dropdown {
+            position: relative;
+            display: inline-block;
+        }
+
+        .dropdown-content {
+            display: none;
+            position: absolute;
+            right: 0;
+            background-color: #f9f9f9;
+            min-width: 160px;
+            box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
+            z-index: 100;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .dropdown-content a {
+            color: black;
+            padding: 12px 16px;
+            text-decoration: none;
+            display: block;
+            font-size: 14px;
+        }
+
+        .dropdown-content a:hover {
+            background-color: #f1f1f1;
+        }
+        
+        /* Show dropdown when this class is added via JavaScript */
+        .dropdown-content.show {
+            display: block;
         }
         
         .button.small {
             padding: 0.25rem 0.5rem;
             font-size: 0.8rem;
+        }
+
+        /* Settings Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        .modal-container {
+            background-color: white;
+            border-radius: 8px;
+            width: 80%;
+            max-width: 700px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            position: relative;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid #e5e5e5;
+        }
+
+        .modal-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin: 0;
+            color: var(--color-text-dark);
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: #999;
+        }
+
+        .modal-close:hover {
+            color: var(--color-danger);
+        }
+
+        .modal-body {
+            padding: 1.5rem;
+        }
+
+        .modal-footer {
+            padding: 1rem 1.5rem;
+            border-top: 1px solid #e5e5e5;
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.5rem;
+        }
+
+        .settings-section {
+            margin-bottom: 1.5rem;
+        }
+
+        .settings-section h3 {
+            font-size: 1.1rem;
+            margin-bottom: 1rem;
+            color: var(--color-text-dark);
+            border-bottom: 1px solid #eee;
+            padding-bottom: 0.5rem;
+        }
+
+        .settings-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .settings-row .form-group {
+            flex: 1 1 200px;
+        }
+        
+        /* Status indicator for settings */
+        .save-status {
+            margin-right: 1rem;
+            font-size: 0.9rem;
+            display: none;
+        }
+        
+        .save-status.success {
+            color: var(--color-success);
+            display: inline;
+        }
+        
+        .save-status.error {
+            color: var(--color-danger);
+            display: inline;
         }
     </style>
 </head>
@@ -206,11 +360,76 @@
                 <h2 class="form-title">Debug Information</h2>
                 
                 <div class="debug-section">
+                    <h3>Session Information</h3>
+                    <div class="debug-info-container" id="debug-session">
+                        <p class="loading-message">Loading session information...</p>
+                    </div>
+                </div>
+                
+                <div class="debug-section">
                     <h3>Environment Information</h3>
                     <div class="debug-info-container" id="debug-environment">
                         <p class="loading-message">Loading environment information...</p>
                     </div>
                 </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- User Settings Modal -->
+    <div id="settings-modal" class="modal-overlay">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h2 class="modal-title">User Settings</h2>
+                <button class="modal-close" id="settings-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-section">
+                    <h3>VNC Session Defaults</h3>
+                    <div class="settings-row">
+                        <div class="form-group">
+                            <label for="settings-resolution">Default Resolution</label>
+                            <div class="select-wrapper">
+                                <select id="settings-resolution" name="resolution">
+                                    <!-- Options will be loaded from configuration -->
+                                </select>
+                                <i class="fas fa-chevron-down"></i>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="settings-window-manager">Default Window Manager</label>
+                            <div class="select-wrapper">
+                                <select id="settings-window-manager" name="window_manager">
+                                    <!-- Options will be loaded from configuration -->
+                                </select>
+                                <i class="fas fa-chevron-down"></i>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="settings-row">
+                        <div class="form-group">
+                            <label for="settings-site">Default Site</label>
+                            <div class="select-wrapper">
+                                <select id="settings-site" name="site">
+                                    <!-- Options will be loaded from configuration -->
+                                </select>
+                                <i class="fas fa-chevron-down"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+            </div>
+            <div class="modal-footer">
+                <span id="save-status" class="save-status"></span>
+                <button id="settings-reset" class="button secondary">
+                    <i class="fas fa-undo"></i> Reset to Defaults
+                </button>
+                <button id="settings-save" class="button primary">
+                    <i class="fas fa-save"></i> Save Settings
+                </button>
             </div>
         </div>
     </div>
@@ -228,5 +447,6 @@
     
     <script src="js/auth.js"></script>
     <script src="js/app.js"></script>
+    <script src="js/settings.js"></script>
 </body>
 </html> 

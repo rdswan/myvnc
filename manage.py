@@ -26,6 +26,7 @@ import psutil
 import glob
 from pathlib import Path
 import socket
+import logging
 
 # Add the current directory to the path so we can import from the myvnc package
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -43,18 +44,79 @@ def setup_logging_for_manage():
     # First try to get an existing logger
     if logger is not None:
         return logger
-        
-    # Only create a new logger if one doesn't exist
+    
+    # Find existing server PID and its log file
+    existing_pid = read_pid_file() or find_server_process()
     config = load_server_config()
     
-    # Try using get_logger first, which will reuse an existing logger if possible
-    logger = get_logger()
+    # If we have a running server, try to use its log file
+    if existing_pid and is_server_running(existing_pid):
+        log_dir = config.get('logdir', '/tmp')
+        server_log_file = os.path.join(log_dir, f'myvnc_{existing_pid}.log')
+        
+        # If server log file exists, create a handler for it
+        if os.path.exists(server_log_file):
+            # Create a logger that writes to the server's log file
+            logger = logging.getLogger('myvnc')
+            logger.setLevel(logging.INFO)
+            
+            # Clear existing handlers to avoid duplicate logging
+            logger.handlers.clear()
+            
+            # Create formatter for our logs
+            formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+            
+            # Add console handler
+            console_handler = logging.StreamHandler(sys.stdout)
+            console_handler.setFormatter(formatter)
+            logger.addHandler(console_handler)
+            
+            # Add file handler for the server's log file
+            try:
+                file_handler = logging.FileHandler(server_log_file)
+                file_handler.setFormatter(formatter)
+                logger.addHandler(file_handler)
+                logger.info(f"Manage.py: Writing to server log file: {server_log_file}")
+                return logger
+            except (PermissionError, IOError) as e:
+                # If we can't write to the server log file, log it and continue
+                # with a new log file
+                print(f"Warning: Cannot write to server log file {server_log_file}: {e}")
+                # Continue with setup_logging below
     
-    # If that didn't work, fall back to setup_logging
-    if logger is None:
+    # If no server log file or couldn't write to it, create our own temporary log
+    # but don't record it in a way that would make it look like a server log
+    try:
+        # Create a new logger with a temp file that includes "manage" in the name
+        from myvnc.utils.log_manager import setup_logging
+        
+        # Temporarily modify the process ID to avoid creating a server-named log
+        real_pid = os.getpid()
+        
+        # Override PID with a special value for manage.py
+        # This ensures that log files for manage.py-only operations are clearly marked
+        os.environ['MYVNC_MANAGE_PID'] = f"manage_{real_pid}"
+        
+        # Set up logging with this environment variable
         logger = setup_logging(config=config)
         
-    return logger
+        # Restore real PID
+        del os.environ['MYVNC_MANAGE_PID']
+        
+        return logger
+    except Exception as e:
+        # If all else fails, create a basic logger
+        logger = logging.getLogger('myvnc')
+        logger.setLevel(logging.INFO)
+        logger.handlers.clear()
+        
+        handler = logging.StreamHandler(sys.stdout)
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        
+        logger.warning(f"Using fallback logger due to error: {e}")
+        return logger
 
 def get_pid_file():
     """Get the path to the PID file"""
@@ -152,17 +214,31 @@ def find_server_log_file(pid):
     log_dir = config.get('logdir', '/tmp')
     log_path = Path(log_dir)
     
-    # Look for log file with PID in name
+    # Look for the most direct match first
     log_file = log_path / f'myvnc_{pid}.log'
     
     if log_file.exists():
         return str(log_file)
     
-    # Fallback: Check all log files in directory if specific file not found
+    # If direct match isn't found, try all log files in the directory
     try:
-        for file in log_path.glob('myvnc_*.log'):
+        # Get list of all log files sorted by modification time (newest first)
+        log_files = sorted(
+            log_path.glob('myvnc_*.log'),
+            key=lambda x: x.stat().st_mtime,
+            reverse=True
+        )
+        
+        # First look for a file with the PID in the name
+        for file in log_files:
             if f'myvnc_{pid}.log' in file.name:
                 return str(file)
+        
+        # If we have a running server process and didn't find a direct match,
+        # just return the newest log file as it's likely the right one
+        if is_server_running(pid) and log_files:
+            return str(log_files[0])
+            
     except Exception as e:
         logger = get_logger()
         if logger:
@@ -258,6 +334,7 @@ def start_server():
         # Check if HTTPS is configured
         ssl_cert = config.get('ssl_cert', '')
         ssl_key = config.get('ssl_key', '')
+        ssl_ca_chain = config.get('ssl_ca_chain', '')
         use_https = ssl_cert and ssl_key and os.path.exists(ssl_cert) and os.path.exists(ssl_key)
         protocol = "https" if use_https else "http"
         
@@ -325,6 +402,7 @@ def start_server():
         # Check if HTTPS is configured
         ssl_cert = config.get('ssl_cert', '')
         ssl_key = config.get('ssl_key', '')
+        ssl_ca_chain = config.get('ssl_ca_chain', '')
         use_https = ssl_cert and ssl_key and os.path.exists(ssl_cert) and os.path.exists(ssl_key)
         protocol = "https" if use_https else "http"
         
@@ -426,12 +504,7 @@ def restart_server():
 
 def server_status():
     """Show the status of the server"""
-    logger = setup_logging_for_manage()
-    
-    # Load server configuration to display
-    config = load_server_config()
-    
-    # Check if the server is running
+    # First check if there's a running server
     pid = read_pid_file()
     
     # If we don't have a PID file, try to find the server process
@@ -440,11 +513,20 @@ def server_status():
         if pid:
             write_pid_file(pid)
     
+    # Check if the server is actually running
+    is_running = pid is not None and is_server_running(pid)
+    
+    # Now get a logger - try to use the server's log if possible
+    logger = setup_logging_for_manage()
+    
+    # Load server configuration to display
+    config = load_server_config()
+    
     # Calculate timestamp once, for consistent output
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S,%f")[:-3]
     
-    if pid is None or not is_server_running(pid):
-        logger.info(f"Server status: Not running")
+    if not is_running:
+        logger.info("Server status: Not running")
         return
     
     # Server is running, get more information
@@ -453,6 +535,7 @@ def server_status():
     host = config.get('host', 'localhost')
     port = config.get('port', '9143')
     logdir = config.get('logdir', '/tmp')
+    datadir = config.get('datadir', 'myvnc/data')
     
     # Always use FQDN even if config has localhost
     fqdn_host = get_fully_qualified_hostname(host)
@@ -463,11 +546,37 @@ def server_status():
     # Check if HTTPS is configured
     ssl_cert = config.get('ssl_cert', '')
     ssl_key = config.get('ssl_key', '')
+    ssl_ca_chain = config.get('ssl_ca_chain', '')
     use_https = ssl_cert and ssl_key and os.path.exists(ssl_cert) and os.path.exists(ssl_key)
     protocol = "https" if use_https else "http"
     
+    # Check authentication configuration
+    auth_method = config.get('authentication', 'None')
+    auth_enabled = auth_method.lower() in ['entra', 'ldap']
+    
+    # Check if LDAP module is available
+    try:
+        import ldap3
+        ldap_available = True
+    except ImportError:
+        ldap_available = False
+    
+    # Check if MSAL (Microsoft Auth) module is available
+    try:
+        import msal
+        msal_available = True
+    except ImportError:
+        msal_available = False
+    
+    # Determine actual auth status based on configuration and module availability
+    actual_auth_enabled = auth_enabled
+    if auth_method.lower() == 'ldap' and not ldap_available:
+        actual_auth_enabled = False
+    elif auth_method.lower() == 'entra' and not msal_available:
+        actual_auth_enabled = False
+    
     # Log status information
-    logger.info(f"Server status:")
+    logger.info("Server status:")
     logger.info(f"  Status: Running")
     logger.info(f"  PID: {pid}")
     logger.info(f"  Host: {host}")
@@ -477,7 +586,27 @@ def server_status():
     if use_https:
         logger.info(f"  SSL Certificate: {ssl_cert}")
         logger.info(f"  SSL Key: {ssl_key}")
+        if ssl_ca_chain and os.path.exists(ssl_ca_chain):
+            logger.info(f"  SSL CA Chain: {ssl_ca_chain}")
+        elif ssl_ca_chain:
+            logger.info(f"  SSL CA Chain: {ssl_ca_chain} (file not found)")
+        else:
+            logger.info(f"  SSL CA Chain: Not configured")
+    logger.info(f"  Authentication: {'Enabled' if actual_auth_enabled else 'Disabled'}")
+    if auth_method and auth_method.lower() != 'none':
+        logger.info(f"  Auth Method: {auth_method}")
+        logger.info(f"  Auth Method Configured: {'Yes' if auth_enabled else 'No'}")
+        logger.info(f"  Auth Method Available: {'Yes' if actual_auth_enabled else 'No'}")
+        logger.info(f"  Auth Status: {auth_method} ({'Active' if actual_auth_enabled else 'Inactive - Module Missing'})")
+        
+        # Add details about the auth modules
+        if auth_method.lower() == 'ldap':
+            logger.info(f"  LDAP Module Available: {'Yes' if ldap_available else 'No'}")
+        elif auth_method.lower() == 'entra':
+            logger.info(f"  MSAL Module Available: {'Yes' if msal_available else 'No'}")
+    
     logger.info(f"  Log directory: {logdir}")
+    logger.info(f"  Data directory: {datadir}")
     logger.info(f"  Current log: {server_log_file if server_log_file else 'Unknown'}")
     logger.info(f"  Uptime: {uptime}")
 

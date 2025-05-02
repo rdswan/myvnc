@@ -1,0 +1,15 @@
+{
+    "ldap_server": "",
+    "ldap_domain": "",
+    "ldap_base_dn": "",
+    "ldap_user_filter": "(sAMAccountName=%s)",
+    "ldap_group_filter": "(&(objectClass=group)(member=%s))",
+    "ldap_attr_username": "sAMAccountName",
+    "ldap_attr_display_name": "displayName",
+    "ldap_attr_email": "mail",
+    "ldap_attr_groups": "memberOf",
+    "ldap_admin_binddn": "",
+    "ldap_admin_password": "",
+    "session_expiry_days": 45,
+    "ldap_notes": "These are example settings. Adjust for your LDAP/AD server."
+} 

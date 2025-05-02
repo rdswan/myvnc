@@ -8,6 +8,8 @@ import json
 from typing import Dict, Optional, Tuple, List
 from pathlib import Path
 from urllib.parse import urlencode
+import logging
+import traceback
 
 # Try to import requests, use mock if not available
 try:
@@ -75,9 +77,21 @@ class AuthManager:
     
     def __init__(self):
         """Initialize the auth manager"""
+        # Initialize logger
+        self.logger = logging.getLogger('myvnc')
+        
         # Load server configuration
         self.server_config = self._load_server_config()
-        self.auth_enabled = self.server_config.get("authentication", "").lower() == "entra"
+        self.auth_method = self.server_config.get("authentication", "").lower()
+        self.auth_enabled = self.auth_method in ["entra", "ldap"]
+        
+        # Import specialized auth managers
+        from .entra_manager import EntraManager
+        from .ldap_manager import LDAPManager
+        
+        # Initialize the specific auth manager based on configuration
+        self.entra_manager = EntraManager() if self.auth_method == "entra" else None
+        self.ldap_manager = LDAPManager() if self.auth_method == "ldap" else None
         
         # Only set up auth if enabled
         if not self.auth_enabled:
@@ -89,14 +103,23 @@ class AuthManager:
         self.ad_domain = os.environ.get('AD_DOMAIN', 'example.com')
         self.ad_base_dn = os.environ.get('AD_BASE_DN', 'dc=example,dc=com')
         
-        # Microsoft Entra ID settings
+        # Microsoft Entra ID settings - try to load from environment variables first
         self.tenant_id = os.environ.get('ENTRA_TENANT_ID', '')
         self.client_id = os.environ.get('ENTRA_CLIENT_ID', '')
         self.client_secret = os.environ.get('ENTRA_CLIENT_SECRET', '')
         self.redirect_uri = os.environ.get('ENTRA_REDIRECT_URI', 'http://localhost:8000/auth/callback')
+        
+        # If Entra credentials are missing and Entra auth is enabled, try to load from config file
+        if self.auth_method == 'entra' and not all([self.tenant_id, self.client_id, self.client_secret]):
+            self._load_entra_config_from_file()
+            
+            # Update from environment variables again (might have been set by EntraManager)
+            self.tenant_id = os.environ.get('ENTRA_TENANT_ID', self.tenant_id)
+            self.client_id = os.environ.get('ENTRA_CLIENT_ID', self.client_id)
+            self.client_secret = os.environ.get('ENTRA_CLIENT_SECRET', self.client_secret)
+            self.redirect_uri = os.environ.get('ENTRA_REDIRECT_URI', self.redirect_uri)
+        
         self.scopes = ['https://graph.microsoft.com/.default']
-        # Default to 'entra' authentication if environment variables are set
-        self.auth_method = os.environ.get('AUTH_METHOD', 'entra' if self.tenant_id and self.client_id else 'ldap')
         
         # Initialize MSAL app if using Entra ID
         if self.auth_method == 'entra' and self.tenant_id and self.client_id:
@@ -110,9 +133,29 @@ class AuthManager:
         
         # Session management
         self.sessions = {}
-        self.session_dir = 'data'
+        
+        # Use data directory from config, falling back to default
+        self.session_dir = self.server_config.get("datadir", "myvnc/data")
         self.session_file = os.path.join(self.session_dir, 'sessions.json')
-        self.session_expiry = 8 * 60 * 60  # 8 hours in seconds
+        
+        # Load session expiry from config - default to 30 days (1 month) if not specified
+        self.session_expiry_days = 30  # Default value: 30 days (1 month)
+        
+        # Try to get session expiry from server config first
+        if "session_expiry_days" in self.server_config:
+            self.session_expiry_days = int(self.server_config.get("session_expiry_days", 30))
+            self.logger.info(f"Using session expiry from server config: {self.session_expiry_days} days")
+        
+        # If LDAP auth is enabled, check LDAP config for session expiry
+        if self.auth_method == 'ldap' and self.ldap_manager and hasattr(self.ldap_manager, 'config'):
+            ldap_expiry_days = self.ldap_manager.config.get("session_expiry_days")
+            if ldap_expiry_days is not None:
+                self.session_expiry_days = int(ldap_expiry_days)
+                self.logger.info(f"Using session expiry from LDAP config: {self.session_expiry_days} days")
+        
+        # Calculate session expiry in seconds
+        self.session_expiry = self.session_expiry_days * 24 * 60 * 60
+        self.logger.info(f"Session expiry time set to {self.session_expiry_days} days ({self.session_expiry} seconds)")
         
         # Create the data directory if it doesn't exist
         if not os.path.exists(self.session_dir):
@@ -132,7 +175,54 @@ class AuthManager:
             print(f"Warning: Server configuration file not found or invalid at {config_path}")
             return {}
     
-    def authenticate(self, username: str, password: str) -> Tuple[bool, str, Optional[Dict]]:
+    def _load_entra_config_from_file(self):
+        """Load Entra ID configuration from the config file"""
+        try:
+            # Get the path from server config or use the default
+            config_path_str = self.server_config.get('entra_config', "config/auth/entra_config.json")
+            
+            # Handle both absolute and relative paths
+            config_path = Path(config_path_str)
+            if not config_path.is_absolute():
+                # Resolve relative path from the application root
+                config_path = Path(__file__).parent.parent.parent / config_path_str
+            
+            print(f"Looking for Entra ID config file at: {config_path}")
+            
+            # Check if the file exists
+            if not config_path.exists():
+                print(f"Warning: Entra ID config file not found: {config_path}")
+                return
+            
+            # Load the config file
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+            
+            # Set the configuration values if not already set from environment variables
+            if not self.client_id and 'client_id' in config:
+                self.client_id = config['client_id']
+                os.environ['ENTRA_CLIENT_ID'] = self.client_id
+                
+            if not self.client_secret and 'client_secret' in config:
+                self.client_secret = config['client_secret']
+                os.environ['ENTRA_CLIENT_SECRET'] = self.client_secret
+                
+            if not self.tenant_id and 'tenant_id' in config:
+                self.tenant_id = config['tenant_id']
+                os.environ['ENTRA_TENANT_ID'] = self.tenant_id
+                
+            if not self.redirect_uri and 'redirect_uri' in config:
+                self.redirect_uri = config['redirect_uri']
+                os.environ['ENTRA_REDIRECT_URI'] = self.redirect_uri
+                
+            if 'scopes' in config and config['scopes']:
+                self.scopes = config['scopes']
+                
+            print(f"Successfully loaded Entra ID configuration from {config_path}")
+        except Exception as e:
+            print(f"Error loading Entra ID config from file: {str(e)}")
+    
+    def authenticate(self, username: str, password: str) -> Tuple[bool, str, Optional[str]]:
         """
         Authenticate a user with Active Directory or Microsoft Entra ID
         
@@ -141,17 +231,19 @@ class AuthManager:
             password: Password
             
         Returns:
-            Tuple of (success, message, session_data)
+            Tuple of (success, message, session_id)
         """
         if not self.auth_enabled:
             return False, "Authentication is disabled", None
             
-        if self.auth_method == 'entra' and self.msal_app:
+        if self.auth_method == 'entra':
             return self._authenticate_entra_id(username, password)
-        else:
+        elif self.auth_method == 'ldap':
             return self._authenticate_ldap(username, password)
+        else:
+            return False, f"Unsupported authentication method: {self.auth_method}", None
     
-    def _authenticate_entra_id(self, username: str, password: str) -> Tuple[bool, str, Optional[Dict]]:
+    def _authenticate_entra_id(self, username: str, password: str) -> Tuple[bool, str, Optional[str]]:
         """
         Authenticate a user with Microsoft Entra ID
         
@@ -160,7 +252,7 @@ class AuthManager:
             password: Password
             
         Returns:
-            Tuple of (success, message, session_data)
+            Tuple of (success, message, session_id)
         """
         try:
             # Use Resource Owner Password Credentials (ROPC) flow
@@ -197,85 +289,81 @@ class AuthManager:
             print(error_msg, file=sys.stderr)
             return False, error_msg, None
     
-    def _authenticate_ldap(self, username: str, password: str) -> Tuple[bool, str, Optional[Dict]]:
+    def _authenticate_ldap(self, username: str, password: str) -> Tuple[bool, str, Optional[str]]:
         """
-        Authenticate a user with Active Directory using LDAP
+        Authenticate user against LDAP
         
         Args:
-            username: Username (without domain)
-            password: Password
+            username: Username to authenticate
+            password: Password to authenticate
             
         Returns:
-            Tuple of (success, message, session_data)
+            Tuple of (success, message, session_id)
         """
+        if not self.ldap_manager:
+            return False, "LDAP authentication is not configured", None
+            
+        self.logger.info(f"Authenticating user {username} with LDAP")
+        
         try:
-            # Connect to LDAP server
-            conn = ldap.initialize(self.ad_server)
-            conn.set_option(ldap.OPT_REFERRALS, 0)
+            # Use LDAP manager to authenticate
+            success, message, session_id = self.ldap_manager.authenticate(username, password)
             
-            # Bind with user credentials
-            user_dn = f"{username}@{self.ad_domain}"
-            conn.simple_bind_s(user_dn, password)
-            
-            # Search for user details
-            search_filter = f"(sAMAccountName={username})"
-            attributes = ['displayName', 'mail', 'memberOf']
-            
-            result = conn.search_s(
-                self.ad_base_dn,
-                ldap.SCOPE_SUBTREE,
-                search_filter,
-                attributes
-            )
-            
-            # Process user data
-            if result and len(result) > 0:
-                user_data = {}
-                ldap_attrs = result[0][1]
+            if not success:
+                self.logger.warning(f"LDAP authentication failed for {username}: {message}")
+                return False, message, None
                 
-                # Extract user attributes
-                if 'displayName' in ldap_attrs:
-                    user_data['display_name'] = ldap_attrs['displayName'][0].decode('utf-8')
-                else:
-                    user_data['display_name'] = username
-                    
-                if 'mail' in ldap_attrs:
-                    user_data['email'] = ldap_attrs['mail'][0].decode('utf-8')
+            self.logger.info(f"LDAP authentication successful for {username}")
                 
-                # Extract group memberships
-                user_data['groups'] = []
-                if 'memberOf' in ldap_attrs:
-                    for group_dn in ldap_attrs['memberOf']:
-                        group_dn_str = group_dn.decode('utf-8')
-                        # Extract CN from the DN
-                        cn_part = next((part for part in group_dn_str.split(',') if part.startswith('CN=')), None)
-                        if cn_part:
-                            group_name = cn_part.replace('CN=', '')
-                            user_data['groups'].append(group_name)
+            # Make sure we got a valid session ID
+            if not session_id:
+                self.logger.error(f"LDAP authentication successful but no session ID returned")
+                # Try to create a session here as a fallback
+                try:
+                    # Create a minimal user info to create a session
+                    user_info = {
+                        'username': username,
+                        'display_name': username,
+                        'email': f"{username}@unknown.com",
+                        'groups': []
+                    }
+                    session_id = self.create_session(username, user_info.get('display_name'), user_info.get('email'), user_info.get('groups', []))
+                    self.logger.info(f"Created fallback session ID: {session_id}")
+                    return True, "Authentication successful (fallback session created)", session_id
+                except Exception as e:
+                    self.logger.error(f"Failed to create fallback session: {str(e)}")
+                    return False, "Authentication successful but session creation failed", None
+            
+            # Extra check to make sure session ID is a string
+            if not isinstance(session_id, str):
+                self.logger.error(f"LDAP authentication returned invalid session ID type: {type(session_id)}")
+                return False, "Invalid session ID from LDAP authentication", None
+            
+            # Clone the session from LDAP manager to auth manager's session store
+            # This ensures sessions are shared between the two managers
+            ldap_session = self.ldap_manager.sessions.get(session_id)
+            if ldap_session:
+                # Copy the session data to our local sessions dictionary
+                self.sessions[session_id] = ldap_session.copy()
+                self.logger.info(f"Copied LDAP session to auth_manager sessions: {session_id[:8]}...")
                 
-                # Create session
-                session_id = self.create_session(username, user_data['display_name'], user_data['email'], user_data['groups'])
-                return True, "Authentication successful", session_id
+                # Ensure the session has an expiry time
+                if 'expiry' not in self.sessions[session_id]:
+                    self.sessions[session_id]['expiry'] = time.time() + self.session_expiry
+                    self.logger.info(f"Added missing expiry to cloned session")
+                
+                # Save sessions to disk
+                self.save_sessions()
             else:
-                return False, "User not found in Active Directory", None
+                self.logger.warning(f"Could not find session {session_id[:8]}... in LDAP manager sessions")
+            
+            return True, "Authentication successful", session_id
                 
-        except ldap.INVALID_CREDENTIALS:
-            return False, "Invalid credentials", None
-        except ldap.SERVER_DOWN:
-            return False, "LDAP server is unreachable", None
-        except ldap.LDAPError as e:
-            error_msg = f"LDAP error: {str(e)}"
-            print(error_msg, file=sys.stderr)
-            return False, error_msg, None
         except Exception as e:
-            error_msg = f"Authentication error: {str(e)}"
-            print(error_msg, file=sys.stderr)
+            error_msg = f"LDAP authentication error: {str(e)}"
+            self.logger.error(error_msg)
+            self.logger.error(traceback.format_exc())
             return False, error_msg, None
-        finally:
-            try:
-                conn.unbind()
-            except:
-                pass
     
     def _get_user_info_from_graph(self, access_token):
         """Get user information from Microsoft Graph API"""
@@ -348,7 +436,7 @@ class AuthManager:
             self.logger.error(f"Exception fetching user groups: {str(e)}")
             return []
     
-    def handle_auth_code(self, code: str) -> Tuple[bool, str, Optional[Dict]]:
+    def handle_auth_code(self, code: str) -> Tuple[bool, str, Optional[str]]:
         """
         Handle authorization code from Microsoft Entra ID redirect
         
@@ -356,7 +444,7 @@ class AuthManager:
             code: Authorization code
             
         Returns:
-            Tuple of (success, message, session_data)
+            Tuple of (success, message, session_id)
         """
         if not self.msal_app:
             return False, "Microsoft Entra ID authentication is not configured", None
@@ -384,7 +472,7 @@ class AuthManager:
             # Get group memberships
             groups = self._get_user_groups_from_graph(result['access_token'])
             
-            # Create session
+            # Create session - returns session_id string
             session_id = self.create_session(username, display_name, email, groups)
             
             return True, "Authentication successful", session_id
@@ -394,73 +482,147 @@ class AuthManager:
             print(error_msg, file=sys.stderr)
             return False, error_msg, None
     
-    def get_auth_url(self) -> str:
+    def validate_session(self, session_id: str) -> Tuple[bool, str, Optional[Dict]]:
         """
-        Get the Microsoft Entra ID authorization URL for interactive login
-        
-        Returns:
-            Authorization URL
-        """
-        if not self.msal_app:
-            return None
-        
-        auth_url = self.msal_app.get_authorization_request_url(
-            scopes=self.scopes,
-            redirect_uri=self.redirect_uri,
-            response_type="code",
-            prompt="select_account"
-        )
-        return auth_url
-    
-    def validate_session(self, session_id: str) -> Tuple[bool, Optional[Dict]]:
-        """
-        Validate a session ID
+        Validate a user session
         
         Args:
             session_id: Session ID to validate
             
         Returns:
-            Tuple of (is_valid, session_data)
+            Tuple of (success, message, session)
         """
-        if not self.auth_enabled:
-            return False, None
+        self.logger.debug(f"Validating session: {session_id[:8] if isinstance(session_id, str) and len(session_id) > 8 else session_id}")
+        
+        # Additional debug: Log session ID type
+        self.logger.debug(f"Session ID type: {type(session_id)}")
+        
+        # Ensure session_id is a string
+        if not isinstance(session_id, str):
+            self.logger.warning(f"Session ID is not a string: {type(session_id)}")
+            # Try to convert to string
+            try:
+                session_id = str(session_id)
+                self.logger.debug(f"Converted session ID to string: {session_id[:8] if len(session_id) > 8 else session_id}")
+            except Exception as e:
+                self.logger.error(f"Failed to convert session ID to string: {e}")
+                return False, "Invalid session ID format", None
+        
+        # Check if the session exists in our local cache
+        if session_id in self.sessions:
+            session = self.sessions[session_id]
             
-        if not session_id or session_id not in self.sessions:
-            return False, None
+            # Debug log session details
+            self.logger.debug(f"Found session for user: {session.get('username', 'unknown')}")
+            self.logger.debug(f"Session details: {session}")
+            
+            # Check for session expiry
+            if 'expiry' in session:
+                current_time = time.time()
+                expiry_time = session['expiry']
+                time_left = expiry_time - current_time
+                
+                # Log expiry information
+                self.logger.debug(f"Session expiry check: current={current_time}, expiry={expiry_time}, time left={time_left:.2f}s")
+                
+                if current_time > expiry_time:
+                    self.logger.warning(f"Session {session_id[:8]}... has expired")
+                    # Remove expired session
+                    self.sessions.pop(session_id)
+                    return False, "Session has expired", None
+            else:
+                # If no expiry set, add one now (8 hours from now)
+                session['expiry'] = time.time() + self.session_expiry
+                self.logger.debug(f"Added missing expiry to session: {session['expiry']}")
+            
+            # Update last access time
+            session['last_access'] = time.time()
+            
+            return True, "Session is valid", session
         
-        session = self.sessions[session_id]
+        # If using LDAP, check with LDAP manager
+        if self.auth_method == 'ldap' and self.ldap_manager:
+            self.logger.debug("Session not found in auth_manager, checking LDAP manager")
+            success, message, session = self.ldap_manager.validate_session(session_id)
+            
+            # Additional debug: Log LDAP validation result
+            self.logger.debug(f"LDAP validate_session result: success={success}, message={message}")
+            if session:
+                self.logger.debug(f"LDAP session: {session}")
+            
+            if success and session:
+                # Cache the session locally
+                self.sessions[session_id] = session
+                
+                # Ensure it has expiry time
+                if 'expiry' not in session:
+                    session['expiry'] = time.time() + self.session_expiry
+                    self.logger.debug(f"Added expiry to LDAP session: {session['expiry']}")
+                
+                # Save sessions to persist
+                self.save_sessions()
+                
+                return True, message, session
         
-        # Check if session has expired
-        current_time = time.time()
-        if current_time > session.get('expiry', 0):
-            # Remove expired session
-            del self.sessions[session_id]
-            self.save_sessions()
-            return False, None
-        
-        # Extend session expiry time
-        session['expiry'] = current_time + self.session_expiry
-        self.save_sessions()
-        
-        return True, session
-    
-    def logout(self, session_id: str) -> bool:
+        self.logger.warning(f"Session not found: {session_id[:8]}...")
+        return False, "Invalid or expired session", None
+
+    def logout(self, session_id: str) -> Tuple[bool, str]:
         """
-        Invalidate a session (logout)
+        Logout a user by invalidating their session
         
         Args:
             session_id: Session ID to invalidate
             
         Returns:
-            True if session was found and removed, False otherwise
+            Tuple of (success, message)
         """
+        # Check local sessions
         if session_id in self.sessions:
-            del self.sessions[session_id]
+            self.sessions.pop(session_id)
             self.save_sessions()
-            return True
-        return False
+            return True, "Logged out successfully"
+        
+        # Check LDAP manager if using LDAP
+        if self.auth_method == 'ldap' and self.ldap_manager:
+            success, message = self.ldap_manager.end_session(session_id)
+            if success:
+                return True, message
+        
+        return False, "Session not found"
+
+    def get_auth_url(self) -> str:
+        """
+        Get the authorization URL for Microsoft Entra ID authentication
+        
+        Returns:
+            Authorization URL string
+        """
+        if self.auth_method != 'entra' or not self.msal_app:
+            return ""
+            
+        # Generate a request state with a random value
+        request_state = str(uuid.uuid4())
+        
+        # Cache the state for validation during the callback
+        # This is a simplistic approach - for production, you would want a more robust solution
+        self.auth_states = getattr(self, 'auth_states', {})
+        self.auth_states[request_state] = {'created_at': time.time()}
+        
+        # Generate the authorization URL
+        auth_params = {
+            "client_id": self.client_id,
+            "response_type": "code",
+            "redirect_uri": self.redirect_uri,
+            "scope": " ".join(self.scopes),
+            "state": request_state,
+            "prompt": "select_account"
+        }
+        
+        auth_url = f"https://login.microsoftonline.com/{self.tenant_id}/oauth2/v2.0/authorize?{urlencode(auth_params)}"
+        return auth_url
     
-    def create_session(self, username: str, display_name: str, email: str, groups: List[str]) -> Dict:
+    def create_session(self, username: str, display_name: str, email: str, groups: List[str]) -> str:
         """
         Create a new session for a user
         
@@ -471,11 +633,14 @@ class AuthManager:
             groups: List of group memberships
             
         Returns:
-            Session data including session_id
+            Session ID string
         """
+        # Generate a unique session ID
         session_id = str(uuid.uuid4())
+        # Set expiry time based on the session_expiry value
         expiry = time.time() + self.session_expiry
         
+        # Create session object
         session = {
             'session_id': session_id,
             'username': username,
@@ -483,13 +648,19 @@ class AuthManager:
             'email': email,
             'groups': groups,
             'created': time.time(),
-            'expiry': expiry
+            'expiry': expiry,
+            'last_access': time.time()
         }
         
+        # Store session
         self.sessions[session_id] = session
+        
+        # Save sessions to persist across server restarts
         self.save_sessions()
         
-        return session
+        self.logger.info(f"Created new session for user {username}: {session_id[:8]}...")
+        
+        return session_id
     
     def save_sessions(self):
         """Save sessions to a file"""
@@ -501,10 +672,19 @@ class AuthManager:
     
     def load_sessions(self):
         """Load sessions from a file"""
+        self.sessions = {}  # Initialize with empty dict
+        
         if os.path.exists(self.session_file):
             try:
                 with open(self.session_file, 'r') as f:
-                    self.sessions = json.load(f)
+                    loaded_sessions = json.load(f)
+                    
+                # Validate the loaded sessions to ensure they're properly formatted
+                for session_id, session_data in loaded_sessions.items():
+                    # Ensure session has the required fields
+                    if isinstance(session_data, dict) and 'username' in session_data:
+                        self.sessions[session_id] = session_data
+                        
+                self.logger.info(f"Loaded {len(self.sessions)} sessions from {self.session_file}")
             except Exception as e:
-                print(f"Error loading sessions: {str(e)}")
-                self.sessions = {} 
+                self.logger.error(f"Error loading sessions: {str(e)}")
