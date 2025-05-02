@@ -79,6 +79,15 @@ function checkAuthentication() {
                     groups: data.groups || []
                 };
                 updateUserInfo(data);
+                
+                // Dispatch an event to notify other scripts that the user is authenticated
+                const authEvent = new CustomEvent('userAuthenticated', { 
+                    detail: { 
+                        username: data.username,
+                        authenticated: true 
+                    } 
+                });
+                document.dispatchEvent(authEvent);
             } else {
                 // User is not authenticated, redirect to login page
                 // Only redirect if not on the login page already
@@ -105,6 +114,15 @@ function checkAuthentication() {
                 groups: []
             };
             updateUserInfo(currentUser);
+            
+            // Dispatch event for anonymous user
+            const authEvent = new CustomEvent('userAuthenticated', { 
+                detail: { 
+                    username: 'anonymous',
+                    authenticated: false
+                } 
+            });
+            document.dispatchEvent(authEvent);
         });
 }
 
@@ -122,29 +140,69 @@ function updateUserInfo(userData) {
     // Create user info display
     const displayName = userData.display_name || userData.username;
     
-    // Add user name span
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'user-name';
-    nameSpan.textContent = displayName;
-    userInfoContainer.appendChild(nameSpan);
-    
-    // Only add logout button if NOT anonymous user
+    // Only show user dropdown if not anonymous user
     if (userData.username && userData.username !== 'anonymous') {
-        console.log('Showing logout button for authenticated user:', userData.username);
+        console.log('Showing user dropdown for authenticated user:', userData.username);
         
-        // Create small space between name and button
-        userInfoContainer.appendChild(document.createTextNode(' '));
+        // Create user dropdown container
+        const userDropdown = document.createElement('div');
+        userDropdown.className = 'user-dropdown';
         
-        // Create logout button
-        const logoutBtn = document.createElement('button');
-        logoutBtn.id = 'logout-btn';
-        logoutBtn.className = 'button small';
-        logoutBtn.textContent = 'Logout';
-        logoutBtn.addEventListener('click', handleLogout);
+        // Add user name span with dropdown icon
+        const nameSpan = document.createElement('div');
+        nameSpan.className = 'user-name';
+        nameSpan.innerHTML = `${displayName} <i class="fas fa-chevron-down"></i>`;
+        userDropdown.appendChild(nameSpan);
         
-        userInfoContainer.appendChild(logoutBtn);
+        // Create dropdown content
+        const dropdownContent = document.createElement('div');
+        dropdownContent.className = 'dropdown-content';
+        
+        // Add settings option
+        const settingsLink = document.createElement('a');
+        settingsLink.href = '#';
+        settingsLink.innerHTML = '<i class="fas fa-cog"></i> Settings';
+        settingsLink.addEventListener('click', function(e) {
+            e.preventDefault();
+            showSettingsModal();
+        });
+        dropdownContent.appendChild(settingsLink);
+        
+        // Add logout option
+        const logoutLink = document.createElement('a');
+        logoutLink.href = '#';
+        logoutLink.innerHTML = '<i class="fas fa-sign-out-alt"></i> Logout';
+        logoutLink.addEventListener('click', function(e) {
+            e.preventDefault();
+            handleLogout();
+        });
+        dropdownContent.appendChild(logoutLink);
+        
+        // Add dropdown content to user dropdown
+        userDropdown.appendChild(dropdownContent);
+        
+        // Add user dropdown to container
+        userInfoContainer.appendChild(userDropdown);
     } else {
-        console.log('Not showing logout button for anonymous user');
+        console.log('Showing anonymous user info');
+        
+        // Add simple user name for anonymous user
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'user-name';
+        nameSpan.textContent = displayName;
+        userInfoContainer.appendChild(nameSpan);
+    }
+}
+
+/**
+ * Show the settings modal
+ */
+function showSettingsModal() {
+    // This function is implemented in settings.js
+    if (typeof openSettingsModal === 'function') {
+        openSettingsModal();
+    } else {
+        console.error('Settings modal function not found');
     }
 }
 

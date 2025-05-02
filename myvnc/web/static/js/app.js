@@ -3,19 +3,28 @@ let vncConfig = {};
 let lsfConfig = {};
 
 // DOM Elements
-const tabs = document.querySelectorAll('.tab-button');
-const tabContents = document.querySelectorAll('.tab-content');
-const refreshButton = document.getElementById('refresh-button');
-const createVNCForm = document.getElementById('create-vnc-form');
-const vncTableBody = document.getElementById('vnc-table-body');
-const noVNCMessage = document.getElementById('no-vnc-message');
+let tabs = document.querySelectorAll('.tab-button');
+let tabContents = document.querySelectorAll('.tab-content');
+let refreshButton = document.getElementById('refresh-button');
+let createVNCForm = document.getElementById('create-vnc-form');
+let vncTableBody = document.getElementById('vnc-table-body');
+let noVNCMessage = document.getElementById('no-vnc-message');
 const messageBox = document.getElementById('message-box');
 const messageText = document.getElementById('message-text');
 const messageClose = document.getElementById('message-close');
 
 // Initialize application
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('Application initialization started');
+    
     // Initialize tabs
+    tabs = document.querySelectorAll('.tab-button');
+    tabContents = document.querySelectorAll('.tab-content');
+    refreshButton = document.getElementById('refresh-button');
+    createVNCForm = document.getElementById('create-vnc-form');
+    vncTableBody = document.getElementById('vnc-table-body');
+    noVNCMessage = document.getElementById('no-vnc-message');
+    
     tabs.forEach(tab => {
         tab.addEventListener('click', () => {
             const tabId = tab.getAttribute('data-tab');
@@ -23,21 +32,23 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
     
-    // Set up event listeners
-    refreshButton.addEventListener('click', () => {
-        refreshButton.classList.add('rotating');
-        refreshButton.classList.add('refreshing');
-        const originalText = '<i class="fas fa-sync-alt"></i> Refresh';
-        refreshButton.innerHTML = '<i class="fas fa-sync-alt"></i> Refreshing...';
-        
-        refreshVNCList().finally(() => {
-            setTimeout(() => {
-                refreshButton.classList.remove('rotating');
-                refreshButton.classList.remove('refreshing');
-                refreshButton.innerHTML = originalText;
-            }, 500);
+    // Set up other event listeners
+    if (refreshButton) {
+        refreshButton.addEventListener('click', () => {
+            refreshButton.classList.add('rotating');
+            refreshButton.classList.add('refreshing');
+            const originalText = '<i class="fas fa-sync-alt"></i> Refresh';
+            refreshButton.innerHTML = '<i class="fas fa-sync-alt"></i> Refreshing...';
+            
+            refreshVNCList().finally(() => {
+                setTimeout(() => {
+                    refreshButton.classList.remove('rotating');
+                    refreshButton.classList.remove('refreshing');
+                    refreshButton.innerHTML = originalText;
+                }, 500);
+            });
         });
-    });
+    }
     
     // Memory slider event listener
     const memorySlider = document.getElementById('lsf-memory');
@@ -53,19 +64,370 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
-    createVNCForm.addEventListener('submit', createVNCSession);
-    messageClose.addEventListener('click', hideMessage);
+    if (createVNCForm) {
+        createVNCForm.addEventListener('submit', createVNCSession);
+    }
     
-    // Load configurations
-    loadVNCConfig();
-    loadLSFConfig();
+    if (messageClose) {
+        messageClose.addEventListener('click', hideMessage);
+    }
+    
+    // Initialize the application in a defined sequence
+    initializeApplication();
     
     // Load initial VNC list
     refreshVNCList();
     
     // Initial load of debug info when debug tab is clicked
-    document.getElementById('debug-tab').addEventListener('click', loadDebugInfo);
+    const debugTab = document.getElementById('debug-tab');
+    if (debugTab) {
+        debugTab.addEventListener('click', loadDebugInfo);
+    }
 });
+
+// Initialize Application
+async function initializeApplication() {
+    console.log('==== INITIALIZING APPLICATION ====');
+    try {
+        // Load configuration data
+        await Promise.all([
+            loadVNCConfig(),
+            loadLSFConfig()
+        ]);
+        
+        // Setup memory slider functionality if present
+        const memorySlider = document.getElementById('lsf-memory');
+        if (memorySlider) {
+            memorySlider.addEventListener('input', handleMemorySliderInput);
+            memorySlider.addEventListener('change', handleMemorySliderChange);
+        }
+        
+        // Initial load of VNC sessions list
+        await refreshVNCList();
+        
+        // Determine initial active tab
+        const activeTab = document.querySelector('.tab-button.active');
+        if (activeTab) {
+            changeTab(activeTab.dataset.tab);
+        }
+        
+        // Run testUserSettings function during development/debugging
+        if (window.location.search.includes('debug=1')) {
+            console.log('Debug mode enabled, testing user settings');
+            setTimeout(testUserSettings, 1000);
+        }
+        
+        // After initialization is done, make sure the Create VNC tab form has the right user settings applied
+        // This ensures settings are applied even if the tab isn't the first active one
+        setTimeout(() => {
+            console.log('Double-checking user settings are applied to Create VNC form...');
+            loadVNCConfig();
+        }, 500);
+        
+        console.log('==== INITIALIZATION COMPLETE ====');
+    } catch (error) {
+        console.error('Failed to initialize application:', error);
+    }
+}
+
+// Test function that can be called from browser console
+async function testUserSettings() {
+    console.log('==== TESTING USER SETTINGS ====');
+    try {
+        // First try to get the settings directly from the API
+        console.log('Directly fetching user settings from API...');
+        const response = await fetch('/api/user/settings');
+        console.log('API response status:', response.status);
+        
+        const responseText = await response.text();
+        console.log('Raw API response:', responseText);
+        
+        try {
+            const data = JSON.parse(responseText);
+            console.log('Parsed settings data:', data);
+            
+            if (data && data.success && data.settings) {
+                console.log('Settings found:', data.settings);
+                
+                if (data.settings.vnc_settings) {
+                    console.log('VNC settings:', data.settings.vnc_settings);
+                } else {
+                    console.warn('No VNC settings found in user settings object');
+                }
+            } else {
+                console.warn('No settings found in response');
+            }
+        } catch (e) {
+            console.error('Failed to parse settings JSON:', e);
+        }
+        
+        // Now check the select elements to see what they contain
+        const siteSelect = document.getElementById('vnc-site');
+        const resolutionSelect = document.getElementById('vnc-resolution');
+        const windowManagerSelect = document.getElementById('vnc-window-manager');
+        
+        console.log('Current form values:');
+        console.log('Site:', siteSelect ? siteSelect.value : 'Not found');
+        console.log('Resolution:', resolutionSelect ? resolutionSelect.value : 'Not found');
+        console.log('Window Manager:', windowManagerSelect ? windowManagerSelect.value : 'Not found');
+        
+        // Now try loading with our function
+        console.log('Loading via loadUserSettings function...');
+        const userSettings = await loadUserSettings();
+        console.log('User settings from function:', userSettings);
+        
+        // Force applying the settings
+        if (userSettings && userSettings.vnc_settings) {
+            console.log('Forcing application of settings...');
+            
+            if (siteSelect && userSettings.vnc_settings.site) {
+                console.log(`Setting site to ${userSettings.vnc_settings.site}`);
+                siteSelect.value = userSettings.vnc_settings.site;
+            }
+            
+            if (resolutionSelect && userSettings.vnc_settings.resolution) {
+                console.log(`Setting resolution to ${userSettings.vnc_settings.resolution}`);
+                resolutionSelect.value = userSettings.vnc_settings.resolution;
+            }
+            
+            if (windowManagerSelect && userSettings.vnc_settings.window_manager) {
+                console.log(`Setting window manager to ${userSettings.vnc_settings.window_manager}`);
+                windowManagerSelect.value = userSettings.vnc_settings.window_manager;
+            }
+            
+            console.log('Settings application complete');
+        } else {
+            console.warn('No settings to apply');
+        }
+    } catch (error) {
+        console.error('Test error:', error);
+    }
+    console.log('==== TEST COMPLETE ====');
+}
+
+// Export the test function to the window object so it can be called from the console
+window.testUserSettings = testUserSettings;
+
+// Load VNC Configuration
+async function loadVNCConfig() {
+    console.log('==== LOADING VNC CONFIGURATION ====');
+    try {
+        // First try to load user settings directly (most important)
+        let userVncSettings = null;
+        
+        try {
+            console.log('Fetching user settings first...');
+            const userSettingsResponse = await fetch('/api/user/settings');
+            const userSettingsText = await userSettingsResponse.text();
+            console.log('Raw user settings response:', userSettingsText);
+            
+            if (userSettingsText && userSettingsText.trim()) {
+                const userSettingsData = JSON.parse(userSettingsText);
+                console.log('User settings response parsed:', userSettingsData);
+                
+                if (userSettingsData.success && userSettingsData.settings && userSettingsData.settings.vnc_settings) {
+                    userVncSettings = userSettingsData.settings.vnc_settings;
+                    console.log('Found user VNC settings:', userVncSettings);
+                } else {
+                    console.log('No user VNC settings found');
+                }
+            } else {
+                console.log('Empty response from user settings API');
+            }
+        } catch (e) {
+            console.warn('Error fetching user settings:', e);
+        }
+        
+        // Load server VNC default configuration 
+        console.log('Fetching server VNC configuration...');
+        const vncResponse = await fetch('/api/config/vnc');
+        const vncText = await vncResponse.text();
+        console.log('Raw VNC config response:', vncText);
+        
+        vncConfig = JSON.parse(vncText);
+        console.log('Server VNC config loaded:', vncConfig);
+        
+        // Get references to form selects before populating
+        const siteSelect = document.getElementById('vnc-site');
+        const resolutionSelect = document.getElementById('vnc-resolution');
+        const windowManagerSelect = document.getElementById('vnc-window-manager');
+        
+        if (!siteSelect || !resolutionSelect || !windowManagerSelect) {
+            console.error('Could not find all select elements!', {
+                siteSelect: !!siteSelect,
+                resolutionSelect: !!resolutionSelect,
+                windowManagerSelect: !!windowManagerSelect
+            });
+            return;
+        }
+        
+        // Clear and populate dropdowns with options
+        clearAndPopulateDropdown(siteSelect, vncConfig.sites);
+        clearAndPopulateDropdown(resolutionSelect, vncConfig.resolutions);
+        clearAndPopulateDropdown(windowManagerSelect, vncConfig.window_managers);
+        
+        // Now set the selected values - prioritize user settings if available
+        if (userVncSettings) {
+            console.log('Setting dropdown values from user settings');
+            
+            // After populating the dropdowns, wait longer to ensure the DOM has fully updated
+            // Increased from 50ms to 200ms to ensure DOM is ready
+            setTimeout(() => {
+                // Set site
+                if (userVncSettings.site) {
+                    console.log(`Setting site dropdown to: ${userVncSettings.site}`);
+                    setDropdownValue(siteSelect, userVncSettings.site);
+                    // Force the value directly after setting it through the function
+                    if (siteSelect.value !== userVncSettings.site) {
+                        console.log(`Direct force setting site to: ${userVncSettings.site}`);
+                        siteSelect.value = userVncSettings.site;
+                    }
+                }
+                
+                // Set resolution
+                if (userVncSettings.resolution) {
+                    console.log(`Setting resolution dropdown to: ${userVncSettings.resolution}`);
+                    setDropdownValue(resolutionSelect, userVncSettings.resolution);
+                    // Force the value directly after setting it through the function
+                    if (resolutionSelect.value !== userVncSettings.resolution) {
+                        console.log(`Direct force setting resolution to: ${userVncSettings.resolution}`);
+                        resolutionSelect.value = userVncSettings.resolution;
+                    }
+                }
+                
+                // Set window manager
+                if (userVncSettings.window_manager) {
+                    console.log(`Setting window manager dropdown to: ${userVncSettings.window_manager}`);
+                    setDropdownValue(windowManagerSelect, userVncSettings.window_manager);
+                    // Force the value directly after setting it through the function
+                    if (windowManagerSelect.value !== userVncSettings.window_manager) {
+                        console.log(`Direct force setting window manager to: ${userVncSettings.window_manager}`);
+                        windowManagerSelect.value = userVncSettings.window_manager;
+                    }
+                }
+                
+                // VERIFICATION: Double-check the selected values
+                console.log('VERIFICATION - Current dropdown values after setting:');
+                console.log(`Site: ${siteSelect.value}`);
+                console.log(`Resolution: ${resolutionSelect.value}`);
+                console.log(`Window Manager: ${windowManagerSelect.value}`);
+                
+                // Add additional verification logging to check if any items were not found in dropdowns
+                if (userVncSettings.site && siteSelect.value !== userVncSettings.site) {
+                    console.warn(`Failed to set site to ${userVncSettings.site}. Options available:`, 
+                        Array.from(siteSelect.options).map(o => o.value));
+                }
+                if (userVncSettings.resolution && resolutionSelect.value !== userVncSettings.resolution) {
+                    console.warn(`Failed to set resolution to ${userVncSettings.resolution}. Options available:`, 
+                        Array.from(resolutionSelect.options).map(o => o.value));
+                }
+                if (userVncSettings.window_manager && windowManagerSelect.value !== userVncSettings.window_manager) {
+                    console.warn(`Failed to set window manager to ${userVncSettings.window_manager}. Options available:`, 
+                        Array.from(windowManagerSelect.options).map(o => o.value));
+                }
+            }, 200); // Increased timeout from 50ms to 200ms
+        } else {
+            // Fall back to server defaults
+            console.log('Setting dropdown values from server defaults');
+            
+            // Also use the increased setTimeout for consistency
+            setTimeout(() => {
+                setDropdownValue(siteSelect, vncConfig.defaults.site);
+                setDropdownValue(resolutionSelect, vncConfig.defaults.resolution);
+                setDropdownValue(windowManagerSelect, vncConfig.defaults.window_manager);
+                
+                // VERIFICATION for defaults as well
+                console.log('VERIFICATION - Default dropdown values after setting:');
+                console.log(`Site: ${siteSelect.value}`);
+                console.log(`Resolution: ${resolutionSelect.value}`);
+                console.log(`Window Manager: ${windowManagerSelect.value}`);
+            }, 200); // Increased timeout from 50ms to 200ms
+        }
+        
+        // Set default name placeholder
+        const randomId = generateRandomId();
+        const nameInput = document.getElementById('vnc-name');
+        if (nameInput) {
+            nameInput.placeholder = `${vncConfig.defaults.name_prefix}_${randomId}`;
+        }
+        
+        console.log('VNC configuration loading complete');
+    } catch (error) {
+        console.error('Failed to load VNC configuration:', error);
+        showMessage('Could not load VNC configuration. Please try again later.', 'error');
+    }
+}
+
+// Helper function to clear and populate a dropdown
+function clearAndPopulateDropdown(selectElement, options) {
+    if (!selectElement) return;
+    
+    // Clear existing options
+    selectElement.innerHTML = '';
+    
+    // Add new options
+    options.forEach(option => {
+        const optionElement = document.createElement('option');
+        optionElement.value = option;
+        optionElement.textContent = option;
+        selectElement.appendChild(optionElement);
+    });
+}
+
+// Helper function to set dropdown value and ensure it's visible
+function setDropdownValue(selectElement, value) {
+    if (!selectElement || !value) return;
+    
+    console.log(`Setting ${selectElement.id} to value: ${value}`);
+    
+    // Try setting the value directly first
+    selectElement.value = value;
+    
+    // If that didn't work, try to find the option by value
+    if (selectElement.value !== value) {
+        console.warn(`Direct value setting failed. Current value: ${selectElement.value}, Wanted: ${value}`);
+        
+        // Check if option exists
+        let optionFound = false;
+        for (let i = 0; i < selectElement.options.length; i++) {
+            const option = selectElement.options[i];
+            // Try matching by exact value, lowercase value, or trimmed value
+            if (option.value === value || 
+                option.value.toLowerCase() === value.toLowerCase() ||
+                option.value.trim() === value.trim()) {
+                // Select this option by setting selectedIndex
+                selectElement.selectedIndex = i;
+                optionFound = true;
+                console.log(`Set selectedIndex to ${i}`);
+                break;
+            }
+        }
+        
+        // If option doesn't exist, add it
+        if (!optionFound) {
+            console.log(`Option ${value} doesn't exist in dropdown, adding it`);
+            const option = document.createElement('option');
+            option.value = value;
+            option.textContent = `${value} (Custom)`;
+            selectElement.appendChild(option);
+            
+            // Try setting the value again (should work now)
+            selectElement.value = value;
+            
+            // Verify that it worked
+            if (selectElement.value !== value) {
+                console.error(`Failed to set value even after adding it as an option. Current value: ${selectElement.value}`);
+            }
+        }
+    }
+    
+    // Final verification
+    console.log(`Final selected value for ${selectElement.id}: ${selectElement.value}`);
+    
+    // Fire a change event to make sure any listeners are notified
+    const event = new Event('change');
+    selectElement.dispatchEvent(event);
+}
 
 // Tab functionality
 function changeTab(tabId) {
@@ -81,6 +443,50 @@ function changeTab(tabId) {
     const activeContent = document.getElementById(tabId);
     activeContent.classList.add('fade-in');
     setTimeout(() => activeContent.classList.remove('fade-in'), 300);
+    
+    // Handle tab-specific actions
+    if (tabId === 'vnc-creator') {
+        console.log('Switching to Create VNC tab, reloading VNC config with user preferences');
+        loadVNCConfig(); // Use our rewritten function that directly gets user settings
+        
+        // Print current form settings after a delay to allow dropdowns to update
+        setTimeout(printFormSettings, 500);
+    } else if (tabId === 'vnc-manager') {
+        // Refresh VNC list when switching to manager tab
+        refreshVNCList();
+    } else if (tabId === 'debug-panel') {
+        // Load debug info when switching to debug tab
+        loadDebugInfo();
+    }
+}
+
+// Helper function to print out the current form settings
+function printFormSettings() {
+    const siteSelect = document.getElementById('vnc-site');
+    const resolutionSelect = document.getElementById('vnc-resolution');
+    const windowManagerSelect = document.getElementById('vnc-window-manager');
+    
+    console.log('==== CURRENT FORM SETTINGS ====');
+    console.log(`Site: ${siteSelect ? siteSelect.value : 'Not found'}`);
+    console.log(`Resolution: ${resolutionSelect ? resolutionSelect.value : 'Not found'}`);
+    console.log(`Window Manager: ${windowManagerSelect ? windowManagerSelect.value : 'Not found'}`);
+    
+    // Also check if these values are present in the dropdown options
+    if (siteSelect) {
+        const siteExists = Array.from(siteSelect.options).some(opt => opt.value === siteSelect.value);
+        console.log(`Site value exists in options: ${siteExists}`);
+    }
+    
+    if (resolutionSelect) {
+        const resolutionExists = Array.from(resolutionSelect.options).some(opt => opt.value === resolutionSelect.value);
+        console.log(`Resolution value exists in options: ${resolutionExists}`);
+    }
+    
+    if (windowManagerSelect) {
+        const wmExists = Array.from(windowManagerSelect.options).some(opt => opt.value === windowManagerSelect.value);
+        console.log(`Window Manager value exists in options: ${wmExists}`);
+    }
+    console.log('==============================');
 }
 
 // API Requests
@@ -97,40 +503,49 @@ async function apiRequest(endpoint, method = 'GET', data = null) {
     }
     
     try {
+        console.log(`Making API request to: /api/${endpoint}`);
         const response = await fetch(`/api/${endpoint}`, options);
-        const result = await response.json();
+        
+        // For debugging, log the status code
+        console.log(`API response status for ${endpoint}: ${response.status}`);
+        
+        // For user settings, handle 404 gracefully
+        if (endpoint === 'user/settings' && !response.ok) {
+            console.warn(`User settings request failed with status: ${response.status}`);
+            return { success: false, settings: {} };
+        }
+        
+        // Try to get response as text first
+        const responseText = await response.text();
+        console.log(`Raw API response for ${endpoint}:`, responseText);
+        
+        // Try to parse as JSON
+        let result;
+        try {
+            result = responseText ? JSON.parse(responseText) : {};
+            console.log(`Parsed API response for ${endpoint}:`, result);
+        } catch (parseError) {
+            console.error('Error parsing response as JSON:', parseError);
+            console.log('Response text:', responseText);
+            throw new Error('Invalid JSON response from server');
+        }
         
         if (!response.ok) {
-            throw new Error(result.error || 'An error occurred');
+            if (result && result.error) {
+                throw new Error(result.error);
+            } else {
+                throw new Error(`Server returned status ${response.status}`);
+            }
         }
         
         return result;
     } catch (error) {
-        console.error('API Error:', error);
-        // Don't show API errors for list requests, as they might be expected
-        if (!endpoint.includes('vnc/list')) {
+        console.error(`API Error for ${endpoint}:`, error);
+        // Don't show API errors for list requests or user settings, as they might be expected
+        if (!endpoint.includes('vnc/list') && !endpoint.includes('user/settings')) {
             showMessage(error.message || 'API request failed. Please try again later.', 'error');
         }
         throw error;
-    }
-}
-
-// Load VNC Configuration
-async function loadVNCConfig() {
-    try {
-        vncConfig = await apiRequest('config/vnc');
-        
-        // Populate form fields
-        populateSelect('vnc-site', vncConfig.sites, vncConfig.defaults.site);
-        populateSelect('vnc-resolution', vncConfig.resolutions, vncConfig.defaults.resolution);
-        populateSelect('vnc-window-manager', vncConfig.window_managers, vncConfig.defaults.window_manager);
-        
-        // Set default name placeholder
-        const randomId = generateRandomId();
-        document.getElementById('vnc-name').placeholder = `${vncConfig.defaults.name_prefix}_${randomId}`;
-    } catch (error) {
-        console.error('Failed to load VNC configuration:', error);
-        showMessage('Could not load VNC configuration. Please try again later.', 'error');
     }
 }
 
@@ -520,53 +935,108 @@ async function createVNCSession(event) {
     submitButton.disabled = true;
     
     try {
-        // Get form data and convert to object
-        const formData = new FormData(createVNCForm);
+        // Get form elements directly
+        const siteSelect = document.getElementById('vnc-site');
+        const resolutionSelect = document.getElementById('vnc-resolution');
+        const windowManagerSelect = document.getElementById('vnc-window-manager');
+        const nameInput = document.getElementById('vnc-name');
+        const coresSelect = document.getElementById('lsf-cores');
+        const queueSelect = document.getElementById('lsf-queue');
+        const memorySlider = document.getElementById('lsf-memory');
+        
+        // Log all form element values for debugging
+        console.log('Form values at submission:');
+        console.log('Site:', siteSelect ? siteSelect.value : 'Not found');
+        console.log('Resolution:', resolutionSelect ? resolutionSelect.value : 'Not found');
+        console.log('Window Manager:', windowManagerSelect ? windowManagerSelect.value : 'Not found');
+        console.log('Name:', nameInput ? nameInput.value : 'Not found');
+        console.log('Cores:', coresSelect ? coresSelect.value : 'Not found');
+        console.log('Queue:', queueSelect ? queueSelect.value : 'Not found');
+        console.log('Memory:', memorySlider ? memorySlider.value : 'Not found');
+        
+        // Build the data object manually from form elements
         const data = {};
         
-        // Only include non-empty values
-        for (const [key, value] of formData.entries()) {
-            // Skip empty session names to ensure they're not sent at all
-            if (key === 'name' && (!value || value.trim() === '')) {
-                continue;
-            }
-            
-            // Include all fields including memory_gb
-            data[key] = value;
+        // Add site if available and valid
+        if (siteSelect && siteSelect.value) {
+            data.site = siteSelect.value;
         }
         
-        // Make sure memory_gb is included from the slider
-        const memorySlider = document.getElementById('lsf-memory');
-        if (memorySlider) {
+        // Add resolution if available and valid
+        if (resolutionSelect && resolutionSelect.value) {
+            data.resolution = resolutionSelect.value;
+        }
+        
+        // Add window manager if available and valid
+        if (windowManagerSelect && windowManagerSelect.value) {
+            data.window_manager = windowManagerSelect.value;
+        }
+        
+        // Add name if provided (not empty)
+        if (nameInput && nameInput.value && nameInput.value.trim() !== '') {
+            data.name = nameInput.value.trim();
+        }
+        
+        // Add cores if available
+        if (coresSelect && coresSelect.value) {
+            data.num_cores = coresSelect.value;
+        }
+        
+        // Add queue if available
+        if (queueSelect && queueSelect.value) {
+            data.queue = queueSelect.value;
+        }
+        
+        // Add memory if available
+        if (memorySlider && memorySlider.value) {
             // Get the current value
             const currentValue = parseInt(memorySlider.value);
             
             // If we have memory options stored, ensure we use a valid option
             if (memorySlider.dataset.memoryOptions) {
-                const options = JSON.parse(memorySlider.dataset.memoryOptions);
-                
-                // Find the closest memory option
-                let closestOption = options[0];
-                let minDiff = Math.abs(currentValue - options[0]);
-                
-                for (let i = 1; i < options.length; i++) {
-                    const diff = Math.abs(currentValue - options[i]);
-                    if (diff < minDiff) {
-                        minDiff = diff;
-                        closestOption = options[i];
-                    }
+                try {
+                    const options = JSON.parse(memorySlider.dataset.memoryOptions);
+                    
+                    // Find the closest memory option
+                    let closestOption = findClosestMemoryOption(options, currentValue);
+                    data.memory_gb = closestOption.toString();
+                } catch (e) {
+                    console.warn('Error finding closest memory option:', e);
+                    data.memory_gb = currentValue.toString();
                 }
-                
-                data['memory_gb'] = closestOption.toString();
             } else {
                 // Fallback if no memory options are available
-                data['memory_gb'] = currentValue.toString();
+                data.memory_gb = currentValue.toString();
             }
         }
         
-        console.log('Submitting data:', data);
+        console.log('Submitting VNC session with data:', data);
         
-        const result = await apiRequest('vnc/create', 'POST', data);
+        // Request headers and body
+        const options = {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        };
+        
+        // Send the request directly
+        console.log('Sending request to /api/vnc/create');
+        const response = await fetch('/api/vnc/create', options);
+        
+        // Check response status
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Server returned error:', errorText);
+            throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+        }
+        
+        // Parse response
+        const result = await response.json();
+        console.log('Creation response:', result);
+        
+        // Show success message
         showMessage(`VNC session created successfully. Job ID: ${result.job_id}`, 'success');
         
         // Reset form
@@ -642,8 +1112,20 @@ async function killVNCSession(jobId) {
 // Populate Select Options
 function populateSelect(elementId, options, defaultValue) {
     const select = document.getElementById(elementId);
+    if (!select) {
+        console.error(`Element with ID "${elementId}" not found`);
+        return;
+    }
+    
+    console.log(`Populating select ${elementId} with options:`, options, `default:`, defaultValue);
+    
+    // Clear existing options
     select.innerHTML = '';
     
+    // Track if we found a match for the default value
+    let foundDefault = false;
+    
+    // Add each option
     options.forEach(option => {
         const optionElement = document.createElement('option');
         optionElement.value = option;
@@ -651,10 +1133,28 @@ function populateSelect(elementId, options, defaultValue) {
         
         if (option === defaultValue) {
             optionElement.selected = true;
+            foundDefault = true;
+            console.log(`Found matching option for default value "${defaultValue}" in ${elementId}`);
         }
         
         select.appendChild(optionElement);
     });
+    
+    // If no match found for the default value, log a warning
+    if (!foundDefault && defaultValue) {
+        console.warn(`Default value "${defaultValue}" not found in options for ${elementId}`);
+        
+        // Add the default value as an option if it's not in the list
+        const optionElement = document.createElement('option');
+        optionElement.value = defaultValue;
+        optionElement.textContent = defaultValue + ' (Custom)';
+        optionElement.selected = true;
+        select.appendChild(optionElement);
+        console.log(`Added custom option for default value "${defaultValue}" to ${elementId}`);
+    }
+    
+    // Log the final selected value
+    console.log(`${elementId} final selected value:`, select.value);
 }
 
 // Show Message
@@ -815,14 +1315,10 @@ function fetchSessionInfo() {
         .catch(error => {
             console.error('Failed to load session information:', error);
             document.getElementById('debug-session').innerHTML = `
-                <div class="session-status not-authenticated">
-                    <i class="fas fa-exclamation-circle"></i>
-                    <span>Error loading session: ${error.message}</span>
+                <div class="error-message">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <p>Failed to load session information: ${error.message}</p>
                 </div>
-                <p>Please check the browser console for more details.</p>
-                <button onclick="fetchSessionInfo()" class="button primary">
-                    <i class="fas fa-sync"></i> Try Again
-                </button>
             `;
         });
 }
@@ -831,7 +1327,7 @@ function fetchSessionInfo() {
  * Fetch environment information from server
  */
 function fetchEnvironmentInfo() {
-    console.log('Fetching environment data using direct fetch...');
+    console.log('Fetching environment data...');
     
     fetch('/api/debug/environment')
         .then(response => {
@@ -843,282 +1339,155 @@ function fetchEnvironmentInfo() {
         })
         .then(data => {
             console.log('Environment data successfully received:', data);
-            if (data && data.environment) {
-                displayEnvironmentInfo(data.environment);
-            } else {
-                throw new Error('Invalid environment data structure');
-            }
+            displayEnvironmentInfo(data);
         })
         .catch(error => {
             console.error('Failed to load environment information:', error);
             document.getElementById('debug-environment').innerHTML = `
-                <div class="error">
-                    <i class="fas fa-exclamation-circle"></i>
-                    <span>Error loading environment: ${error.message}</span>
+                <div class="error-message">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <p>Failed to load environment information: ${error.message}</p>
                 </div>
-                <button onclick="fetchEnvironmentInfo()" class="button primary">
-                    <i class="fas fa-sync"></i> Try Again
-                </button>
             `;
         });
 }
 
 /**
- * Display session information
- * @param {Object} data - Session information data
+ * Display session information in the debug panel
  */
 function displaySessionInfo(data) {
-    const container = document.getElementById('debug-session');
+    console.log('Displaying session information...');
     
-    if (!data.authenticated || !data.session_info) {
-        container.innerHTML = `
-            <div class="session-status not-authenticated">
-                <i class="fas fa-exclamation-circle"></i>
-                <span>${data.message || 'No active session found'}</span>
-            </div>
-        `;
-        return;
-    }
+    const sessionContainer = document.getElementById('debug-session');
     
-    const session = data.session_info;
+    let html = '<div class="debug-section">';
     
-    // Format the expiry information
-    let expiryInfo = '';
-    if (session.days_until_expiry !== null) {
-        const days = session.days_until_expiry;
-        if (days <= 1) {
-            const hours = Math.round(session.time_until_expiry_seconds / 3600);
-            if (hours < 1) {
-                const minutes = Math.round(session.time_until_expiry_seconds / 60);
-                expiryInfo = `<span class="expiry-soon">${minutes} minutes</span>`;
-            } else {
-                expiryInfo = `<span class="expiry-warning">${hours} hours</span>`;
-            }
-        } else if (days <= 7) {
-            expiryInfo = `<span class="expiry-normal">${days} days</span>`;
-        } else {
-            expiryInfo = `<span class="expiry-long">${days} days</span>`;
-        }
-    } else {
-        expiryInfo = 'N/A';
-    }
-    
-    // Create the HTML for the session information
-    let html = `
-        <div class="session-status authenticated">
-            <i class="fas fa-check-circle"></i>
-            <span>Authenticated as ${session.username}</span>
-        </div>
-        
-        <div class="session-details">
-            <div class="session-row">
-                <div class="session-label">Session ID:</div>
-                <div class="session-value">${session.session_id}</div>
+    // Display session information
+    html += `
+        <h3>Session Information</h3>
+        <div class="debug-info-table">
+            <div class="debug-info-row">
+                <div class="debug-info-label">Session ID</div>
+                <div class="debug-info-value">${data.session_id || 'N/A'}</div>
             </div>
-            <div class="session-row">
-                <div class="session-label">User:</div>
-                <div class="session-value">
-                    ${session.display_name || session.username}
-                    <span class="username">(${session.username})</span>
-                </div>
+            <div class="debug-info-row">
+                <div class="debug-info-label">User</div>
+                <div class="debug-info-value">${data.username || 'Anonymous'}</div>
             </div>
-            <div class="session-row">
-                <div class="session-label">Email:</div>
-                <div class="session-value">${session.email || 'N/A'}</div>
+            <div class="debug-info-row">
+                <div class="debug-info-label">Authentication</div>
+                <div class="debug-info-value">${data.authenticated ? 'Authenticated' : 'Not Authenticated'}</div>
             </div>
-            <div class="session-row">
-                <div class="session-label">Auth Method:</div>
-                <div class="session-value">${session.authentication_method || 'N/A'}</div>
+            <div class="debug-info-row">
+                <div class="debug-info-label">Auth Method</div>
+                <div class="debug-info-value">${data.auth_method || 'None'}</div>
             </div>
-            <div class="session-row">
-                <div class="session-label">Created:</div>
-                <div class="session-value">${session.created_at || 'N/A'}</div>
+            <div class="debug-info-row">
+                <div class="debug-info-label">Login Time</div>
+                <div class="debug-info-value">${data.login_time || 'N/A'}</div>
             </div>
-            <div class="session-row">
-                <div class="session-label">Last Access:</div>
-                <div class="session-value">${session.last_access || 'N/A'}</div>
+            <div class="debug-info-row">
+                <div class="debug-info-label">IP Address</div>
+                <div class="debug-info-value">${data.ip_address || 'Unknown'}</div>
             </div>
-            <div class="session-row">
-                <div class="session-label">Expires:</div>
-                <div class="session-value">${session.expiry_date || 'N/A'}</div>
-            </div>
-            <div class="session-row">
-                <div class="session-label">Time left:</div>
-                <div class="session-value">${expiryInfo}</div>
+            <div class="debug-info-row">
+                <div class="debug-info-label">User Agent</div>
+                <div class="debug-info-value">${data.user_agent || 'Unknown'}</div>
             </div>
         </div>
     `;
     
-    // Add group information if available
-    if (session.groups && session.groups.length > 0) {
+    // Display user permissions if available
+    if (data.permissions && Array.isArray(data.permissions) && data.permissions.length > 0) {
         html += `
-            <div class="groups-section">
-                <div class="session-label">User Groups:</div>
-                <div class="groups-list">
-                    ${session.groups.map(group => `<span class="group-tag">${group}</span>`).join('')}
+            <h3>User Permissions</h3>
+            <ul class="debug-permissions-list">
+                ${data.permissions.map(perm => `<li>${perm}</li>`).join('')}
+            </ul>
+        `;
+    }
+    
+    html += '</div>';
+    
+    sessionContainer.innerHTML = html;
+}
+
+/**
+ * Display environment information in the debug panel
+ */
+function displayEnvironmentInfo(data) {
+    console.log('Displaying environment information...');
+    
+    const envContainer = document.getElementById('debug-environment');
+    
+    let html = '<div class="debug-section">';
+    
+    // Server Information
+    html += `
+        <h3>Server Information</h3>
+        <div class="debug-info-table">
+            <div class="debug-info-row">
+                <div class="debug-info-label">Server Version</div>
+                <div class="debug-info-value">${data.server_version || 'Unknown'}</div>
+            </div>
+            <div class="debug-info-row">
+                <div class="debug-info-label">Python Version</div>
+                <div class="debug-info-value">${data.python_version || 'Unknown'}</div>
+            </div>
+            <div class="debug-info-row">
+                <div class="debug-info-label">Server Time</div>
+                <div class="debug-info-value">${data.server_time || 'Unknown'}</div>
+            </div>
+            <div class="debug-info-row">
+                <div class="debug-info-label">Hostname</div>
+                <div class="debug-info-value">${data.hostname || 'Unknown'}</div>
+            </div>
+        </div>
+    `;
+    
+    // LSF Configuration
+    if (data.lsf_info) {
+        html += `
+            <h3>LSF Configuration</h3>
+            <div class="debug-info-table">
+                <div class="debug-info-row">
+                    <div class="debug-info-label">LSF Version</div>
+                    <div class="debug-info-value">${data.lsf_info.version || 'Unknown'}</div>
+                </div>
+                <div class="debug-info-row">
+                    <div class="debug-info-label">LSF Root</div>
+                    <div class="debug-info-value">${data.lsf_info.lsf_root || 'Unknown'}</div>
+                </div>
+                <div class="debug-info-row">
+                    <div class="debug-info-label">LSF Default Queue</div>
+                    <div class="debug-info-value">${data.lsf_info.default_queue || 'Unknown'}</div>
                 </div>
             </div>
         `;
     }
     
-    container.innerHTML = html;
-}
-
-/**
- * Display environment information
- * @param {Object} environment - Environment information
- */
-function displayEnvironmentInfo(environment) {
-    const container = document.getElementById('debug-environment');
-    
-    if (!environment || Object.keys(environment).length === 0) {
-        container.innerHTML = '<p>No environment information available.</p>';
-        return;
-    }
-    
-    let html = '';
-    
-    // Display each environment variable
-    for (const [key, value] of Object.entries(environment)) {
+    // VNC Configuration
+    if (data.vnc_info) {
         html += `
-            <div class="env-item">
-                <div class="env-key">${key}:</div>
-                <div class="env-value">${value}</div>
+            <h3>VNC Configuration</h3>
+            <div class="debug-info-table">
+                <div class="debug-info-row">
+                    <div class="debug-info-label">VNC Server Path</div>
+                    <div class="debug-info-value">${data.vnc_info.server_path || 'Unknown'}</div>
+                </div>
+                <div class="debug-info-row">
+                    <div class="debug-info-label">Default Resolution</div>
+                    <div class="debug-info-value">${data.vnc_info.default_resolution || 'Unknown'}</div>
+                </div>
+                <div class="debug-info-row">
+                    <div class="debug-info-label">Default Window Manager</div>
+                    <div class="debug-info-value">${data.vnc_info.default_wm || 'Unknown'}</div>
+                </div>
             </div>
         `;
     }
     
-    container.innerHTML = html;
+    html += '</div>';
+    
+    envContainer.innerHTML = html;
 }
-
-// Function to load debug data
-function loadDebugData() {
-    fetch('/api/debug')
-        .then(response => response.json())
-        .then(data => {
-            displayDebugData(data);
-        })
-        .catch(error => {
-            console.error('Error loading debug data:', error);
-            document.getElementById('debug-content').innerHTML = 
-                `<div class="alert alert-danger">Error loading debug data: ${error.message}</div>`;
-        });
-}
-
-// Function to display debug data in a nice format
-function displayDebugData(data) {
-    const debugContentElement = document.getElementById('debug-content');
-    
-    // Create HTML content for debug data
-    let html = '<div class="debug-section">';
-    
-    // Environment section
-    html += '<h3>Environment Information</h3>';
-    html += '<table class="table table-sm table-striped">';
-    html += '<thead><tr><th>Name</th><th>Value</th></tr></thead><tbody>';
-    
-    for (const [key, value] of Object.entries(data.environment)) {
-        html += `<tr><td>${key}</td><td>${value}</td></tr>`;
-    }
-    
-    html += '</tbody></table>';
-    
-    // Configuration section
-    html += '<h3>Configuration</h3>';
-    html += '<div class="accordion" id="configAccordion">';
-    
-    let configIdx = 0;
-    for (const [configType, configData] of Object.entries(data.config)) {
-        configIdx++;
-        const headerId = `heading${configIdx}`;
-        const collapseId = `collapse${configIdx}`;
-        
-        html += '<div class="accordion-item">';
-        html += `<h2 class="accordion-header" id="${headerId}">`;
-        html += `<button class="accordion-button collapsed" type="button" 
-                      data-bs-toggle="collapse" data-bs-target="#${collapseId}" 
-                      aria-expanded="false" aria-controls="${collapseId}">
-                    ${configType}
-                 </button>`;
-        html += '</h2>';
-        html += `<div id="${collapseId}" class="accordion-collapse collapse" 
-                     aria-labelledby="${headerId}" data-bs-parent="#configAccordion">`;
-        html += '<div class="accordion-body">';
-        html += `<pre>${JSON.stringify(configData, null, 2)}</pre>`;
-        html += '</div></div></div>';
-    }
-    
-    html += '</div>'; // Close accordion
-    html += '</div>'; // Close debug-section
-    
-    debugContentElement.innerHTML = html;
-}
-
-// Event listener for debug tab
-document.getElementById('debug-tab').addEventListener('click', function() {
-    // Load debug data when debug tab is clicked
-    loadDebugData();
-});
-
-// Calculate job running time
-function calculateRunningTime(submitTime) {
-    if (!submitTime) {
-        return 'N/A';
-    }
-    
-    try {
-        // Parse the submit time
-        let submitDate;
-        
-        // Try to parse in standard ISO format
-        if (submitTime.includes('-')) {
-            // Assuming ISO format 'YYYY-MM-DD HH:MM:SS'
-            submitDate = new Date(submitTime);
-        } else {
-            // For other formats, try a more tolerant parser
-            const parts = submitTime.split(/[\s:\/]/);
-            if (parts.length >= 5) { // At least year, month, day, hour, minute
-                // Different date formats depending on the parts
-                const month = isNaN(parts[1]) ? parts[1] : parts[1] - 1; // JS months are 0-based
-                submitDate = new Date(
-                    parts[0], // year or month name
-                    isNaN(parts[0]) ? new Date().getFullYear() : month, // month or year
-                    parts[2], // day
-                    parts[3], // hour
-                    parts[4]  // minute
-                );
-            } else {
-                // Fallback: try the default JS date parser
-                submitDate = new Date(submitTime);
-            }
-        }
-        
-        // If parsing failed or the date is invalid, return N/A
-        if (isNaN(submitDate.getTime())) {
-            console.error('Unable to parse date:', submitTime);
-            return 'N/A';
-        }
-        
-        const now = new Date();
-        
-        // Calculate time difference in milliseconds
-        const diff = now - submitDate;
-        
-        // Convert to days, hours, minutes
-        const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-        
-        // Format the output based on the duration
-        if (days > 0) {
-            return `${days}d ${hours}h`;
-        } else if (hours > 0) {
-            return `${hours}h ${minutes}m`;
-        } else {
-            return `${minutes}m`;
-        }
-    } catch (e) {
-        console.error('Error calculating running time:', e);
-        return 'N/A';
-    }
-} 

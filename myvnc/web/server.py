@@ -34,6 +34,7 @@ from myvnc.utils.auth_manager import AuthManager
 from myvnc.utils.lsf_manager import LSFManager
 from myvnc.utils.config_manager import ConfigManager
 from myvnc.utils.vnc_manager import VNCManager
+from myvnc.utils.db_manager import DatabaseManager
 from myvnc.utils.log_manager import setup_logging, get_logger, get_current_log_file
 
 def setup_logger():
@@ -130,6 +131,14 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         self.lsf_manager = LSFManager()
         self.auth_manager = AuthManager()
         self.vnc_manager = VNCManager()
+        
+        # Get data directory from configuration
+        server_config = load_server_config()
+        data_dir = server_config.get("datadir", "/localdev/myvnc/data")
+        
+        # Initialize database manager with the correct data directory
+        self.db_manager = DatabaseManager(data_dir=data_dir)
+        
         self.directory = os.path.join(os.path.dirname(__file__), "static")
         self.logger = get_logger()
         
@@ -288,14 +297,15 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.handle_debug_commands()
         elif path == "/api/debug/environment":
             self.handle_debug_environment()
-        elif path == "/api/debug/session":
-            self.handle_debug_session()
         elif path == "/auth/entra" and auth_enabled and self.authentication_enabled.lower() == "entra":
             self.handle_auth_entra()
         elif path == "/auth/callback" and auth_enabled and self.authentication_enabled.lower() == "entra":
             self.handle_auth_callback()
         elif path == "/api/auth/ldap/diagnose" and auth_enabled and self.authentication_enabled.lower() == "ldap":
             self.ldap_diagnostics()
+        # New User Settings API endpoint
+        elif path == "/api/user/settings":
+            self.handle_user_settings()
         else:
             # Try to serve static file
             super().do_GET()
@@ -303,7 +313,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
     def do_POST(self):
         """Handle POST requests"""
         # Parse URL path
-        path = urlparse(self.path).path
+        parsed_path = urlparse(self.path)
+        path = parsed_path.path
         
         # Log the request
         client_address = self.client_address[0] if hasattr(self, 'client_address') and self.client_address else 'unknown'
@@ -333,8 +344,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             
             # Check authentication for all other paths
             if not path.startswith("/auth/"):
-                is_authenticated, message, _ = self.check_auth()
-                if not is_authenticated:
+                auth_result = self.check_auth()
+                if not auth_result[0]:  # Using index since it returns (success, message, session)
                     self.send_json_response({
                         "success": False,
                         "message": "Authentication required"
@@ -348,9 +359,11 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.handle_vnc_stop()
         elif path == "/api/vnc/copy":
             self.handle_vnc_copy()
+        # New User Settings API endpoint
+        elif path == "/api/user/settings":
+            self.handle_user_settings()
         else:
-            self.send_response(404)
-            self.end_headers()
+            self.send_error_response(f"Unknown endpoint: {path}", 404)
     
     def serve_file(self, filename):
         """Serve a file from the static directory"""
@@ -476,37 +489,17 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                     self.logger.debug(f"Setting session cookie: session_id={session_preview}..., Max-Age={self.auth_manager.session_expiry}")
                 else:
                     self.logger.debug(f"Setting session cookie with non-string session_id type: {type(session_id)}")
-                    # Convert to string if needed
-                    session_id = str(session_id)
+                
+                # Create browser-compatible session cookie without restrictive flags
+                cookie = f"session_id={session_id}; Path=/; Max-Age={self.auth_manager.session_expiry}"
+                username_cookie = f"username={username}; Path=/; Max-Age={self.auth_manager.session_expiry}"
+                self.logger.debug(f"Cookie being set: {cookie}")
                 
                 # Get the actual session to log expiry details
                 _, _, session = self.auth_manager.validate_session(session_id)
                 if session and 'expiry' in session:
                     expiry_time = session['expiry']
                     self.logger.info(f"Session expires at: {time.ctime(expiry_time)}")
-                    
-                    # Create better browser cookie with longer expiry
-                    http_only = "HttpOnly" if self.server.server_name != "localhost" else ""
-                    
-                    # Calculate expiry date in HTTP format
-                    expiry_date = time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime(expiry_time))
-                    
-                    # Create secure cookie if using HTTPS
-                    is_secure = self.headers.get('X-Forwarded-Proto') == 'https' or self.server.server_name != "localhost"
-                    secure_flag = "Secure;" if is_secure else ""
-                    
-                    # Create cookies with proper security settings
-                    cookie = f"session_id={session_id}; Path=/; Expires={expiry_date}; Max-Age={self.auth_manager.session_expiry}; {secure_flag} SameSite=Lax; {http_only}"
-                    username_cookie = f"username={username}; Path=/; Expires={expiry_date}; Max-Age={self.auth_manager.session_expiry}; {secure_flag} SameSite=Lax; {http_only}"
-                    
-                    self.logger.debug(f"Setting cookies: {cookie}")
-                else:
-                    self.logger.warning(f"Session validation failed immediately after creation for {username}")
-                    # Set a more basic cookie but still with proper expiry
-                    expiry_time = time.time() + self.auth_manager.session_expiry
-                    expiry_date = time.strftime("%a, %d %b %Y %H:%M:%S GMT", time.gmtime(expiry_time))
-                    cookie = f"session_id={session_id}; Path=/; Expires={expiry_date}; Max-Age={self.auth_manager.session_expiry}"
-                    username_cookie = f"username={username}; Path=/; Expires={expiry_date}; Max-Age={self.auth_manager.session_expiry}"
                 
                 # Send response with cookies
                 self.send_response(200)
@@ -627,40 +620,15 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 return
             
             # Log session ID for tracking
-            if isinstance(session_id, str) and len(session_id) > 8:
-                self.logger.debug(f"Validating session ID: {session_id[:8]}...")
-            else:
-                self.logger.debug(f"Validating session ID: {session_id}")
+            self.logger.debug(f"Validating session ID: {session_id[:8] if isinstance(session_id, str) and len(session_id) > 8 else session_id}...")
             
             # Validate session
             success, message, session = self.auth_manager.validate_session(session_id)
-            
-            # Log more detailed information about the session validation
-            if not success:
-                self.logger.warning(f"Session validation failed: message={message}")
-                # Try to extract the session from auth_manager to see if it exists but is invalid
-                if session_id in self.auth_manager.sessions:
-                    session_data = self.auth_manager.sessions[session_id]
-                    if 'expiry' in session_data:
-                        current_time = time.time()
-                        expiry_time = session_data['expiry']
-                        self.logger.warning(f"Found invalid session: expiry={expiry_time}, current={current_time}, diff={expiry_time-current_time}s, expired={current_time > expiry_time}")
-                    else:
-                        self.logger.warning(f"Found invalid session without expiry field: {session_data}")
-                else:
-                    self.logger.warning(f"Session ID not found in auth_manager sessions")
             
             if success and session:
                 # Send user data
                 username = session.get('username', '')
                 display_name = session.get('display_name', username) or username  # Ensure display_name is not empty
-                
-                # Log session expiry information
-                if 'expiry' in session:
-                    current_time = time.time()
-                    expiry_time = session['expiry']
-                    time_left = expiry_time - current_time
-                    self.logger.debug(f"Session expiry check: current={current_time}, expiry={expiry_time}, time left={time_left:.2f}s")
                 
                 self.logger.info(f"Session check: Authenticated user {username}")
                 self.send_json_response({
@@ -672,21 +640,12 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                     "auth_method": auth_method
                 })
             else:
-                # Send unauthenticated response with detailed error message
+                # Send unauthenticated response
                 self.logger.warning(f"Session check: Not authenticated - {message}")
-                
-                # Check if we need to redirect to login due to session expiry
-                if message == "Session has expired":
-                    self.send_json_response({
-                        "authenticated": False,
-                        "message": message,
-                        "reason": "expired"
-                    }, 401)
-                else:
-                    self.send_json_response({
-                        "authenticated": False,
-                        "message": message
-                    }, 401)
+                self.send_json_response({
+                    "authenticated": False,
+                    "message": message
+                }, 401)
                 
         except Exception as e:
             # Send error response for any exceptions
@@ -950,160 +909,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.handle_debug_commands()
         elif debug_command == 'environment':
             self.handle_debug_environment()
-        elif debug_command == 'session':
-            self.handle_debug_session()
         else:
             self.send_error(404)
-            
-    def handle_debug_session(self):
-        """Handle /debug/session endpoint to display session information"""
-        try:
-            self.logger.info("Handling debug session request")
-            self.logger.debug(f"Headers: {dict(self.headers)}")
-            
-            # Check if authentication is enabled
-            auth_enabled = self.is_auth_enabled()
-            if not auth_enabled:
-                # If authentication is disabled, return a default response for anonymous users
-                self.logger.info("Debug session request - Authentication is disabled, returning anonymous user info")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                
-                # Create a dummy session for anonymous user
-                response = {
-                    "success": True,
-                    "message": "Authentication is disabled, using anonymous user",
-                    "authenticated": True,
-                    "session_info": {
-                        "session_id": "anonymous",
-                        "username": "anonymous",
-                        "display_name": "Anonymous User",
-                        "email": "",
-                        "authentication_method": "None",
-                        "created_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
-                        "last_access": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
-                        "expiry_date": "Never",
-                        "days_until_expiry": 999,
-                        "time_until_expiry_seconds": 999999,
-                        "groups": [],
-                        "is_valid": True
-                    }
-                }
-                
-                self.wfile.write(json.dumps(response).encode())
-                return
-            
-            # Get session cookie from request
-            session_id = self.get_session_cookie()
-            if not session_id:
-                self.logger.warning("Debug session request - No active session found")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                
-                response = {
-                    "success": False,
-                    "message": "No active session found. Please log in.",
-                    "authenticated": False,
-                    "session_info": None
-                }
-                
-                self.wfile.write(json.dumps(response).encode())
-                return
-            
-            self.logger.info(f"Debug session request - Found session ID: {session_id[:8]}...")
-            
-            # Validate session with auth manager
-            success, message, session = self.auth_manager.validate_session(session_id)
-            
-            if not success or not session:
-                # Session is invalid or expired
-                self.logger.warning(f"Debug session request - Invalid session: {message}")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                
-                response = {
-                    "success": False,
-                    "message": message,
-                    "authenticated": False,
-                    "session_info": None
-                }
-                
-                self.wfile.write(json.dumps(response).encode())
-                return
-            
-            self.logger.info(f"Debug session request - Valid session for user: {session.get('username', 'unknown')}")
-            
-            # Calculate days until expiry
-            days_until_expiry = None
-            time_until_expiry = None
-            expiry_date = None
-            
-            if 'expiry' in session:
-                current_time = time.time()
-                expiry_time = session['expiry']
-                # Calculate seconds until expiry
-                time_until_expiry = max(0, expiry_time - current_time)  
-                # Calculate days until expiry
-                days_until_expiry = round(time_until_expiry / (24 * 60 * 60), 1)
-                # Format expiry date for display
-                expiry_date = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(expiry_time))
-                self.logger.debug(f"Debug session request - Session expiry: {expiry_date}, days left: {days_until_expiry}")
-            else:
-                self.logger.warning("Debug session request - Session has no expiry date")
-            
-            # Prepare session information
-            session_info = {
-                "session_id": session_id[:8] + "..." if len(session_id) > 8 else session_id,
-                "username": session.get('username', 'unknown'),
-                "display_name": session.get('display_name', ''),
-                "email": session.get('email', ''),
-                "authentication_method": self.authentication_enabled,
-                "created_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(session.get('created', session.get('created_at', 0)))),
-                "last_access": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(session.get('last_access', 0))),
-                "expiry_date": expiry_date,
-                "days_until_expiry": days_until_expiry,
-                "time_until_expiry_seconds": int(time_until_expiry) if time_until_expiry is not None else None,
-                "groups": session.get('groups', []),
-                "is_valid": success
-            }
-            
-            # Log the response for debugging
-            self.logger.debug(f"Debug session request - Sending response with session info: {session_info}")
-            
-            # Send response
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            
-            response = {
-                "success": True,
-                "message": "Session information retrieved successfully",
-                "authenticated": True,
-                "session_info": session_info
-            }
-            
-            self.wfile.write(json.dumps(response).encode())
-            
-        except Exception as e:
-            self.logger.error(f"Error handling debug session: {str(e)}")
-            self.logger.error(traceback.format_exc())
-            
-            # Send error response with explicit headers
-            self.send_response(500)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            
-            response = {
-                "success": False,
-                "message": f"Server error: {str(e)}",
-                "authenticated": False,
-                "session_info": None
-            }
-            
-            self.wfile.write(json.dumps(response).encode())
 
     def send_json_response(self, data, status=200):
         """Send JSON response to client"""
@@ -1359,6 +1166,98 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 'success': False,
                 'message': f'Error running LDAP diagnostics: {str(e)}'
             }, 500)
+
+    def handle_user_settings(self):
+        """Handle GET and POST for user settings"""
+        # Check authentication if enabled
+        if self.is_auth_enabled():
+            is_authenticated, message, session = self.check_auth()
+            if not is_authenticated:
+                self.send_error_response("Authentication required", 401)
+                return
+            
+            # Get username from session
+            username = session.get("username", "unknown")
+        else:
+            # If authentication is disabled, use system username
+            username = os.environ.get("USER", "unknown")
+        
+        # Handle GET or POST
+        if self.command == "GET":
+            self.handle_get_user_settings(username)
+        elif self.command == "POST":
+            self.handle_post_user_settings(username)
+    
+    def handle_get_user_settings(self, username):
+        """Handle GET request for user settings"""
+        try:
+            # Get user settings from database
+            self.logger.info(f"Getting user settings for {username}")
+            settings = self.db_manager.get_user_settings(username)
+            
+            # Log the settings for debugging
+            self.logger.info(f"Retrieved settings for {username}: {json.dumps(settings)}")
+            
+            # Check specifically for VNC settings
+            if 'vnc_settings' in settings:
+                self.logger.info(f"VNC settings found: {json.dumps(settings['vnc_settings'])}")
+            else:
+                self.logger.warning(f"No VNC settings found for user {username}")
+            
+            # Send response
+            response = {
+                "success": True,
+                "settings": settings
+            }
+            
+            self.logger.info(f"Sending user settings response: {json.dumps(response)}")
+            self.send_json_response(response)
+            
+        except Exception as e:
+            self.logger.error(f"Error getting user settings: {str(e)}")
+            self.send_error_response(f"Error getting user settings: {str(e)}")
+    
+    def handle_post_user_settings(self, username):
+        """Handle POST request for user settings"""
+        try:
+            # Get content length
+            content_length = int(self.headers.get('Content-Length', 0))
+            
+            # Read and parse request body
+            post_data = self.rfile.read(content_length).decode('utf-8')
+            data = json.loads(post_data)
+            
+            # Validate settings
+            if not isinstance(data, dict) or "settings" not in data:
+                self.send_error_response("Invalid request: 'settings' field is required", 400)
+                return
+            
+            settings = data["settings"]
+            
+            # Validate settings structure
+            if not isinstance(settings, dict):
+                self.send_error_response("Invalid request: 'settings' must be an object", 400)
+                return
+            
+            # Save user settings
+            success = self.db_manager.save_user_settings(username, settings)
+            
+            if success:
+                # Send success response
+                response = {
+                    "success": True,
+                    "message": "Settings saved successfully"
+                }
+                self.send_json_response(response)
+            else:
+                self.send_error_response("Failed to save settings", 500)
+                
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Invalid JSON in request: {str(e)}")
+            self.send_error_response(f"Invalid JSON in request: {str(e)}", 400)
+        except Exception as e:
+            self.logger.error(f"Error saving user settings: {str(e)}")
+            self.send_error_response(f"Error saving user settings: {str(e)}", 500)
 
 def load_server_config():
     """Load server configuration from JSON file"""
