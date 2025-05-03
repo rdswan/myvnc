@@ -13,6 +13,7 @@ import requests
 from urllib.parse import urlencode
 from pathlib import Path
 from myvnc.utils.config_loader import load_server_config
+import traceback
 
 class EntraManager:
     """Manages Microsoft Entra ID authentication for VNC Manager"""
@@ -62,26 +63,33 @@ class EntraManager:
         try:
             # Get the path from server config - this should be the absolute path
             config_path_str = self.server_config.get('entra_config')
+            self.logger.info(f"DEBUG EntraManager: Server config provides entra_config path: {config_path_str}")
             
             if not config_path_str:
                 # Fallback to default path
                 config_path_str = "config/auth/entra_config.json"
                 # Resolve relative path from the application root
                 config_path = Path(__file__).parent.parent.parent / config_path_str
+                self.logger.info(f"DEBUG EntraManager: Using default relative path: {config_path}")
             else:
                 # Use the absolute path directly from server config
                 config_path = Path(config_path_str)
+                self.logger.info(f"DEBUG EntraManager: Using absolute path from server config: {config_path}")
             
-            self.logger.info(f"Loading Entra ID config from: {config_path}")
+            self.logger.info(f"DEBUG EntraManager: Checking if file exists at: {config_path}")
             
             # Check if the file exists
             if not config_path.exists():
                 self.logger.error(f"Entra ID config file not found: {config_path}")
                 return
             
+            self.logger.info(f"DEBUG EntraManager: File exists, loading config from: {config_path}")
+            
             # Load the config file
             with open(config_path, 'r') as f:
                 config = json.load(f)
+                
+            self.logger.info(f"DEBUG EntraManager: Successfully loaded config JSON with keys: {list(config.keys())}")
             
             # Set the configuration values if not already set from environment variables
             if not self.client_id and 'client_id' in config:
@@ -113,10 +121,12 @@ class EntraManager:
                 
             if 'scopes' in config and config['scopes']:
                 self.scopes = config['scopes']
+                self.logger.info(f"DEBUG EntraManager: Using scopes from config: {self.scopes}")
                 
-            print(f"Successfully loaded Entra ID configuration from {config_path}")
+            self.logger.info(f"Successfully loaded Entra ID configuration from {config_path}")
         except Exception as e:
-            print(f"Error loading Entra ID config from file: {str(e)}")
+            self.logger.error(f"Error loading Entra ID config from file: {str(e)}")
+            self.logger.error(f"Exception details: {traceback.format_exc()}")
     
     def get_authorization_url(self):
         """Generate the authorization URL for Entra ID login"""

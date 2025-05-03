@@ -113,19 +113,18 @@ class AuthManager:
         # Will be fully set from config file - don't use default value
         self.redirect_uri = None
         
-        # If Entra credentials are missing and Entra auth is enabled, try to load from config file
-        if self.auth_method == 'entra' and not all([self.tenant_id, self.client_id, self.client_secret]):
+        # If Entra auth is enabled, always load from config file to ensure redirect_uri is set
+        if self.auth_method == 'entra':
+            self.logger.info("Entra authentication is enabled, loading configuration from file")
             self._load_entra_config_from_file()
             
             # Update from environment variables again (might have been set by EntraManager)
             self.tenant_id = os.environ.get('ENTRA_TENANT_ID', self.tenant_id)
             self.client_id = os.environ.get('ENTRA_CLIENT_ID', self.client_id)
             self.client_secret = os.environ.get('ENTRA_CLIENT_SECRET', self.client_secret)
-            # Only use environment if we don't already have a redirect_uri
-            if not self.redirect_uri:
-                self.redirect_uri = os.environ.get('ENTRA_REDIRECT_URI')
-                if self.redirect_uri:
-                    self.logger.info(f"Using redirect_uri from environment: {self.redirect_uri}")
+            
+            # Log the final configuration state
+            self.logger.info(f"Final Entra configuration state: client_id={self.client_id}, tenant_id={self.tenant_id}, redirect_uri={self.redirect_uri}")
         
         self.scopes = ['https://graph.microsoft.com/.default']
         
@@ -177,26 +176,33 @@ class AuthManager:
         try:
             # Get the path from server config - this should be the absolute path
             config_path_str = self.server_config.get('entra_config')
+            self.logger.info(f"DEBUG: Server config provides entra_config path: {config_path_str}")
             
             if not config_path_str:
                 # Fallback to default path
                 config_path_str = "config/auth/entra_config.json"
                 # Resolve relative path from the application root
                 config_path = Path(__file__).parent.parent.parent / config_path_str
+                self.logger.info(f"DEBUG: Using default relative path: {config_path}")
             else:
                 # Use the absolute path directly from server config
                 config_path = Path(config_path_str)
+                self.logger.info(f"DEBUG: Using absolute path from server config: {config_path}")
             
-            self.logger.info(f"Loading Entra ID config from: {config_path}")
+            self.logger.info(f"DEBUG: Checking if file exists at: {config_path}")
             
             # Check if the file exists
             if not config_path.exists():
                 self.logger.error(f"Entra ID config file not found: {config_path}")
                 return
             
+            self.logger.info(f"DEBUG: File exists, loading config from: {config_path}")
+            
             # Load the config file
             with open(config_path, 'r') as f:
                 config = json.load(f)
+            
+            self.logger.info(f"DEBUG: Successfully loaded config JSON with keys: {list(config.keys())}")
             
             # Set the configuration values if not already set from environment variables
             if not self.client_id and 'client_id' in config:
@@ -224,10 +230,12 @@ class AuthManager:
                 
             if 'scopes' in config and config['scopes']:
                 self.scopes = config['scopes']
+                self.logger.info(f"DEBUG: Using scopes from config: {self.scopes}")
                 
-            print(f"Successfully loaded Entra ID configuration from {config_path}")
+            self.logger.info(f"Successfully loaded Entra ID configuration from {config_path}")
         except Exception as e:
-            print(f"Error loading Entra ID config from file: {str(e)}")
+            self.logger.error(f"Error loading Entra ID config from file: {str(e)}")
+            self.logger.error(f"Exception details: {traceback.format_exc()}")
     
     def authenticate(self, username: str, password: str) -> Tuple[bool, str, Optional[str]]:
         """
@@ -612,6 +620,7 @@ class AuthManager:
             Authorization URL string
         """
         if self.auth_method != 'entra' or not self.msal_app:
+            self.logger.error("Unable to get auth URL: auth_method is not entra or msal_app is not initialized")
             return ""
             
         # Generate a request state with a random value
@@ -625,8 +634,29 @@ class AuthManager:
         # Check if redirect_uri is configured
         if not self.redirect_uri:
             self.logger.error("Missing redirect_uri in get_auth_url")
-            return ""
             
+            # If not set, try to load it from the config file directly
+            try:
+                config_path_str = self.server_config.get('entra_config')
+                if config_path_str:
+                    config_path = Path(config_path_str)
+                    self.logger.info(f"Attempting to load redirect_uri directly from: {config_path}")
+                    
+                    if config_path.exists():
+                        with open(config_path, 'r') as f:
+                            config = json.load(f)
+                            
+                        if 'redirect_uri' in config:
+                            self.redirect_uri = config['redirect_uri']
+                            self.logger.info(f"Loaded redirect_uri directly from config: {self.redirect_uri}")
+                            os.environ['ENTRA_REDIRECT_URI'] = self.redirect_uri
+            except Exception as e:
+                self.logger.error(f"Error attempting to load redirect_uri directly: {str(e)}")
+            
+            if not self.redirect_uri:
+                self.logger.error("Still missing redirect_uri after direct load attempt")
+                return ""
+        
         self.logger.info(f"Generating auth URL with redirect_uri: {self.redirect_uri}")
         
         # Generate the authorization URL
@@ -640,6 +670,7 @@ class AuthManager:
         }
         
         auth_url = f"https://login.microsoftonline.com/{self.tenant_id}/oauth2/v2.0/authorize?{urlencode(auth_params)}"
+        self.logger.info(f"Generated auth URL: {auth_url}")
         return auth_url
     
     def create_session(self, username: str, display_name: str, email: str, groups: List[str]) -> str:
