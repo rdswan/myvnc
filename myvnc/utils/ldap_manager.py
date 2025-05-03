@@ -53,6 +53,9 @@ except ImportError:
             def unbind(self): pass
         ldap = MockLDAP()
 
+# Import the central load_server_config function from the new module
+from myvnc.utils.config_loader import load_server_config
+
 class LDAPManager:
     """Manages LDAP authentication for VNC Manager"""
     
@@ -67,8 +70,8 @@ class LDAPManager:
         else:
             self.logger.error(f"LDAP support is NOT available. Details: {LDAP_ERROR_DETAILS}")
         
-        # Load server configuration first to get config paths
-        self.server_config = self._load_server_config()
+        # Load server configuration first to get config paths - use central function
+        self.server_config = load_server_config()
         
         # Load LDAP-specific configuration
         self.config = self._load_config()
@@ -101,21 +104,7 @@ class LDAPManager:
         # Session tracking
         self.sessions = {}
         
-    def _load_server_config(self):
-        """Load server configuration to get config file paths"""
-        config_path = Path(__file__).parent.parent.parent / "config" / "server_config.json"
-        
-        try:
-            if config_path.exists():
-                with open(config_path, 'r') as f:
-                    return json.load(f)
-            else:
-                self.logger.warning(f"Server config file not found: {config_path}")
-        except Exception as e:
-            self.logger.error(f"Error loading server config: {str(e)}")
-        
-        # Return empty config if not found
-        return {}
+# _load_server_config method removed - using central load_server_config function instead
     
     def _load_config(self):
         """Load LDAP configuration from JSON file"""

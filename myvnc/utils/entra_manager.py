@@ -12,6 +12,7 @@ import logging
 import requests
 from urllib.parse import urlencode
 from pathlib import Path
+from myvnc.utils.config_loader import load_server_config
 
 class EntraManager:
     """Manages Microsoft Entra ID authentication for VNC Manager"""
@@ -21,8 +22,8 @@ class EntraManager:
         # Initialize logger
         self.logger = logging.getLogger('myvnc')
         
-        # Load server configuration first to get config paths
-        self.server_config = self._load_server_config()
+        # Load server configuration first to get config paths - use central function
+        self.server_config = load_server_config()
         
         # Try to load configuration from environment variables first
         self.client_id = os.environ.get('ENTRA_CLIENT_ID')
@@ -53,21 +54,7 @@ class EntraManager:
         # Session tracking
         self.sessions = {}
     
-    def _load_server_config(self):
-        """Load server configuration to get config file paths"""
-        config_path = Path(__file__).parent.parent.parent / "config" / "server_config.json"
-        
-        try:
-            if config_path.exists():
-                with open(config_path, 'r') as f:
-                    return json.load(f)
-            else:
-                print(f"Server config file not found: {config_path}")
-        except Exception as e:
-            print(f"Error loading server config: {str(e)}")
-        
-        # Return empty config if not found
-        return {}
+# _load_server_config method removed - using central load_server_config function instead
         
     def _load_config_from_file(self):
         """Load Entra ID configuration from the config file"""

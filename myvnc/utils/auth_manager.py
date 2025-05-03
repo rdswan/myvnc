@@ -70,6 +70,9 @@ except ImportError:
         ConfidentialClientApplication = ConfidentialClientApplication
     msal = MockMSAL
 
+# Import the central load_server_config function from the new module
+from myvnc.utils.config_loader import load_server_config
+
 class AuthManager:
     """
     Manages authentication with Active Directory using LDAP or Microsoft Entra ID using MSAL
@@ -80,8 +83,8 @@ class AuthManager:
         # Initialize logger
         self.logger = logging.getLogger('myvnc')
         
-        # Load server configuration
-        self.server_config = self._load_server_config()
+        # Load server configuration - use central function instead of internal method
+        self.server_config = load_server_config()
         self.auth_method = self.server_config.get("authentication", "").lower()
         self.auth_enabled = self.auth_method in ["entra", "ldap"]
         
@@ -163,21 +166,6 @@ class AuthManager:
         
         # Load existing sessions
         self.load_sessions()
-    
-    def _load_server_config(self):
-        """Load server configuration from JSON file"""
-        config_path = Path(__file__).parent.parent.parent / "config" / "server_config.json"
-        
-        if not config_path.exists():
-            print(f"Warning: Could not find server config file at {config_path}")
-            return {}
-        
-        try:
-            with open(config_path, 'r') as f:
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            print(f"Warning: Server configuration file not found or invalid at {config_path}")
-            return {}
     
     def _load_entra_config_from_file(self):
         """Load Entra ID configuration from the config file"""

@@ -550,7 +550,7 @@ def server_status():
         
         # Construct the URL to query the running server's status with proper protocol
         protocol = "https" if use_https else "http"
-        url = f"{protocol}://{fqdn_host}:{port}/api/debug/app_info"
+        url = f"{protocol}://{fqdn_host}:{port}/api/server/status"
         logger.info(f"Querying running server for status at: {url}")
         
         # Use subprocess to run a curl command to avoid adding requests dependency
@@ -571,71 +571,68 @@ def server_status():
             
         # Parse the JSON response
         try:
-            response = json.loads(result.stdout)
-            app_info = response.get('app_info', {})
+            status = json.loads(result.stdout)
             
-            if not app_info:
-                logger.error("Server response did not contain app_info")
+            if not status:
+                logger.error("Server response did not contain status information")
                 _server_status_fallback(pid, prod_config_path)
                 return
                 
             # Log status information directly from the server
-            logger.info("Server status:")
+            logger.info("Server status (direct from server):")
             
-            # Report configuration files
+            # Report configuration files - ensure full paths are shown
             logger.info("Configuration files:")
-            logger.info(f"  Server config: {app_info.get('server_config_file', 'Unknown')}")
-            logger.info(f"  VNC config: {app_info.get('vnc_config_file', 'Unknown')}")
-            logger.info(f"  LSF config: {app_info.get('lsf_config_file', 'Unknown')}")
+            logger.info(f"  Server config: {os.path.abspath(status.get('server_config_file', 'Unknown'))}")
+            logger.info(f"  VNC config: {os.path.abspath(status.get('vnc_config_file', 'Unknown'))}")
+            logger.info(f"  LSF config: {os.path.abspath(status.get('lsf_config_file', 'Unknown'))}")
             
-            # If LDAP config is configured, report it
-            ldap_config = app_info.get('ldap_config_file', '')
+            # Log LDAP & Entra config info if available
+            ldap_config = status.get('ldap_config_file', '')
             if ldap_config and ldap_config != 'Not configured':
-                logger.info(f"  LDAP config: {ldap_config}")
+                logger.info(f"  LDAP config: {os.path.abspath(ldap_config)}")
             else:
                 logger.info("  LDAP config: Not configured")
                 
-            # If Entra config is configured, report it
-            entra_config = app_info.get('entra_config_file', '')
+            entra_config = status.get('entra_config_file', '')
             if entra_config and entra_config != 'Not configured':
-                logger.info(f"  Entra config: {entra_config}")
+                logger.info(f"  Entra config: {os.path.abspath(entra_config)}")
             else:
                 logger.info("  Entra config: Not configured")
             
             # Report server status
-            logger.info(f"  Status: {app_info.get('status', 'Unknown')}")
-            logger.info(f"  PID: {app_info.get('pid', 'Unknown')}")
-            logger.info(f"  Host: {app_info.get('host', 'Unknown')}")
-            logger.info(f"  Port: {app_info.get('port', 'Unknown')}")
-            logger.info(f"  URL: {app_info.get('url', 'Unknown')}")
-            logger.info(f"  SSL: {'Enabled' if app_info.get('ssl_enabled', False) else 'Disabled'}")
+            logger.info(f"  Status: {status.get('status', 'Unknown')}")
+            logger.info(f"  PID: {status.get('pid', 'Unknown')}")
+            logger.info(f"  Host: {status.get('host', 'Unknown')}")
+            logger.info(f"  Port: {status.get('port', 'Unknown')}")
+            logger.info(f"  URL: {status.get('url', 'Unknown')}")
+            logger.info(f"  SSL: {'Enabled' if status.get('ssl_enabled', False) else 'Disabled'}")
             
             # Report SSL details if enabled
-            if app_info.get('ssl_enabled', False):
-                logger.info(f"  SSL Certificate: {app_info.get('ssl_cert', 'Unknown')}")
-                logger.info(f"  SSL Key: {app_info.get('ssl_key', 'Unknown')}")
-                if app_info.get('ssl_ca_chain'):
-                    logger.info(f"  SSL CA Chain: {app_info.get('ssl_ca_chain')}")
+            if status.get('ssl_enabled', False):
+                logger.info(f"  SSL Certificate: {status.get('ssl_cert', 'Unknown')}")
+                logger.info(f"  SSL Key: {status.get('ssl_key', 'Unknown')}")
+                if status.get('ssl_ca_chain'):
+                    logger.info(f"  SSL CA Chain: {status.get('ssl_ca_chain')}")
                     
             # Report authentication status
-            logger.info(f"  Authentication: {'Enabled' if app_info.get('auth_enabled', False) else 'Disabled'}")
+            logger.info(f"  Authentication: {'Enabled' if status.get('auth_enabled', False) else 'Disabled'}")
             
-            if app_info.get('auth_method'):
-                logger.info(f"  Auth Method: {app_info.get('auth_method', 'Unknown')}")
-                logger.info(f"  Auth Status: {app_info.get('auth_status', 'Unknown')}")
+            if status.get('auth_method'):
+                logger.info(f"  Auth Method: {status.get('auth_method', 'Unknown')}")
+                logger.info(f"  Auth Status: {status.get('auth_status', 'Unknown')}")
                 
-                # Add details about the auth modules
-                auth_available = app_info.get('auth_available', {})
-                if app_info.get('auth_method').lower() == 'ldap':
-                    logger.info(f"  LDAP Module Available: {'Yes' if auth_available.get('ldap', False) else 'No'}")
-                elif app_info.get('auth_method').lower() == 'entra':
-                    logger.info(f"  MSAL Module Available: {'Yes' if auth_available.get('entra', False) else 'No'}")
+                # Report module availability based on auth method
+                if status.get('auth_method').lower() == 'ldap':
+                    logger.info(f"  LDAP Module Available: {'Yes' if status.get('ldap_available', False) else 'No'}")
+                elif status.get('auth_method').lower() == 'entra':
+                    logger.info(f"  MSAL Module Available: {'Yes' if status.get('msal_available', False) else 'No'}")
             
             # Report directory information
-            logger.info(f"  Log directory: {app_info.get('log_directory', 'Unknown')}")
-            logger.info(f"  Data directory: {app_info.get('data_directory', 'Unknown')}")
-            logger.info(f"  Current log: {app_info.get('log_file', 'Unknown')}")
-            logger.info(f"  Uptime: {app_info.get('uptime', 'Unknown')}")
+            logger.info(f"  Log directory: {status.get('log_directory', 'Unknown')}")
+            logger.info(f"  Data directory: {status.get('data_directory', 'Unknown')}")
+            logger.info(f"  Current log: {status.get('log_file', 'Unknown')}")
+            logger.info(f"  Uptime: {status.get('uptime', 'Unknown')}")
             
         except json.JSONDecodeError:
             logger.error(f"Failed to parse server response: {result.stdout}")
@@ -757,41 +754,19 @@ def _server_status_fallback(pid, prod_config_path=None):
         else:
             entra_config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), entra_config_path)
     
-    # Log configuration file paths
+    # Log configuration file paths - use absolute paths
     logger.info("Configuration files (warning: might not match server's actual config):")
-    logger.info(f"  Server config: {server_config_path}")
-    if os.path.exists(server_config_path):
-        logger.info(f"    (exists: Yes)")
-    else:
-        logger.info(f"    (exists: No)")
-    
-    logger.info(f"  VNC config: {vnc_config_path}")
-    if os.path.exists(vnc_config_path):
-        logger.info(f"    (exists: Yes)")
-    else:
-        logger.info(f"    (exists: No)")
-    
-    logger.info(f"  LSF config: {lsf_config_path}")
-    if os.path.exists(lsf_config_path):
-        logger.info(f"    (exists: Yes)")
-    else:
-        logger.info(f"    (exists: No)")
+    logger.info(f"  Server config: {os.path.abspath(server_config_path)}")
+    logger.info(f"  VNC config: {os.path.abspath(vnc_config_path)}")
+    logger.info(f"  LSF config: {os.path.abspath(lsf_config_path)}")
     
     if ldap_config_path:
-        logger.info(f"  LDAP config: {ldap_config_path}")
-        if os.path.exists(ldap_config_path):
-            logger.info(f"    (exists: Yes)")
-        else:
-            logger.info(f"    (exists: No)")
+        logger.info(f"  LDAP config: {os.path.abspath(ldap_config_path)}")
     else:
         logger.info("  LDAP config: Not configured")
     
     if entra_config_path:
-        logger.info(f"  Entra config: {entra_config_path}")
-        if os.path.exists(entra_config_path):
-            logger.info(f"    (exists: Yes)")
-        else:
-            logger.info(f"    (exists: No)")
+        logger.info(f"  Entra config: {os.path.abspath(entra_config_path)}")
     else:
         logger.info("  Entra config: Not configured")
     
@@ -807,14 +782,12 @@ def _server_status_fallback(pid, prod_config_path=None):
         if ssl_ca_chain and os.path.exists(ssl_ca_chain):
             logger.info(f"  SSL CA Chain: {ssl_ca_chain}")
         elif ssl_ca_chain:
-            logger.info(f"  SSL CA Chain: {ssl_ca_chain} (file not found)")
+            logger.info(f"  SSL CA Chain: {ssl_ca_chain}")
         else:
             logger.info(f"  SSL CA Chain: Not configured")
     logger.info(f"  Authentication: {'Enabled' if actual_auth_enabled else 'Disabled'}")
     if auth_method and auth_method.lower() != 'none':
         logger.info(f"  Auth Method: {auth_method}")
-        logger.info(f"  Auth Method Configured: {'Yes' if auth_enabled else 'No'}")
-        logger.info(f"  Auth Method Available: {'Yes' if actual_auth_enabled else 'No'}")
         logger.info(f"  Auth Status: {auth_method} ({'Active' if actual_auth_enabled else 'Inactive - Module Missing'})")
         
         # Add details about the auth modules

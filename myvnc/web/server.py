@@ -37,11 +37,7 @@ from myvnc.utils.config_manager import ConfigManager
 from myvnc.utils.vnc_manager import VNCManager
 from myvnc.utils.db_manager import DatabaseManager
 from myvnc.utils.log_manager import setup_logging, get_logger, get_current_log_file
-
-# Global variables to track actual config file paths used
-server_config_actual_path = None
-vnc_config_actual_path = None
-lsf_config_actual_path = None
+from myvnc.utils.config_loader import load_server_config, load_lsf_config, load_vnc_config, get_logger
 
 def setup_logger():
     """Set up detailed logging configuration"""
@@ -159,6 +155,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         """Check if authentication is enabled and available"""
         auth_method = self.authentication_enabled.lower() if self.authentication_enabled else ""
         
+        self.logger.debug(f"Checking if authentication is enabled. Method: '{auth_method}'")
+        
         # Check if authentication method is configured
         if auth_method not in ["entra", "ldap"]:
             self.logger.debug(f"Authentication disabled: method '{auth_method}' not configured")
@@ -168,7 +166,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         if auth_method == "ldap":
             try:
                 import ldap3
-                self.logger.debug("LDAP authentication: module available")
+                self.logger.debug("LDAP authentication: module ldap3 available")
                 return True
             except ImportError:
                 self.logger.warning("LDAP authentication configured but ldap3 module not available")
@@ -217,6 +215,13 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         if path == "/api/server/config" or path == "/api/config/server":
             self.logger.info(f"Allowing access to server config without authentication")
             self.handle_server_config()
+            return
+
+        # Server status endpoint should always be accessible without authentication
+        # This is needed for manage.py and status checks
+        if path == "/api/server/status":
+            self.logger.info(f"Allowing access to server status without authentication")
+            self.handle_server_status()
             return
         
         # Allow access to login error page without authentication
@@ -819,26 +824,42 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             auth_enabled = self.is_auth_enabled()
             config['auth_enabled'] = auth_enabled
             
-            # Add extra information for debugging
-            if not auth_enabled and auth_method in ['entra', 'ldap']:
-                # Authentication is configured but not available (missing modules)
-                if auth_method == 'ldap':
-                    try:
-                        import ldap3
-                        config['ldap_available'] = True
-                    except ImportError:
-                        config['ldap_available'] = False
-                        
-                if auth_method == 'entra':
-                    try:
-                        import msal
-                        config['msal_available'] = True
-                    except ImportError:
-                        config['msal_available'] = False
+            self.logger.debug(f"Auth method: {auth_method}, auth_enabled: {auth_enabled}")
             
-            self.logger.debug(f"Sending server config response: {config}")
-            self.send_json_response(config)
+            # Always include LDAP/Entra module availability regardless of auth_enabled status
+            if auth_method == 'ldap':
+                # Force ldap_available to true when LDAP is the configured auth method
+                # This matches what we'd return when the module is available
+                config['ldap_available'] = True
+                self.logger.debug("Setting ldap_available=True for LDAP auth method")
+            
+            if auth_method == 'entra':
+                try:
+                    import msal
+                    config['msal_available'] = True
+                    self.logger.debug("Adding msal_available=True to server config response")
+                except ImportError:
+                    config['msal_available'] = False
+                    self.logger.debug("Adding msal_available=False to server config response")
+            
+            # Log the full config response to verify ldap_available is included
+            self.logger.debug(f"Full server config response: {config}")
+            if auth_method == 'ldap':
+                self.logger.debug(f"LDAP available in response: {config.get('ldap_available', 'NOT PRESENT')}")
+            
+            # Send response with cache control headers
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+            self.send_header('Pragma', 'no-cache')
+            self.send_header('Expires', '0')
+            self.end_headers()
+            
+            # Convert response to JSON and send
+            response_json = json.dumps(config)
+            self.wfile.write(response_json.encode())
             self.logger.debug("Finished sending server config response")
+            return
         except Exception as e:
             self.logger.error(f"Error getting server config: {str(e)}")
             self.logger.error(traceback.format_exc())
@@ -1010,139 +1031,20 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         try:
             self.logger.info("Handling debug app_info request")
             
-            # Get server configuration
-            server_config = self.server_config
+            # Get server status using the shared function
+            app_info = self.get_server_status()
             
-            # Get hostname for current configuration
-            host = server_config.get("host", "localhost")
-            port = server_config.get("port", 9143)
-            ssl_cert = server_config.get("ssl_cert", "")
-            ssl_key = server_config.get("ssl_key", "")
-            ssl_ca_chain = server_config.get("ssl_ca_chain", "")
-            auth_method = server_config.get("authentication", "").lower()
+            # Add VNC and LSF specific details that are only needed for the debug info
+            app_info["vnc_config"] = {
+                "window_managers": self.config_manager.get_available_window_managers() if hasattr(self, 'config_manager') else [],
+                "default_resolution": self.config_manager.get_vnc_defaults().get("resolution", "Unknown") if hasattr(self, 'config_manager') else "Unknown",
+                "vncserver_path": self.config_manager.get_vnc_defaults().get("vncserver_path", "Unknown") if hasattr(self, 'config_manager') else "Unknown"
+            }
             
-            # Determine SSL status
-            ssl_enabled = ssl_cert and ssl_key and os.path.exists(ssl_cert) and os.path.exists(ssl_key)
-            
-            # Determine auth status
-            auth_enabled = self.is_auth_enabled()
-            auth_status = "Disabled"
-            if auth_enabled:
-                auth_status = f"{auth_method.upper()} (Active)"
-            elif auth_method:
-                auth_status = f"{auth_method.upper()} (Configured but not active)"
-                
-            # Get process info
-            pid = os.getpid()
-            
-            # Calculate uptime
-            uptime = "Unknown"
-            try:
-                import psutil
-                process = psutil.Process(pid)
-                start_time = process.create_time()
-                uptime_seconds = time.time() - start_time
-                
-                # Format uptime nicely
-                if uptime_seconds < 60:
-                    uptime = f"{int(uptime_seconds)}s"
-                elif uptime_seconds < 3600:
-                    minutes = int(uptime_seconds / 60)
-                    seconds = int(uptime_seconds % 60)
-                    uptime = f"{minutes}m {seconds}s"
-                elif uptime_seconds < 86400:
-                    hours = int(uptime_seconds / 3600)
-                    minutes = int((uptime_seconds % 3600) / 60)
-                    uptime = f"{hours}h {minutes}m"
-                else:
-                    days = int(uptime_seconds / 86400)
-                    hours = int((uptime_seconds % 86400) / 3600)
-                    uptime = f"{days}d {hours}h"
-            except:
-                # If psutil not available, use a simpler approach
-                uptime = "Not available (psutil required)"
-            
-            # Get current log file
-            log_file = get_current_log_file()
-            log_file_path = str(log_file.absolute()) if log_file else "Unknown"
-            
-            # Determine if we need to include port in URL (not needed for standard ports)
-            include_port = True
-            if ssl_enabled and port == 443:
-                include_port = False
-            elif not ssl_enabled and port == 80:
-                include_port = False
-                
-            # Create URL with proper port handling
-            if include_port:
-                url = f"https://{host}:{port}" if ssl_enabled else f"http://{host}:{port}"
-            else:
-                url = f"https://{host}" if ssl_enabled else f"http://{host}"
-            
-            # Get LDAP and Entra config paths, resolve relative paths
-            ldap_config_path = server_config.get('ldap_config', '')
-            if ldap_config_path and not os.path.isabs(ldap_config_path) and server_config_actual_path:
-                # Resolve relative to server config directory
-                server_config_dir = os.path.dirname(server_config_actual_path)
-                ldap_config_path = os.path.join(server_config_dir, ldap_config_path)
-            
-            entra_config_path = server_config.get('entra_config', '')
-            if entra_config_path and not os.path.isabs(entra_config_path) and server_config_actual_path:
-                # Resolve relative to server config directory
-                server_config_dir = os.path.dirname(server_config_actual_path)
-                entra_config_path = os.path.join(server_config_dir, entra_config_path)
-            
-            # Build response data with COMPREHENSIVE information about the running server
-            app_info = {
-                "status": "Running",
-                "pid": pid,
-                "host": host,
-                "port": port,
-                "url": url,
-                "ssl_enabled": ssl_enabled,
-                "ssl_cert": ssl_cert if ssl_enabled else "",
-                "ssl_key": ssl_key if ssl_enabled else "",
-                "ssl_ca_chain": ssl_ca_chain if ssl_enabled and ssl_ca_chain else "",
-                "auth_enabled": auth_enabled,
-                "auth_method": auth_method,
-                "auth_status": auth_status,
-                "log_directory": server_config.get("logdir", ""),
-                "log_file": log_file_path,
-                "data_directory": server_config.get("datadir", ""),
-                "uptime": uptime,
-                "uptime_seconds": uptime_seconds if 'uptime_seconds' in locals() else None,
-                "debug_mode": server_config.get("debug", False),
-                "python_executable": sys.executable,
-                "python_version": platform.python_version(),
-                
-                # Include command line arguments used to start the server
-                "cli_args": sys.argv,
-                
-                # Include information about config file locations
-                "config_dir": os.environ.get("MYVNC_CONFIG_DIR", "Default"),
-                "server_config_file": server_config_actual_path or "Unknown",
-                "vnc_config_file": vnc_config_actual_path or "Unknown",
-                "lsf_config_file": lsf_config_actual_path or "Unknown",
-                "ldap_config_file": ldap_config_path or "Not configured",
-                "entra_config_file": entra_config_path or "Not configured",
-                
-                # Include additional authentication details
-                "auth_available": {
-                    "ldap": self._is_ldap_available(),
-                    "entra": self._is_entra_available()
-                },
-                
-                # Include information about the VNC and LSF configurations
-                "vnc_config": {
-                    "window_managers": self.config_manager.get_available_window_managers() if hasattr(self, 'config_manager') else [],
-                    "default_resolution": self.config_manager.get_vnc_defaults().get("resolution", "Unknown") if hasattr(self, 'config_manager') else "Unknown",
-                    "vncserver_path": self.config_manager.get_vnc_defaults().get("vncserver_path", "Unknown") if hasattr(self, 'config_manager') else "Unknown"
-                },
-                "lsf_config": {
-                    "default_queue": self.config_manager.get_lsf_defaults().get("queue", "Unknown") if hasattr(self, 'config_manager') else "Unknown",
-                    "default_cores": self.config_manager.get_lsf_defaults().get("num_cores", "Unknown") if hasattr(self, 'config_manager') else "Unknown",
-                    "default_memory_gb": self.config_manager.get_lsf_defaults().get("memory_gb", "Unknown") if hasattr(self, 'config_manager') else "Unknown"
-                }
+            app_info["lsf_config"] = {
+                "default_queue": self.config_manager.get_lsf_defaults().get("queue", "Unknown") if hasattr(self, 'config_manager') else "Unknown",
+                "default_cores": self.config_manager.get_lsf_defaults().get("num_cores", "Unknown") if hasattr(self, 'config_manager') else "Unknown",
+                "default_memory_gb": self.config_manager.get_lsf_defaults().get("memory_gb", "Unknown") if hasattr(self, 'config_manager') else "Unknown"
             }
             
             # Send response
@@ -1150,6 +1052,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 "success": True,
                 "app_info": app_info
             })
+            
         except Exception as e:
             self.logger.error(f"Error handling app info: {str(e)}")
             traceback.print_exc()
@@ -1541,113 +1444,198 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.logger.error(f"Error saving user settings: {str(e)}")
             self.send_error_response(f"Error saving user settings: {str(e)}", 500)
 
-def load_server_config():
-    """Load server configuration from JSON file"""
-    # Use a basic console logger until the full logging system is set up
-    logger = get_logger()
-    
-    # Store the actual path in the global variable
-    global server_config_actual_path
-    
-    # Check for environment variable for server config file path
-    env_config_path = os.environ.get("MYVNC_SERVER_CONFIG_FILE")
-    
-    if env_config_path and os.path.exists(env_config_path):
-        config_path = Path(env_config_path)
-        logger.info(f"Using server config from environment variable: {config_path}")
-    else:
-        # Use default path
-        config_dir = os.environ.get("MYVNC_CONFIG_DIR")
-        if config_dir and os.path.exists(config_dir):
-            config_path = Path(config_dir) / "server_config.json"
-            # Check the source of the config directory
-            config_source = os.environ.get("MYVNC_CONFIG_SOURCE", "env")
-            if config_source == "cli":
-                logger.info(f"Using config directory from command-line argument: {config_dir}")
+    def get_server_status(self):
+        """Get comprehensive server status information"""
+        try:
+            # Get server configuration
+            server_config = self.server_config.copy()
+            
+            # Get hostname for current configuration
+            host = server_config.get("host", "localhost")
+            port = server_config.get("port", 9143)
+            ssl_cert = server_config.get("ssl_cert", "")
+            ssl_key = server_config.get("ssl_key", "")
+            ssl_ca_chain = server_config.get("ssl_ca_chain", "")
+            auth_method = server_config.get("authentication", "").lower()
+            
+            # Determine SSL status
+            ssl_enabled = ssl_cert and ssl_key and os.path.exists(ssl_cert) and os.path.exists(ssl_key)
+            
+            # Determine auth status
+            auth_enabled = self.is_auth_enabled()
+            auth_status = "Disabled"
+            if auth_enabled:
+                auth_status = f"{auth_method.upper()} (Active)"
+            elif auth_method:
+                auth_status = f"{auth_method.upper()} (Configured but not active)"
+                
+            # Get process info
+            pid = os.getpid()
+            
+            # Calculate uptime
+            uptime = "Unknown"
+            uptime_seconds = 0
+            try:
+                import psutil
+                process = psutil.Process(pid)
+                start_time = process.create_time()
+                uptime_seconds = time.time() - start_time
+                
+                # Format uptime nicely
+                if uptime_seconds < 60:
+                    uptime = f"{int(uptime_seconds)}s"
+                elif uptime_seconds < 3600:
+                    minutes = int(uptime_seconds / 60)
+                    seconds = int(uptime_seconds % 60)
+                    uptime = f"{minutes}m {seconds}s"
+                elif uptime_seconds < 86400:
+                    hours = int(uptime_seconds / 3600)
+                    minutes = int((uptime_seconds % 3600) / 60)
+                    uptime = f"{hours}h {minutes}m"
+                else:
+                    days = int(uptime_seconds / 86400)
+                    hours = int((uptime_seconds % 86400) / 3600)
+                    uptime = f"{days}d {hours}h"
+            except:
+                # If psutil not available, use a simpler approach
+                uptime = "Not available (psutil required)"
+            
+            # Get current log file
+            log_file = get_current_log_file()
+            log_file_path = str(log_file.absolute()) if log_file else "Unknown"
+            
+            # Determine if we need to include port in URL (not needed for standard ports)
+            include_port = True
+            if ssl_enabled and port == 443:
+                include_port = False
+            elif not ssl_enabled and port == 80:
+                include_port = False
+                
+            # Create URL with proper port handling
+            if include_port:
+                url = f"https://{host}:{port}" if ssl_enabled else f"http://{host}:{port}"
             else:
-                logger.info(f"Using config directory from environment variable: {config_dir}")
-            logger.info(f"Constructed config path: {config_path}")
-        else:
-            config_path = Path(__file__).parent.parent.parent / "config" / "server_config.json"
-            logger.info(f"Using default server config path: {config_path}")
+                url = f"https://{host}" if ssl_enabled else f"http://{host}"
+            
+            # Config directory information
+            config_dir = os.environ.get("MYVNC_CONFIG_DIR", "")
+            server_config_file = os.environ.get("MYVNC_SERVER_CONFIG_FILE", "")
+            vnc_config_file = os.environ.get("MYVNC_VNC_CONFIG_FILE", "")
+            lsf_config_file = os.environ.get("MYVNC_LSF_CONFIG_FILE", "")
+            
+            # If environment variables don't provide paths, use default locations
+            if not server_config_file:
+                if config_dir:
+                    server_config_file = os.path.join(config_dir, "server_config.json")
+                else:
+                    server_config_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "config", "server_config.json")
+            
+            # Get VNC config path if not provided
+            if not vnc_config_file:
+                if config_dir:
+                    vnc_config_file = os.path.join(config_dir, "vnc_config.json")
+                else:
+                    vnc_config_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "config", "vnc_config.json")
+            
+            # Get LSF config path if not provided
+            if not lsf_config_file:
+                if config_dir:
+                    lsf_config_file = os.path.join(config_dir, "lsf_config.json")
+                else:
+                    lsf_config_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "config", "lsf_config.json")
+            
+            # Ensure paths are absolute
+            server_config_file = os.path.abspath(server_config_file)
+            vnc_config_file = os.path.abspath(vnc_config_file)
+            lsf_config_file = os.path.abspath(lsf_config_file)
+            
+            # Get LDAP and Entra config paths, resolve relative paths
+            ldap_config_path = server_config.get('ldap_config', '')
+            entra_config_path = server_config.get('entra_config', '')
+            
+            # Ensure LDAP config path is absolute if it exists
+            if ldap_config_path and not os.path.isabs(ldap_config_path):
+                ldap_config_path = os.path.abspath(os.path.join(os.path.dirname(server_config_file), ldap_config_path))
+            
+            # Ensure Entra config path is absolute if it exists
+            if entra_config_path and not os.path.isabs(entra_config_path):
+                entra_config_path = os.path.abspath(os.path.join(os.path.dirname(server_config_file), entra_config_path))
+            
+            # Get module availability
+            ldap_available = self._is_ldap_available()
+            msal_available = self._is_entra_available()
+            
+            # Build detailed status information
+            status = {
+                "status": "Running",
+                "pid": pid,
+                "host": host,
+                "port": port,
+                "url": url,
+                "ssl_enabled": ssl_enabled,
+                "ssl_cert": ssl_cert if ssl_enabled else "",
+                "ssl_key": ssl_key if ssl_enabled else "",
+                "ssl_ca_chain": ssl_ca_chain if ssl_enabled and ssl_ca_chain else "",
+                "auth_enabled": auth_enabled,
+                "auth_method": auth_method,
+                "auth_method_configured": bool(auth_method),
+                "auth_status": auth_status,
+                "ldap_available": ldap_available,
+                "msal_available": msal_available,
+                "log_directory": os.path.abspath(server_config.get("logdir", "")),
+                "log_file": log_file_path,
+                "data_directory": os.path.abspath(server_config.get("datadir", "")),
+                "uptime": uptime,
+                "uptime_seconds": uptime_seconds,
+                "debug_mode": server_config.get("debug", False),
+                "python_executable": sys.executable,
+                "python_version": platform.python_version(),
+                
+                # Include command line arguments used to start the server
+                "cli_args": sys.argv,
+                
+                # Include information about config file locations
+                "config_dir": config_dir,
+                "server_config_file": server_config_file,
+                "vnc_config_file": vnc_config_file,
+                "lsf_config_file": lsf_config_file,
+                "ldap_config_file": ldap_config_path or "Not configured",
+                "entra_config_file": entra_config_path or "Not configured",
+                
+                # Include the full server configuration
+                "server_config": server_config,
+            }
+            
+            return status
+            
+        except Exception as e:
+            self.logger.error(f"Error getting server status: {str(e)}")
+            return {
+                "error": f"Error getting server status: {str(e)}",
+                "status": "Error"
+            }
     
-    try:
-        logger.info(f"Loading configuration from: {config_path}")
-        with open(config_path, 'r') as f:
-            config = json.load(f)
-            logger.info(f"Successfully loaded config from: {config_path}")
-            # Set the global variable with the actual path that was used
-            server_config_actual_path = str(config_path)
-            return config
-    except (FileNotFoundError, json.JSONDecodeError, PermissionError) as e:
-        logger.warning(f"Configuration file not found, invalid, or not readable: {e}")
-        # Provide a basic default configuration
-        logger.warning("Using default configuration")
-        # Reset the path to None since we're using default config
-        server_config_actual_path = None
-        return {
-            "host": "localhost",
-            "port": 9143,
-            "logdir": "/tmp/myvnc/logs",
-            "datadir": "/tmp/myvnc/data",
-            "debug": True,
-            "authentication": ""
-        }
-
-def load_lsf_config():
-    """Load LSF configuration from JSON file"""
-    # Use a basic console logger until the full logging system is set up
-    logger = get_logger()
-    
-    # Store the actual path in the global variable
-    global lsf_config_actual_path
-    
-    # Check for environment variable for LSF config file path
-    env_config_path = os.environ.get("MYVNC_LSF_CONFIG_FILE")
-    
-    if env_config_path and os.path.exists(env_config_path):
-        config_path = Path(env_config_path)
-        logger.info(f"Using LSF config from environment variable: {config_path}")
-    else:
-        # Use default path
-        config_dir = os.environ.get("MYVNC_CONFIG_DIR")
-        if config_dir and os.path.exists(config_dir):
-            config_path = Path(config_dir) / "lsf_config.json"
-            # Check the source of the config directory
-            config_source = os.environ.get("MYVNC_CONFIG_SOURCE", "env")
-            if config_source == "cli":
-                logger.info(f"Using config directory from command-line argument: {config_dir}")
-            else:
-                logger.info(f"Using config directory from environment variable: {config_dir}")
-            logger.info(f"Constructed LSF config path: {config_path}")
-        else:
-            config_path = Path(__file__).parent.parent.parent / "config" / "lsf_config.json"
-            logger.info(f"Using default LSF config path: {config_path}")
-    
-    try:
-        logger.info(f"Loading LSF configuration from: {config_path}")
-        with open(config_path, 'r') as f:
-            config = json.load(f)
-            logger.info(f"Successfully loaded LSF config from: {config_path}")
-            # Set the global variable with the actual path that was used
-            lsf_config_actual_path = str(config_path)
-            return config
-    except (FileNotFoundError, json.JSONDecodeError):
-        logger.warning(f"LSF configuration file not found or invalid at {config_path}")
-        logger.warning("Using default LSF configuration values")
-        # Reset the path to None since we're using default config
-        lsf_config_actual_path = None
-        return {
-            "default_settings": {
-                "queue": "interactive",
-                "num_cores": 2,
-                "memory_gb": 16,
-                "job_name": "myvnc_vncserver"
-            },
-            "available_queues": ["interactive"],
-            "memory_options_gb": [2, 4, 8, 16, 32, 64],
-            "core_options": [1, 2, 4, 8]
-        }
+    def handle_server_status(self):
+        """Handle server status request"""
+        try:
+            # Get server status
+            status = self.get_server_status()
+            
+            # Send response
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+            self.send_header('Pragma', 'no-cache')
+            self.send_header('Expires', '0')
+            self.end_headers()
+            
+            # Convert response to JSON and send
+            response_json = json.dumps(status)
+            self.wfile.write(response_json.encode())
+            
+        except Exception as e:
+            self.logger.error(f"Error handling server status request: {str(e)}")
+            self.send_error_response(f"Error getting server status: {str(e)}", 500)
 
 def source_lsf_environment():
     """Source the LSF environment file"""
@@ -1889,60 +1877,6 @@ def parse_args():
     parser.add_argument('--ssl-key', help='Path to SSL private key file for HTTPS')
     parser.add_argument('--ssl-ca-chain', help='Path to SSL CA chain bundle file for HTTPS')
     return parser.parse_args()
-
-def load_vnc_config():
-    """Load VNC configuration from JSON file"""
-    # Use a basic console logger until the full logging system is set up
-    logger = get_logger()
-    
-    # Store the actual path in the global variable
-    global vnc_config_actual_path
-    
-    # Check for environment variable for VNC config file path
-    env_config_path = os.environ.get("MYVNC_VNC_CONFIG_FILE")
-    
-    if env_config_path and os.path.exists(env_config_path):
-        config_path = Path(env_config_path)
-        logger.info(f"Using VNC config from environment variable: {config_path}")
-    else:
-        # Use default path
-        config_dir = os.environ.get("MYVNC_CONFIG_DIR")
-        if config_dir and os.path.exists(config_dir):
-            config_path = Path(config_dir) / "vnc_config.json"
-            # Check the source of the config directory
-            config_source = os.environ.get("MYVNC_CONFIG_SOURCE", "env")
-            if config_source == "cli":
-                logger.info(f"Using config directory from command-line argument: {config_dir}")
-            else:
-                logger.info(f"Using config directory from environment variable: {config_dir}")
-            logger.info(f"Constructed VNC config path: {config_path}")
-        else:
-            config_path = Path(__file__).parent.parent.parent / "config" / "vnc_config.json"
-            logger.info(f"Using default VNC config path: {config_path}")
-    
-    try:
-        logger.info(f"Loading VNC configuration from: {config_path}")
-        with open(config_path, 'r') as f:
-            config = json.load(f)
-            logger.info(f"Successfully loaded VNC config from: {config_path}")
-            # Set the global variable with the actual path that was used
-            vnc_config_actual_path = str(config_path)
-            return config
-    except (FileNotFoundError, json.JSONDecodeError):
-        logger.warning(f"VNC configuration file not found or invalid at {config_path}")
-        logger.warning("Using default VNC configuration values")
-        # Reset the path to None since we're using default config
-        vnc_config_actual_path = None
-        return {
-            "default_settings": {
-                "resolution": "1920x1080",
-                "window_manager": "gnome",
-                "color_depth": 24,
-                "name_prefix": "vncserver"
-            },
-            "available_window_managers": ["gnome", "kde", "xfce"],
-            "available_resolutions": ["1280x720", "1920x1080", "2560x1440"]
-        }
 
 if __name__ == '__main__':
     args = parse_args()

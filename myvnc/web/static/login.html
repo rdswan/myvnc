@@ -281,6 +281,7 @@
             
             // Show error message with option to retry
             function showError(message, canRetry = true) {
+                console.error('Showing error to user:', message);
                 errorMessage.innerHTML = message;
                 
                 if (canRetry) {
@@ -292,6 +293,7 @@
                             retryLink.addEventListener('click', function(e) {
                                 e.preventDefault();
                                 hideError();
+                                console.log('Retrying server config fetch from user action');
                                 fetchServerConfig();
                             });
                         }
@@ -305,20 +307,38 @@
             function handleConfigResponse(config) {
                 console.log('Server config loaded successfully:', config);
                 const authMethod = (config.authentication || '').toLowerCase();
+                const authEnabled = config.auth_enabled === true;
+                
+                console.log('Authentication method:', authMethod, 'enabled:', authEnabled);
+                
+                // First check if authentication is enabled at all
+                if (!authEnabled) {
+                    document.querySelector('.login-title').textContent = 'Authentication Error';
+                    showError('Authentication is disabled on the server.', false);
+                    loginForm.style.display = 'none';
+                    loginDivider.style.display = 'none';
+                    entraSsoButton.style.display = 'none';
+                    return;
+                }
+                
+                // At this point authentication is enabled
                 
                 // Adjust the login UI based on the authentication method
                 if (authMethod === 'ldap') {
                     // For LDAP, show username/password login but hide SSO option
                     loginDivider.style.display = 'none';
                     entraSsoButton.style.display = 'none';
+                    loginForm.style.display = 'block';
                     
                     // Update the login form title to indicate LDAP
                     document.querySelector('.login-title').textContent = 'Login with LDAP';
                     
                     // Check if LDAP is available
                     if (config.hasOwnProperty('ldap_available') && !config.ldap_available) {
+                        console.log('LDAP availability check failed:', config);
                         showError('LDAP authentication is configured but the LDAP module is not available on the server.', false);
                     } else {
+                        console.log('LDAP availability check passed:', config);
                         hideError();
                     }
                 } else if (authMethod === 'entra') {
@@ -351,10 +371,23 @@
             // Check server configuration to determine authentication methods
             function fetchServerConfig(attempt = 1) {
                 const maxAttempts = 3;
+                const timestamp = new Date().getTime(); // Add timestamp to prevent caching
                 
-                fetch('/api/server/config', {
+                console.log(`Fetching server config (attempt ${attempt}/${maxAttempts})`);
+                
+                // Create the URL with a timestamp to prevent caching
+                const url = `/api/server/config?_=${timestamp}`;
+                console.log(`Fetching from URL: ${url}`);
+                
+                fetch(url, {
                     // Don't follow redirects automatically
-                    redirect: 'manual'
+                    redirect: 'manual',
+                    // Add cache control headers
+                    headers: {
+                        'Cache-Control': 'no-cache, no-store, must-revalidate',
+                        'Pragma': 'no-cache',
+                        'Expires': '0'
+                    }
                 })
                     .then(response => {
                         // Handle redirects manually - if we're redirected to /login, use default config
@@ -369,12 +402,38 @@
                         }
                         
                         if (!response.ok) {
+                            console.error(`Server error: ${response.status}`);
                             throw new Error(`Server error: ${response.status}`);
                         }
                         
-                        return response.json();
+                        // Log the raw response for debugging
+                        return response.text().then(text => {
+                            console.log('Raw server response:', text);
+                            try {
+                                return JSON.parse(text);
+                            } catch (e) {
+                                console.error('Error parsing JSON:', e);
+                                throw new Error('Invalid JSON response from server');
+                            }
+                        });
                     })
-                    .then(config => handleConfigResponse(config))
+                    .then(config => {
+                        // Validate the config
+                        if (!config || typeof config !== 'object') {
+                            console.error('Invalid config format:', config);
+                            throw new Error('Invalid server configuration format');
+                        }
+                        
+                        // Log detailed authentication configuration
+                        console.group('Authentication Configuration Details:');
+                        console.log('Authentication method:', config.authentication);
+                        console.log('Auth enabled flag:', config.auth_enabled);
+                        console.log('LDAP available flag:', config.ldap_available);
+                        console.log('MSAL available flag:', config.msal_available);
+                        console.groupEnd();
+                        
+                        handleConfigResponse(config);
+                    })
                     .catch(error => {
                         console.error(`Error fetching server config (attempt ${attempt}/${maxAttempts}):`, error);
                         
@@ -392,6 +451,8 @@
                             
                             // Keep the login form visible so users can still try to log in
                             document.querySelector('.login-title').textContent = 'Login to VNC Manager';
+                            loginForm.style.display = 'block';
+                            hideError();
                         }
                     });
             }
