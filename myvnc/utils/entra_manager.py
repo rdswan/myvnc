@@ -29,7 +29,8 @@ class EntraManager:
         self.client_id = os.environ.get('ENTRA_CLIENT_ID')
         self.client_secret = os.environ.get('ENTRA_CLIENT_SECRET')
         self.tenant_id = os.environ.get('ENTRA_TENANT_ID')
-        self.redirect_uri = os.environ.get('ENTRA_REDIRECT_URI', 'http://localhost:8080/auth/callback')
+        # Will be fully set from config file - don't use default value
+        self.redirect_uri = None
         
         # If any of the required credentials are missing, try to load from config file
         if not all([self.client_id, self.client_secret, self.tenant_id]):
@@ -59,20 +60,23 @@ class EntraManager:
     def _load_config_from_file(self):
         """Load Entra ID configuration from the config file"""
         try:
-            # Get the path from server config or use the default
-            config_path_str = self.server_config.get('entra_config_path', "config/auth/entra_config.json")
+            # Get the path from server config - this should be the absolute path
+            config_path_str = self.server_config.get('entra_config')
             
-            # Handle both absolute and relative paths
-            config_path = Path(config_path_str)
-            if not config_path.is_absolute():
+            if not config_path_str:
+                # Fallback to default path
+                config_path_str = "config/auth/entra_config.json"
                 # Resolve relative path from the application root
                 config_path = Path(__file__).parent.parent.parent / config_path_str
+            else:
+                # Use the absolute path directly from server config
+                config_path = Path(config_path_str)
             
-            print(f"Looking for Entra ID config file at: {config_path}")
+            self.logger.info(f"Loading Entra ID config from: {config_path}")
             
             # Check if the file exists
             if not config_path.exists():
-                print(f"Warning: Entra ID config file not found: {config_path}")
+                self.logger.error(f"Entra ID config file not found: {config_path}")
                 return
             
             # Load the config file
@@ -82,23 +86,30 @@ class EntraManager:
             # Set the configuration values if not already set from environment variables
             if not self.client_id and 'client_id' in config:
                 self.client_id = config['client_id']
+                self.logger.info(f"Using client_id from config: {self.client_id}")
                 # Set as environment variable to be accessible to other components
                 os.environ['ENTRA_CLIENT_ID'] = self.client_id
                 
             if not self.client_secret and 'client_secret' in config:
                 self.client_secret = config['client_secret']
+                self.logger.info("Loaded client_secret from config")
                 # Set as environment variable to be accessible to other components
                 os.environ['ENTRA_CLIENT_SECRET'] = self.client_secret
                 
             if not self.tenant_id and 'tenant_id' in config:
                 self.tenant_id = config['tenant_id']
+                self.logger.info(f"Using tenant_id from config: {self.tenant_id}")
                 # Set as environment variable to be accessible to other components
                 os.environ['ENTRA_TENANT_ID'] = self.tenant_id
                 
+            # ALWAYS use the redirect_uri from config file
             if 'redirect_uri' in config:
                 self.redirect_uri = config['redirect_uri']
-                # Set as environment variable to be accessible to other components
+                self.logger.info(f"Using redirect_uri from config: {self.redirect_uri}")
+                # Set as environment variable 
                 os.environ['ENTRA_REDIRECT_URI'] = self.redirect_uri
+            else:
+                self.logger.error("No redirect_uri found in Entra config file!")
                 
             if 'scopes' in config and config['scopes']:
                 self.scopes = config['scopes']
