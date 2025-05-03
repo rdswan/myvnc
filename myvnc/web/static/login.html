@@ -342,12 +342,13 @@
                         hideError();
                     }
                 } else if (authMethod === 'entra') {
-                    // For Entra, show both login options
-                    loginDivider.style.display = 'flex';
-                    entraSsoButton.style.display = 'block';
+                    // For Entra, only show the Entra SSO option
+                    loginForm.style.display = 'none'; // Hide username/password form
+                    loginDivider.style.display = 'none'; // Hide the divider
+                    entraSsoButton.style.display = 'block'; // Show only the Entra button
                     
                     // Update the login form title
-                    document.querySelector('.login-title').textContent = 'Login to VNC Manager';
+                    document.querySelector('.login-title').textContent = 'Login with Microsoft Entra ID';
                     
                     // Check if MSAL is available
                     if (config.hasOwnProperty('msal_available') && !config.msal_available) {
