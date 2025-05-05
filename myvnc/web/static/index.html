@@ -140,6 +140,21 @@
             justify-content: flex-end;
             gap: 0.5rem;
         }
+        
+        /* Fix for buttons in modal footer to prevent size change */
+        .modal-footer button {
+            box-sizing: border-box;
+            min-width: 140px;
+            height: 38px;
+            transition: background-color 0.2s ease, color 0.2s ease;
+            transform: none !important;
+            box-shadow: none !important;
+        }
+        
+        .modal-footer button:active {
+            transform: none !important;
+            box-shadow: none !important;
+        }
 
         .settings-section {
             margin-bottom: 1.5rem;
@@ -166,19 +181,19 @@
         
         /* Status indicator for settings */
         .save-status {
+            display: none !important;
             margin-right: 1rem;
             font-size: 0.9rem;
-            display: none;
         }
         
         .save-status.success {
+            display: none !important;
             color: var(--color-success);
-            display: inline;
         }
         
         .save-status.error {
+            display: none !important;
             color: var(--color-danger);
-            display: inline;
         }
     </style>
 </head>
@@ -409,7 +424,7 @@
         <div class="modal-container">
             <div class="modal-header">
                 <h3 class="modal-title">User Settings</h3>
-                <button class="modal-close" id="close-settings-modal">&times;</button>
+                <button class="modal-close" id="settings-close">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="settings-section">
@@ -448,9 +463,15 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <span id="settings-save-status" class="save-status"></span>
-                <button id="save-settings" class="button primary">Save Settings</button>
-                <button id="cancel-settings" class="button secondary">Cancel</button>
+                <button id="use-defaults" class="button secondary" onclick="event.preventDefault(); document.getElementById('settings-modal').classList.remove('active'); fetch('/api/user/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings: {} }) }).then(() => { window.location.reload(); });">
+                    <i class="fas fa-undo"></i> Use System Defaults
+                </button>
+                <button id="settings-cancel" class="button secondary" onclick="document.getElementById('settings-modal').classList.remove('active');">
+                    <i class="fas fa-times"></i> Cancel
+                </button>
+                <button id="settings-save" class="button primary">
+                    <i class="fas fa-save"></i> Save Settings
+                </button>
             </div>
         </div>
     </div>
@@ -462,7 +483,19 @@
     <!-- Scripts -->
     <script src="js/app.js"></script>
     <script src="js/auth.js"></script>
+    <script src="js/modal.js"></script>
     <script src="js/settings.js"></script>
+    
+    <!-- Override confirm dialog -->
+    <script>
+        // Override the global confirm function to prevent any confirmation dialogs
+        const originalConfirm = window.confirm;
+        window.confirm = function(message) {
+            console.warn('Confirmation dialog attempted with message:', message);
+            console.trace('Confirmation dialog stack trace');
+            return true; // Always return true to proceed without showing dialog
+        };
+    </script>
     
     <!-- Debug Mode Enforcer Script -->
     <script>

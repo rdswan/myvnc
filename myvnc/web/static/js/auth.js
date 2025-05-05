@@ -179,6 +179,7 @@ function updateUserInfo(userData) {
         settingsLink.innerHTML = '<i class="fas fa-cog"></i> Settings';
         settingsLink.addEventListener('click', function(e) {
             e.preventDefault();
+            console.log('Settings link clicked - openSettingsModal function available:', typeof openSettingsModal === 'function');
             showSettingsModal();
         });
         dropdownContent.appendChild(settingsLink);
@@ -213,11 +214,40 @@ function updateUserInfo(userData) {
  * Show the settings modal
  */
 function showSettingsModal() {
-    // This function is implemented in settings.js
+    console.log('showSettingsModal called - checking for openSettingsModal function');
+    console.log('openSettingsModal in current scope:', typeof openSettingsModal);
+    console.log('window.openSettingsModal:', typeof window.openSettingsModal);
+    
+    // First try direct function reference
     if (typeof openSettingsModal === 'function') {
+        console.log('Calling openSettingsModal directly');
         openSettingsModal();
-    } else {
-        console.error('Settings modal function not found');
+    } 
+    // Then try window-scoped function
+    else if (typeof window.openSettingsModal === 'function') {
+        console.log('Calling window.openSettingsModal');
+        window.openSettingsModal();
+    }
+    // Fallback implementation if the function is not found
+    else {
+        console.error('Settings modal function not found - using fallback implementation');
+        
+        // Get the settings modal element
+        const settingsModal = document.getElementById('settings-modal');
+        if (settingsModal) {
+            // Show the modal
+            settingsModal.classList.add('active');
+            
+            // Set up close button if it exists
+            const closeButton = document.getElementById('settings-close');
+            if (closeButton) {
+                closeButton.addEventListener('click', function() {
+                    settingsModal.classList.remove('active');
+                });
+            }
+        } else {
+            console.error('Settings modal element not found');
+        }
     }
 }
 

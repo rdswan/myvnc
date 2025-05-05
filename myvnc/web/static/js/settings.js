@@ -6,34 +6,64 @@
 let vncSettingsOptions = {};
 let currentUserSettings = {};
 let defaultSettings = {};
-
-// DOM elements
-const settingsModal = document.getElementById('settings-modal');
-const closeButton = document.getElementById('settings-close');
-const saveButton = document.getElementById('settings-save');
-const resetButton = document.getElementById('settings-reset');
-const saveStatus = document.getElementById('save-status');
-
-// Form elements
-const resolutionSelect = document.getElementById('settings-resolution');
-const windowManagerSelect = document.getElementById('settings-window-manager');
-const siteSelect = document.getElementById('settings-site');
+let settingsModal; // Use let instead of const for DOM elements to allow reassignment
 
 // Initialize settings when document is loaded
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Initializing settings module');
     
-    // Add event listeners
+    // Initialize DOM element references
+    settingsModal = document.getElementById('settings-modal');
+    const closeButton = document.getElementById('settings-close');
+    const saveButton = document.getElementById('settings-save');
+    const resetButton = document.getElementById('settings-reset');
+    const saveStatus = document.getElementById('save-status');
+    
+    // Form elements
+    const resolutionSelect = document.getElementById('settings-resolution');
+    const windowManagerSelect = document.getElementById('settings-window-manager');
+    const siteSelect = document.getElementById('settings-site');
+    
+    if (!closeButton) {
+        console.warn('settings-close button not found, checking for close-settings-modal');
+        const altCloseButton = document.getElementById('close-settings-modal');
+        if (altCloseButton) {
+            console.log('Found alternative close button, attaching event listener');
+            altCloseButton.addEventListener('click', closeSettingsModal);
+        }
+    }
+    
+    const saveButtonEl = saveButton || document.getElementById('save-settings');
+    if (saveButtonEl) {
+        console.log('Found save button, attaching event listener');
+        saveButtonEl.addEventListener('click', saveUserSettings);
+    } else {
+        console.error('Save button not found!');
+    }
+    
+    const resetButtonEl = resetButton || document.getElementById('settings-reset');
+    if (resetButtonEl) {
+        console.log('Found reset button, attaching event listener');
+        resetButtonEl.addEventListener('click', resetToDefaults);
+    } else {
+        console.warn('Reset button not found');
+    }
+    
+    // Add Cancel button event listener
+    const cancelButton = document.getElementById('settings-cancel');
+    if (cancelButton) {
+        console.log('Found Cancel button, attaching event listener');
+        cancelButton.addEventListener('click', function() {
+            console.log('Cancel button clicked');
+            closeSettingsModal();
+        });
+    } else {
+        console.error('Cancel button not found!');
+    }
+    
+    // Add event listeners for close button
     if (closeButton) {
         closeButton.addEventListener('click', closeSettingsModal);
-    }
-    
-    if (saveButton) {
-        saveButton.addEventListener('click', saveUserSettings);
-    }
-    
-    if (resetButton) {
-        resetButton.addEventListener('click', resetToDefaults);
     }
     
     // Close modal when clicking outside of it
@@ -45,7 +75,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // If escape key is pressed, close the modal
     document.addEventListener('keydown', function(event) {
-        if (event.key === 'Escape' && settingsModal.classList.contains('active')) {
+        if (event.key === 'Escape' && settingsModal && settingsModal.classList.contains('active')) {
             closeSettingsModal();
         }
     });
@@ -146,11 +176,47 @@ function openSettingsModal() {
  * Close the settings modal
  */
 function closeSettingsModal() {
-    console.log('Closing settings modal');
+    console.log('closeSettingsModal called');
+    
+    if (!settingsModal) {
+        console.error('settingsModal element not found');
+        // Try to get it again
+        settingsModal = document.getElementById('settings-modal');
+        if (!settingsModal) {
+            console.error('Still could not find settings modal element');
+            return;
+        }
+    }
+    
+    console.log('Hiding settings modal');
+    // Hide the modal
     settingsModal.classList.remove('active');
     
-    // Clear save status
-    setSaveStatus('');
+    // Find the save status element if not available in global scope
+    const saveStatusEl = document.getElementById('save-status');
+    if (saveStatusEl) {
+        // Clear save status
+        saveStatusEl.textContent = '';
+        saveStatusEl.className = 'save-status';
+    }
+    
+    console.log('Settings modal closed');
+    
+    // Discard any unsaved changes by repopulating form with current settings
+    // This ensures next time the modal is opened, it shows the original values
+    const mergedSettings = {
+        vnc_settings: { ...defaultSettings.vnc_settings }
+    };
+    
+    // Apply saved user settings (if any)
+    if (currentUserSettings.vnc_settings) {
+        Object.assign(mergedSettings.vnc_settings, currentUserSettings.vnc_settings);
+    }
+    
+    // Re-populate form with original values for next time
+    setTimeout(() => {
+        populateSettingsForm(mergedSettings);
+    }, 300); // Small delay to ensure the modal is hidden first
 }
 
 /**
@@ -217,13 +283,18 @@ function setSelectValue(selectElement, value) {
 }
 
 /**
- * Reset form to system defaults
+ * Reset form to system defaults without confirmation
  */
-function resetToDefaults() {
-    console.log('Resetting settings to defaults');
+function resetToDefaults(event) {
+    // Prevent default button behavior
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
     
-    // Confirm with user
-    if (confirm('Are you sure you want to reset all settings to system defaults?')) {
+    console.log('Immediately resetting to defaults without confirmation');
+    
+    try {
         // Clear user settings
         currentUserSettings = {};
         
@@ -232,8 +303,51 @@ function resetToDefaults() {
             vnc_settings: { ...defaultSettings.vnc_settings }
         });
         
-        // Save empty settings to server (effectively removing user settings)
-        saveUserSettings();
+        // Save empty settings to server
+        fetch('/api/user/settings', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ settings: {} })
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`Server returned ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            console.log('Settings reset successfully:', data);
+            
+            // Close modal immediately
+            const settingsModal = document.getElementById('settings-modal');
+            if (settingsModal) {
+                settingsModal.classList.remove('active');
+            }
+            
+            // Reload VNC configuration to update all defaults
+            if (typeof loadVNCConfig === 'function') {
+                loadVNCConfig();
+            }
+        })
+        .catch(error => {
+            console.error('Error resetting settings:', error);
+            
+            // Close modal anyway
+            const settingsModal = document.getElementById('settings-modal');
+            if (settingsModal) {
+                settingsModal.classList.remove('active');
+            }
+        });
+    } catch (error) {
+        console.error('Error in resetToDefaults:', error);
+        
+        // Close modal anyway
+        const settingsModal = document.getElementById('settings-modal');
+        if (settingsModal) {
+            settingsModal.classList.remove('active');
+        }
     }
 }
 
@@ -270,9 +384,6 @@ async function saveUserSettings() {
         const settings = getFormSettings();
         console.log('Settings to save:', settings);
         
-        // Set saving status
-        setSaveStatus('Saving...', '');
-        
         // Send settings to server
         const response = await fetch('/api/user/settings', {
             method: 'POST',
@@ -305,7 +416,6 @@ async function saveUserSettings() {
         
         if (data && data.success) {
             console.log('Settings saved successfully');
-            setSaveStatus('Settings saved successfully!', 'success');
             
             // Update current user settings
             currentUserSettings = settings;
@@ -315,15 +425,19 @@ async function saveUserSettings() {
                 loadVNCConfig();
             }
             
-            // Close modal after a delay
-            setTimeout(closeSettingsModal, 1500);
+            // Close modal immediately
+            closeSettingsModal();
         } else {
             console.error('Error saving settings:', data ? data.message : 'Unknown error');
-            setSaveStatus(`Error: ${data ? data.message : 'Unknown error'}`, 'error');
+            
+            // Close modal anyway
+            closeSettingsModal();
         }
     } catch (error) {
         console.error('Error saving settings:', error);
-        setSaveStatus(`Error: ${error.message}`, 'error');
+        
+        // Close modal anyway
+        closeSettingsModal();
     }
 }
 
@@ -331,16 +445,26 @@ async function saveUserSettings() {
  * Set save status message
  */
 function setSaveStatus(message, type = '') {
-    if (!saveStatus) return;
+    // Find the save status element if not available in global scope
+    const saveStatusEl = document.getElementById('save-status');
+    if (!saveStatusEl) {
+        console.error('Save status element not found');
+        return;
+    }
     
-    saveStatus.textContent = message;
-    saveStatus.className = 'save-status';
+    console.log('Setting save status:', message, type);
+    saveStatusEl.textContent = message;
+    saveStatusEl.className = 'save-status';
     
     if (type) {
-        saveStatus.classList.add(type);
+        saveStatusEl.classList.add(type);
     }
 }
 
 // Export functions for global use
 window.openSettingsModal = openSettingsModal;
-window.closeSettingsModal = closeSettingsModal; 
+window.closeSettingsModal = closeSettingsModal;
+window.resetToDefaults = resetToDefaults;
+
+// Log when settings module is fully loaded
+console.log('Settings module loaded - openSettingsModal is available in window scope:', typeof window.openSettingsModal === 'function'); 
