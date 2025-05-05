@@ -25,9 +25,31 @@ document.addEventListener('DOMContentLoaded', function() {
     vncTableBody = document.getElementById('vnc-table-body');
     noVNCMessage = document.getElementById('no-vnc-message');
     
+    // Immediately hide the debug tab by default (fail-safe approach)
+    const debugTab = document.getElementById('debug-tab');
+    if (debugTab) {
+        debugTab.style.display = 'none'; // Always hide by default
+        console.log('Debug tab hidden by default');
+    }
+    
+    // Hide corresponding content tab as well
+    const debugContent = document.getElementById('debug');
+    if (debugContent) {
+        debugContent.style.display = 'none';
+        console.log('Debug content tab hidden by default');
+    }
+    
+    // Initialize tabs functionality
     tabs.forEach(tab => {
         tab.addEventListener('click', () => {
             const tabId = tab.getAttribute('data-tab');
+            
+            // Only allow switching to debug tab if debug mode is enabled
+            if (tabId === 'debug' && debugTab.style.display === 'none') {
+                console.log('Prevented switch to debug tab - debug mode not enabled');
+                return; // Prevent switching to debug tab
+            }
+            
             changeTab(tabId);
         });
     });
@@ -78,11 +100,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize the application in a defined sequence
     initializeApplication();
     
-    // Load initial VNC list
-    refreshVNCList();
-    
     // Initial load of debug info when debug tab is clicked
-    const debugTab = document.getElementById('debug-tab');
     if (debugTab) {
         debugTab.addEventListener('click', loadDebugInfo);
     }
@@ -92,7 +110,18 @@ document.addEventListener('DOMContentLoaded', function() {
 async function initializeApplication() {
     console.log('==== INITIALIZING APPLICATION ====');
     try {
+        // First step: Check debug mode to hide/show debug tab
+        console.log('Checking debug mode...');
+        await checkDebugMode();
+        
+        // Second redundant check after a short delay, just to be sure
+        setTimeout(async () => {
+            console.log('Performing redundant debug mode check...');
+            await checkDebugMode();
+        }, 1000);
+        
         // Load configuration data
+        console.log('Loading configuration data...');
         await Promise.all([
             loadVNCConfig(),
             loadLSFConfig()
@@ -108,28 +137,138 @@ async function initializeApplication() {
         // Initial load of VNC sessions list
         await refreshVNCList();
         
-        // Determine initial active tab
-        const activeTab = document.querySelector('.tab-button.active');
-        if (activeTab) {
-            changeTab(activeTab.dataset.tab);
-        }
+        // Register interval to periodically refresh VNC list
+        console.log('Setting up periodic refresh interval');
+        setInterval(refreshVNCList, 30000);
         
-        // Run testUserSettings function during development/debugging
-        if (window.location.search.includes('debug=1')) {
-            console.log('Debug mode enabled, testing user settings');
-            setTimeout(testUserSettings, 1000);
-        }
-        
-        // After initialization is done, make sure the Create VNC tab form has the right user settings applied
-        // This ensures settings are applied even if the tab isn't the first active one
-        setTimeout(() => {
-            console.log('Double-checking user settings are applied to Create VNC form...');
-            loadVNCConfig();
-        }, 500);
-        
-        console.log('==== INITIALIZATION COMPLETE ====');
+        console.log('==== APPLICATION INITIALIZATION COMPLETE ====');
     } catch (error) {
-        console.error('Failed to initialize application:', error);
+        console.error('Error during application initialization:', error);
+    }
+}
+
+// New function to check if debug mode is enabled on the server
+async function checkDebugMode() {
+    try {
+        // Try the server config endpoint first
+        let debugEnabled = await checkDebugModeFromServerConfig();
+        
+        // If that didn't work, try the app_info endpoint as fallback
+        if (debugEnabled === null) {
+            debugEnabled = await checkDebugModeFromAppInfo();
+        }
+        
+        // Apply the debug mode setting
+        applyDebugMode(debugEnabled);
+    } catch (error) {
+        console.error('Error checking debug mode:', error);
+        // Hide debug tab by default if there's an error
+        hideDebugTab();
+    }
+}
+
+// Check debug mode from server config
+async function checkDebugModeFromServerConfig() {
+    try {
+        console.log('Fetching server config to check debug mode...');
+        const response = await fetch('/api/server/config');
+        
+        if (!response.ok) {
+            console.error('Failed to fetch server config:', response.status);
+            return null;
+        }
+        
+        const responseText = await response.text();
+        console.log('Raw server config response:', responseText);
+        
+        const config = JSON.parse(responseText);
+        console.log('Server debug mode from config API:', config.debug);
+        
+        // Return boolean debug value
+        return !!config.debug;
+    } catch (error) {
+        console.error('Error checking debug mode from server config:', error);
+        return null;
+    }
+}
+
+// Check debug mode from app info
+async function checkDebugModeFromAppInfo() {
+    try {
+        console.log('Fetching app info to check debug mode (fallback)...');
+        const response = await fetch('/api/debug/app_info');
+        
+        if (!response.ok) {
+            console.error('Failed to fetch app info:', response.status);
+            return null;
+        }
+        
+        const responseText = await response.text();
+        console.log('Raw app info response:', responseText);
+        
+        const data = JSON.parse(responseText);
+        console.log('App info data:', data);
+        
+        // Try different ways the debug flag might be exposed
+        const debugMode = data.app_info?.debug_mode;
+        const serverDebug = data.app_info?.server_config?.debug;
+        
+        console.log('Debug mode from app_info API:', debugMode ?? serverDebug);
+        
+        // Return boolean debug value (try both possible locations)
+        return !!(debugMode ?? serverDebug);
+    } catch (error) {
+        console.error('Error checking debug mode from app info:', error);
+        return null;
+    }
+}
+
+// Apply debug mode to UI
+function applyDebugMode(debugEnabled) {
+    console.log('Applying debug mode to UI:', debugEnabled);
+    
+    const debugTab = document.getElementById('debug-tab');
+    const debugContent = document.getElementById('debug');
+    
+    if (debugTab && debugContent) {
+        if (debugEnabled === true) {
+            console.log('Debug mode is ON - showing debug tab');
+            debugTab.style.display = 'block';
+            
+            // If debug tab is currently active, show its content
+            if (debugTab.classList.contains('active')) {
+                debugContent.style.display = 'block';
+            }
+        } else {
+            console.log('Debug mode is OFF - hiding debug tab');
+            hideDebugTab();
+            
+            // If debug tab was active, switch to another tab
+            if (debugTab.classList.contains('active')) {
+                const defaultTab = document.querySelector('.tab-button:not(#debug-tab)');
+                if (defaultTab) {
+                    changeTab(defaultTab.getAttribute('data-tab'));
+                }
+            }
+        }
+    } else {
+        console.error('Could not find debug tab elements');
+    }
+}
+
+// Helper to hide debug tab
+function hideDebugTab() {
+    const debugTab = document.getElementById('debug-tab');
+    const debugContent = document.getElementById('debug');
+    
+    if (debugTab) {
+        debugTab.style.display = 'none';
+        console.log('Debug tab hidden');
+    }
+    
+    if (debugContent) {
+        debugContent.style.display = 'none';
+        console.log('Debug content hidden');
     }
 }
 
@@ -1374,24 +1513,30 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 /**
- * Load debug information from the server
+ * Load Debug Info
  */
-async function loadDebugInfo() {
+function loadDebugInfo() {
     console.log('Loading debug information...');
     
-    // Show loading indicators
-    document.getElementById('debug-session').innerHTML = '<p class="loading-message">Loading session information...</p>';
-    document.getElementById('debug-environment').innerHTML = '<p class="loading-message">Loading environment information...</p>';
-    document.getElementById('debug-app-info').innerHTML = '<p class="loading-message">Loading application information...</p>';
-    
-    // Fetch session data with better error handling
-    fetchSessionInfo();
-    
-    // Fetch environment data
-    fetchEnvironmentInfo();
-    
-    // Fetch application information
-    fetchAppInfo();
+    // Fetch server status first (and hide debug tab if needed)
+    checkDebugMode().then(() => {
+        // Only proceed with fetching debug info if the tab is still visible
+        const debugTab = document.getElementById('debug-tab');
+        if (debugTab && debugTab.style.display !== 'none') {
+            console.log('Debug tab is visible, fetching debug information...');
+            
+            // First, fetch application info
+            fetchAppInfo();
+            
+            // Then update debug sections
+            refreshAndUpdateDebugSection('system-info', '/api/debug/system_info');
+            refreshAndUpdateDebugSection('session-info', '/api/debug/session_info');
+            refreshAndUpdateDebugSection('auth-info', '/api/debug/auth_info');
+            refreshAndUpdateDebugSection('log-info', '/api/debug/log');
+        } else {
+            console.log('Debug tab is hidden, skipping debug info fetch');
+        }
+    });
 }
 
 /**
@@ -1610,35 +1755,14 @@ function displayEnvironmentInfo(data) {
 function fetchAppInfo() {
     console.log('Fetching application information...');
     
-    fetch('/api/debug/app_info')
-        .then(response => {
-            console.log('App info response status:', response.status);
-            if (!response.ok) {
-                throw new Error(`Server returned status ${response.status}`);
-            }
-            return response.text();  // Get as text first to inspect the raw response
-        })
-        .then(responseText => {
-            console.log('Raw app info response:', responseText);
-            
-            try {
-                const data = JSON.parse(responseText);
-                console.log('Parsed app info data:', data);
-                displayAppInfo(data);
-            } catch (error) {
-                console.error('Error parsing app info data:', error);
-                throw error;
-            }
-        })
-        .catch(error => {
-            console.error('Failed to load application information:', error);
-            document.getElementById('debug-app-info').innerHTML = `
-                <div class="error-message">
-                    <i class="fas fa-exclamation-triangle"></i>
-                    <p>Failed to load application information: ${error.message}</p>
-                </div>
-            `;
-        });
+    // First check if debug tab should be visible
+    checkDebugMode().then(() => {
+        // Only fetch app info if debug tab is visible
+        const debugTab = document.getElementById('debug-tab');
+        if (debugTab && debugTab.style.display !== 'none') {
+            refreshAndUpdateDebugSection('app-info', '/api/debug/app_info');
+        }
+    });
 }
 
 /**
@@ -1758,4 +1882,36 @@ function initializeCollapsibleSections() {
             }
         });
     });
+}
+
+/**
+ * Refreshes and updates a debug section with data from the specified API endpoint
+ */
+function refreshAndUpdateDebugSection(sectionId, apiEndpoint) {
+    const sectionElement = document.getElementById(sectionId);
+    if (!sectionElement) {
+        console.error(`Debug section element '${sectionId}' not found`);
+        return;
+    }
+    
+    // Show loading indicator
+    sectionElement.innerHTML = `<p class="loading-message">Loading data...</p>`;
+    
+    // Fetch data from API
+    fetch(apiEndpoint)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`Server returned status ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            // Format JSON with syntax highlighting
+            const formattedData = JSON.stringify(data, null, 2);
+            sectionElement.innerHTML = `<pre class="debug-json">${formattedData}</pre>`;
+        })
+        .catch(error => {
+            console.error(`Error fetching ${apiEndpoint}:`, error);
+            sectionElement.innerHTML = `<p class="error-message">Error loading data: ${error.message}</p>`;
+        });
 }

@@ -205,7 +205,7 @@
             <button class="tab-button" data-tab="vnc-creator">
                 <i class="fas fa-plus-circle"></i> Create VNC
             </button>
-            <button class="tab-button" data-tab="debug-panel" id="debug-tab">
+            <button class="tab-button" data-tab="debug-panel" id="debug-tab" style="display: none;">
                 <i class="fas fa-bug"></i> Debug
             </button>
         </div>
@@ -355,7 +355,7 @@
             </div>
         </div>
         
-        <div id="debug-panel" class="tab-content">
+        <div id="debug-panel" class="tab-content" style="display: none;">
             <div class="form-card">
                 <h2 class="form-title">Debug Information</h2>
                 
@@ -398,17 +398,33 @@
         </div>
     </div>
     
+    <!-- Message Box -->
+    <div id="message-box" class="message-box hidden">
+        <span id="message-text"></span>
+        <button id="message-close">&times;</button>
+    </div>
+    
     <!-- User Settings Modal -->
     <div id="settings-modal" class="modal-overlay">
         <div class="modal-container">
             <div class="modal-header">
-                <h2 class="modal-title">User Settings</h2>
-                <button class="modal-close" id="settings-close">&times;</button>
+                <h3 class="modal-title">User Settings</h3>
+                <button class="modal-close" id="close-settings-modal">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="settings-section">
-                    <h3>VNC Session Defaults</h3>
+                    <h3>VNC Settings</h3>
                     <div class="settings-row">
+                        <div class="form-group">
+                            <label for="settings-site">Default Site</label>
+                            <div class="select-wrapper">
+                                <select id="settings-site" name="site">
+                                    <!-- Options will be loaded from configuration -->
+                                </select>
+                                <i class="fas fa-chevron-down"></i>
+                            </div>
+                        </div>
+                        
                         <div class="form-group">
                             <label for="settings-resolution">Default Resolution</label>
                             <div class="select-wrapper">
@@ -429,37 +445,13 @@
                             </div>
                         </div>
                     </div>
-                    
-                    <div class="settings-row">
-                        <div class="form-group">
-                            <label for="settings-site">Default Site</label>
-                            <div class="select-wrapper">
-                                <select id="settings-site" name="site">
-                                    <!-- Options will be loaded from configuration -->
-                                </select>
-                                <i class="fas fa-chevron-down"></i>
-                            </div>
-                        </div>
-                    </div>
                 </div>
-                
             </div>
             <div class="modal-footer">
-                <span id="save-status" class="save-status"></span>
-                <button id="settings-reset" class="button secondary">
-                    <i class="fas fa-undo"></i> Reset to Defaults
-                </button>
-                <button id="settings-save" class="button primary">
-                    <i class="fas fa-save"></i> Save Settings
-                </button>
+                <span id="settings-save-status" class="save-status"></span>
+                <button id="save-settings" class="button primary">Save Settings</button>
+                <button id="cancel-settings" class="button secondary">Cancel</button>
             </div>
-        </div>
-    </div>
-    
-    <div id="message-box" class="message-box hidden">
-        <div class="message-content">
-            <span id="message-text"></span>
-            <button id="message-close" class="close-button">&times;</button>
         </div>
     </div>
     
@@ -467,8 +459,44 @@
         <p>&copy; 2025 Tenstorrent AI ULC - Apache License 2.0</p>
     </footer>
     
-    <script src="js/auth.js"></script>
+    <!-- Scripts -->
     <script src="js/app.js"></script>
+    <script src="js/auth.js"></script>
     <script src="js/settings.js"></script>
+    
+    <!-- Debug Mode Enforcer Script -->
+    <script>
+        // Immediately enforce hiding debug tab if debug mode is disabled
+        (function() {
+            console.log('Debug enforcer script running on page load');
+            
+            // Hide debug tab by default for safety
+            const debugTab = document.getElementById('debug-tab');
+            const debugPanel = document.getElementById('debug-panel');
+            
+            if (debugTab) debugTab.style.display = 'none';
+            if (debugPanel) debugPanel.style.display = 'none';
+            
+            // Check server config to see if debug is enabled
+            fetch('/api/server/config')
+                .then(response => response.json())
+                .then(config => {
+                    console.log('Server config loaded, debug mode:', config.debug);
+                    
+                    // Only show debug tab if debug mode is explicitly true
+                    if (config.debug === true) {
+                        console.log('Debug mode is enabled, showing debug tab');
+                        if (debugTab) debugTab.style.display = '';
+                        if (debugPanel) debugPanel.style.display = '';
+                    } else {
+                        console.log('Debug mode is disabled, keeping debug tab hidden');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error checking debug mode:', error);
+                    // Keep debug tab hidden on error
+                });
+        })();
+    </script>
 </body>
 </html> 
