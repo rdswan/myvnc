@@ -1,3 +1,0 @@
-[console_scripts]
-myvnc = myvnc.main:main
-myvnc-cli = myvnc.cli:cli
