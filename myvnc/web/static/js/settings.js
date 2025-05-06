@@ -82,6 +82,13 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Load settings options after user authentication is checked
     document.addEventListener('userAuthenticated', loadSettingsOptions);
+    
+    // IMPORTANT: Make the functions globally available
+    window.openSettingsModal = openSettingsModal;
+    window.closeSettingsModal = closeSettingsModal;
+    
+    // Preload settings options even if the event hasn't fired yet
+    loadSettingsOptions();
 });
 
 /**
@@ -150,6 +157,18 @@ async function loadUserSettings() {
  * Open the settings modal and populate form fields
  */
 function openSettingsModal() {
+    console.log('openSettingsModal called');
+    
+    // Ensure we have a reference to the modal
+    if (!settingsModal) {
+        console.log('Trying to get settingsModal reference');
+        settingsModal = document.getElementById('settings-modal');
+        if (!settingsModal) {
+            console.error('Could not find settings modal element');
+            return;
+        }
+    }
+    
     // First ensure we have the latest settings
     loadSettingsOptions().then(() => {
         console.log('Opening settings modal');
@@ -169,6 +188,7 @@ function openSettingsModal() {
         
         // Show modal
         settingsModal.classList.add('active');
+        console.log('Modal classes after adding active:', settingsModal.className);
     });
 }
 
@@ -228,6 +248,21 @@ function populateSettingsForm(settings) {
     // VNC settings
     const vncSettings = settings.vnc_settings || {};
     
+    // Get form elements (may not have been defined yet)
+    const resolutionSelect = document.getElementById('settings-resolution');
+    const windowManagerSelect = document.getElementById('settings-window-manager');
+    const siteSelect = document.getElementById('settings-site');
+    
+    // Check if elements exist
+    if (!resolutionSelect || !windowManagerSelect || !siteSelect) {
+        console.error('Form elements not found:',
+            !resolutionSelect ? 'settings-resolution missing' : '',
+            !windowManagerSelect ? 'settings-window-manager missing' : '',
+            !siteSelect ? 'settings-site missing' : ''
+        );
+        return;
+    }
+    
     // Populate select options if not already populated
     populateSelectOptions(resolutionSelect, vncSettingsOptions.resolutions);
     populateSelectOptions(windowManagerSelect, vncSettingsOptions.windowManagers);
@@ -237,6 +272,8 @@ function populateSettingsForm(settings) {
     setSelectValue(resolutionSelect, vncSettings.resolution);
     setSelectValue(windowManagerSelect, vncSettings.window_manager);
     setSelectValue(siteSelect, vncSettings.site);
+    
+    console.log('Settings form populated successfully');
 }
 
 /**
@@ -355,6 +392,18 @@ function resetToDefaults(event) {
  * Get settings from form
  */
 function getFormSettings() {
+    // Get form elements directly
+    const resolutionSelect = document.getElementById('settings-resolution');
+    const windowManagerSelect = document.getElementById('settings-window-manager');
+    const siteSelect = document.getElementById('settings-site');
+    
+    // Log what we found to debug
+    console.log('Getting form values from:',
+        resolutionSelect ? 'Resolution select found' : 'Resolution select missing',
+        windowManagerSelect ? 'Window manager select found' : 'Window manager select missing',
+        siteSelect ? 'Site select found' : 'Site select missing'
+    );
+    
     const settings = {
         vnc_settings: {
             resolution: resolutionSelect ? resolutionSelect.value : undefined,
@@ -362,6 +411,9 @@ function getFormSettings() {
             site: siteSelect ? siteSelect.value : undefined
         }
     };
+    
+    // Log the settings being returned
+    console.log('Form settings being returned:', settings);
     
     // Remove undefined values
     Object.keys(settings.vnc_settings).forEach(key => {
@@ -425,19 +477,37 @@ async function saveUserSettings() {
                 loadVNCConfig();
             }
             
+            // No success alert - silently close the modal
+            
             // Close modal immediately
-            closeSettingsModal();
+            const settingsModal = document.getElementById('settings-modal');
+            if (settingsModal) {
+                settingsModal.classList.remove('active');
+                settingsModal.style.display = 'none';
+            }
         } else {
             console.error('Error saving settings:', data ? data.message : 'Unknown error');
             
+            // No error alert - just log to console
+            
             // Close modal anyway
-            closeSettingsModal();
+            const settingsModal = document.getElementById('settings-modal');
+            if (settingsModal) {
+                settingsModal.classList.remove('active');
+                settingsModal.style.display = 'none';
+            }
         }
     } catch (error) {
         console.error('Error saving settings:', error);
         
+        // No error alert - just log to console
+        
         // Close modal anyway
-        closeSettingsModal();
+        const settingsModal = document.getElementById('settings-modal');
+        if (settingsModal) {
+            settingsModal.classList.remove('active');
+            settingsModal.style.display = 'none';
+        }
     }
 }
 
@@ -465,6 +535,8 @@ function setSaveStatus(message, type = '') {
 window.openSettingsModal = openSettingsModal;
 window.closeSettingsModal = closeSettingsModal;
 window.resetToDefaults = resetToDefaults;
+window.loadSettingsOptions = loadSettingsOptions;
+window.saveMySetting = saveUserSettings;
 
 // Log when settings module is fully loaded
 console.log('Settings module loaded - openSettingsModal is available in window scope:', typeof window.openSettingsModal === 'function'); 

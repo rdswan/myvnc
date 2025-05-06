@@ -42,7 +42,7 @@
             background-color: #f9f9f9;
             min-width: 160px;
             box-shadow: 0px 8px 16px 0px rgba(0,0,0,0.2);
-            z-index: 100;
+            z-index: 1000;
             border-radius: 4px;
             overflow: hidden;
         }
@@ -80,15 +80,16 @@
             display: flex;
             justify-content: center;
             align-items: center;
-            z-index: 1000;
+            z-index: 2000;
             opacity: 0;
             visibility: hidden;
             transition: opacity 0.3s ease, visibility 0.3s ease;
         }
 
         .modal-overlay.active {
-            opacity: 1;
-            visibility: visible;
+            opacity: 1 !important;
+            visibility: visible !important;
+            display: flex !important;
         }
 
         .modal-container {
@@ -100,6 +101,7 @@
             overflow-y: auto;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
             position: relative;
+            z-index: 2001;
         }
 
         .modal-header {
@@ -426,7 +428,7 @@
         <div class="modal-container">
             <div class="modal-header">
                 <h3 class="modal-title">User Settings</h3>
-                <button class="modal-close" id="settings-close">&times;</button>
+                <button class="modal-close" id="settings-close" onclick="document.getElementById('settings-modal').classList.remove('active'); document.getElementById('settings-modal').style.display='none';">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="settings-section">
@@ -465,13 +467,13 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button id="use-defaults" class="button secondary" onclick="event.preventDefault(); document.getElementById('settings-modal').classList.remove('active'); fetch('/api/user/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings: {} }) }).then(() => { window.location.reload(); });">
+                <button id="use-defaults" class="button secondary" onclick="event.preventDefault(); document.getElementById('settings-modal').classList.remove('active'); document.getElementById('settings-modal').style.display='none'; fetch('/api/user/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ settings: {} }) }).then(() => { window.location.reload(); });">
                     <i class="fas fa-undo"></i> Use System Defaults
                 </button>
-                <button id="settings-cancel" class="button secondary" onclick="document.getElementById('settings-modal').classList.remove('active');">
+                <button id="settings-cancel" class="button secondary" onclick="event.preventDefault(); document.getElementById('settings-modal').classList.remove('active'); document.getElementById('settings-modal').style.display='none';">
                     <i class="fas fa-times"></i> Cancel
                 </button>
-                <button id="settings-save" class="button primary">
+                <button id="settings-save" class="button primary" onclick="event.preventDefault(); saveMySetting();">
                     <i class="fas fa-save"></i> Save Settings
                 </button>
             </div>
@@ -532,6 +534,102 @@
                     // Keep debug tab hidden on error
                 });
         })();
+    </script>
+    
+    <!-- Direct Save Settings Function -->
+    <script>
+        function saveMySetting() {
+            console.log('Save settings button clicked - direct handler');
+            
+            try {
+                // Get form elements directly
+                const resolutionSelect = document.getElementById('settings-resolution');
+                const windowManagerSelect = document.getElementById('settings-window-manager');
+                const siteSelect = document.getElementById('settings-site');
+                
+                // Log what we found to debug
+                console.log('Getting form values from:',
+                    resolutionSelect ? 'Resolution select found' : 'Resolution select missing',
+                    windowManagerSelect ? 'Window manager select found' : 'Window manager select missing',
+                    siteSelect ? 'Site select found' : 'Site select missing'
+                );
+                
+                // Prepare settings object
+                const settings = {
+                    vnc_settings: {}
+                };
+                
+                // Add values if elements exist
+                if (resolutionSelect) settings.vnc_settings.resolution = resolutionSelect.value;
+                if (windowManagerSelect) settings.vnc_settings.window_manager = windowManagerSelect.value;
+                if (siteSelect) settings.vnc_settings.site = siteSelect.value;
+                
+                console.log('Settings to save:', settings);
+                
+                // Send to server
+                fetch('/api/user/settings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ settings })
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`Server returned ${response.status}: ${response.statusText}`);
+                    }
+                    return response.text();
+                })
+                .then(text => {
+                    let data;
+                    try {
+                        data = text.trim() ? JSON.parse(text) : { success: false, message: 'Empty response' };
+                    } catch (e) {
+                        console.error('Failed to parse response as JSON:', e);
+                        throw new Error('Invalid JSON response from server');
+                    }
+                    
+                    if (data && data.success) {
+                        console.log('Settings saved successfully');
+                        // No alert - just log to console
+                    } else {
+                        console.error('Error saving settings:', data ? data.message : 'Unknown error');
+                        // No alert for errors either - just log to console
+                    }
+                    
+                    // Close modal regardless of success/failure
+                    const modal = document.getElementById('settings-modal');
+                    if (modal) {
+                        modal.classList.remove('active');
+                        modal.style.display = 'none';
+                    }
+                    
+                    // Refresh the page to apply settings
+                    window.location.reload();
+                })
+                .catch(error => {
+                    console.error('Error saving settings:', error);
+                    // No alert - just log to console
+                    
+                    // Close modal
+                    const modal = document.getElementById('settings-modal');
+                    if (modal) {
+                        modal.classList.remove('active');
+                        modal.style.display = 'none';
+                    }
+                });
+            } catch (error) {
+                console.error('Error in saveMySetting function:', error);
+                // No alert - just log to console
+                
+                // Close modal
+                const modal = document.getElementById('settings-modal');
+                if (modal) {
+                    modal.classList.remove('active');
+                    modal.style.display = 'none';
+                }
+            }
+        }
     </script>
 </body>
 </html> 

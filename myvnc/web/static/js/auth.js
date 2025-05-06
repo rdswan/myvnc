@@ -164,8 +164,25 @@ function updateUserInfo(userData) {
         nameSpan.className = 'user-name';
         nameSpan.innerHTML = `${displayName} <i class="fas fa-chevron-down"></i>`;
         nameSpan.addEventListener('click', function(e) {
+            e.preventDefault();
             e.stopPropagation();
             dropdownContent.classList.toggle('show');
+            
+            // Close dropdown when clicking outside
+            const closeDropdownHandler = function(event) {
+                if (!nameSpan.contains(event.target) && !dropdownContent.contains(event.target)) {
+                    dropdownContent.classList.remove('show');
+                    document.removeEventListener('click', closeDropdownHandler);
+                }
+            };
+            
+            // Add the event listener only when dropdown is shown
+            if (dropdownContent.classList.contains('show')) {
+                // Use setTimeout to ensure this event listener is added after the current event is processed
+                setTimeout(() => {
+                    document.addEventListener('click', closeDropdownHandler);
+                }, 0);
+            }
         });
         userDropdown.appendChild(nameSpan);
         
@@ -179,8 +196,160 @@ function updateUserInfo(userData) {
         settingsLink.innerHTML = '<i class="fas fa-cog"></i> Settings';
         settingsLink.addEventListener('click', function(e) {
             e.preventDefault();
-            console.log('Settings link clicked - openSettingsModal function available:', typeof openSettingsModal === 'function');
-            showSettingsModal();
+            e.stopPropagation(); // Prevent event from bubbling up
+            
+            // Hide dropdown
+            dropdownContent.classList.remove('show');
+            
+            console.log('===== SETTINGS BUTTON CLICKED =====');
+            console.log('Settings link clicked - attempting to open settings modal');
+            console.log('openSettingsModal in current scope:', typeof openSettingsModal);
+            console.log('window.openSettingsModal:', typeof window.openSettingsModal);
+            
+            // First fetch settings from API, then show modal
+            fetch('/api/config/vnc')
+                .then(response => response.json())
+                .then(vncConfig => {
+                    console.log('VNC settings loaded:', vncConfig);
+                    
+                    // DIRECT APPROACH: Get the modal element and show it
+                    const modalElement = document.getElementById('settings-modal');
+                    if (modalElement) {
+                        console.log('Found settings modal element directly, showing it');
+                        
+                        // First populate dropdowns
+                        const resolutionSelect = document.getElementById('settings-resolution');
+                        const windowManagerSelect = document.getElementById('settings-window-manager');
+                        const siteSelect = document.getElementById('settings-site');
+                        
+                        // Populate resolution options
+                        if (resolutionSelect) {
+                            resolutionSelect.innerHTML = '';
+                            vncConfig.resolutions.forEach(resolution => {
+                                const option = document.createElement('option');
+                                option.value = resolution;
+                                option.textContent = resolution;
+                                resolutionSelect.appendChild(option);
+                            });
+                        }
+                        
+                        // Populate window manager options
+                        if (windowManagerSelect) {
+                            windowManagerSelect.innerHTML = '';
+                            vncConfig.window_managers.forEach(wm => {
+                                const option = document.createElement('option');
+                                option.value = wm;
+                                option.textContent = wm;
+                                windowManagerSelect.appendChild(option);
+                            });
+                        }
+                        
+                        // Populate site options
+                        if (siteSelect) {
+                            siteSelect.innerHTML = '';
+                            vncConfig.sites.forEach(site => {
+                                const option = document.createElement('option');
+                                option.value = site;
+                                option.textContent = site;
+                                siteSelect.appendChild(option);
+                            });
+                        }
+                        
+                        // Then load user settings
+                        fetch('/api/user/settings')
+                            .then(response => response.json())
+                            .then(userData => {
+                                console.log('User settings loaded:', userData);
+                                
+                                // Apply user settings if available
+                                if (userData.success && userData.settings && userData.settings.vnc_settings) {
+                                    const settings = userData.settings.vnc_settings;
+                                    
+                                    // Set selected values
+                                    if (resolutionSelect && settings.resolution) {
+                                        for (let i = 0; i < resolutionSelect.options.length; i++) {
+                                            if (resolutionSelect.options[i].value === settings.resolution) {
+                                                resolutionSelect.selectedIndex = i;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    
+                                    if (windowManagerSelect && settings.window_manager) {
+                                        for (let i = 0; i < windowManagerSelect.options.length; i++) {
+                                            if (windowManagerSelect.options[i].value === settings.window_manager) {
+                                                windowManagerSelect.selectedIndex = i;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    
+                                    if (siteSelect && settings.site) {
+                                        for (let i = 0; i < siteSelect.options.length; i++) {
+                                            if (siteSelect.options[i].value === settings.site) {
+                                                siteSelect.selectedIndex = i;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    console.log('No user settings found, using defaults');
+                                    
+                                    // Use default values from VNC config
+                                    if (resolutionSelect && vncConfig.defaults && vncConfig.defaults.resolution) {
+                                        for (let i = 0; i < resolutionSelect.options.length; i++) {
+                                            if (resolutionSelect.options[i].value === vncConfig.defaults.resolution) {
+                                                resolutionSelect.selectedIndex = i;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    
+                                    if (windowManagerSelect && vncConfig.defaults && vncConfig.defaults.window_manager) {
+                                        for (let i = 0; i < windowManagerSelect.options.length; i++) {
+                                            if (windowManagerSelect.options[i].value === vncConfig.defaults.window_manager) {
+                                                windowManagerSelect.selectedIndex = i;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    
+                                    if (siteSelect && vncConfig.defaults && vncConfig.defaults.site) {
+                                        for (let i = 0; i < siteSelect.options.length; i++) {
+                                            if (siteSelect.options[i].value === vncConfig.defaults.site) {
+                                                siteSelect.selectedIndex = i;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                // Finally show the modal
+                                modalElement.classList.add('active');
+                                modalElement.style.display = 'flex';
+                                modalElement.style.opacity = '1';
+                                modalElement.style.visibility = 'visible';
+                                console.log('Modal should now be visible with populated dropdowns');
+                            })
+                            .catch(error => {
+                                console.error('Error loading user settings:', error);
+                                // Show modal anyway
+                                modalElement.classList.add('active');
+                                modalElement.style.display = 'flex';
+                                modalElement.style.opacity = '1';
+                                modalElement.style.visibility = 'visible';
+                            });
+                    } else {
+                        console.error('Could not find settings-modal element in the DOM');
+                        // Fallback to the standard approach
+                        showSettingsModal();
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading VNC config:', error);
+                    // Fallback to the standard approach
+                    showSettingsModal();
+                });
         });
         dropdownContent.appendChild(settingsLink);
         
@@ -214,40 +383,43 @@ function updateUserInfo(userData) {
  * Show the settings modal
  */
 function showSettingsModal() {
-    console.log('showSettingsModal called - checking for openSettingsModal function');
+    console.log('showSettingsModal called');
+    
+    // Most direct approach first - just get the modal and show it
+    const modal = document.getElementById('settings-modal');
+    if (modal) {
+        console.log('Found settings modal, current class:', modal.className);
+        console.log('Adding active class directly');
+        modal.classList.add('active');
+        console.log('New class after adding active:', modal.className);
+        
+        // Set inline styles to force visibility if needed
+        modal.style.display = 'flex';
+        modal.style.opacity = '1';
+        modal.style.visibility = 'visible';
+        
+        console.log('Applied inline styles to force visibility');
+        
+        return;
+    }
+    
+    // If we couldn't find the modal element, try the other approaches
     console.log('openSettingsModal in current scope:', typeof openSettingsModal);
     console.log('window.openSettingsModal:', typeof window.openSettingsModal);
     
-    // First try direct function reference
-    if (typeof openSettingsModal === 'function') {
-        console.log('Calling openSettingsModal directly');
-        openSettingsModal();
-    } 
-    // Then try window-scoped function
-    else if (typeof window.openSettingsModal === 'function') {
+    // First try window-scoped function
+    if (typeof window.openSettingsModal === 'function') {
         console.log('Calling window.openSettingsModal');
         window.openSettingsModal();
     }
+    // Then try direct function reference
+    else if (typeof openSettingsModal === 'function') {
+        console.log('Calling openSettingsModal directly');
+        openSettingsModal();
+    }
     // Fallback implementation if the function is not found
     else {
-        console.error('Settings modal function not found - using fallback implementation');
-        
-        // Get the settings modal element
-        const settingsModal = document.getElementById('settings-modal');
-        if (settingsModal) {
-            // Show the modal
-            settingsModal.classList.add('active');
-            
-            // Set up close button if it exists
-            const closeButton = document.getElementById('settings-close');
-            if (closeButton) {
-                closeButton.addEventListener('click', function() {
-                    settingsModal.classList.remove('active');
-                });
-            }
-        } else {
-            console.error('Settings modal element not found');
-        }
+        console.error('Settings modal function not found - all approaches failed');
     }
 }
 
