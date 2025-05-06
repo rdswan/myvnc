@@ -22,6 +22,16 @@ from myvnc.utils.log_manager import get_logger
 class LSFManager:
     """Manages interactions with the LSF job scheduler via command line"""
     
+    # Singleton instance
+    _instance = None
+    _initialized = False
+    
+    def __new__(cls):
+        """Ensure only one instance of LSFManager is created"""
+        if cls._instance is None:
+            cls._instance = super(LSFManager, cls).__new__(cls)
+        return cls._instance
+    
     def __init__(self):
         """
         Initialize the LSF manager and check if LSF is available
@@ -29,6 +39,10 @@ class LSFManager:
         Raises:
             RuntimeError: If LSF is not available
         """
+        # Only initialize once
+        if LSFManager._initialized:
+            return
+            
         # For storing command execution history for debugging
         self.command_history = []
         
@@ -44,6 +58,9 @@ class LSFManager:
         except Exception as e:
             print(f"Warning: LSF initialization error: {str(e)}", file=sys.stderr)
             # Don't raise here, let individual methods handle errors
+            
+        # Mark as initialized
+        LSFManager._initialized = True
     
     def get_command_history(self, limit=10):
         """Return the last N commands executed with their outputs"""
@@ -52,10 +69,9 @@ class LSFManager:
     def run_test_commands(self):
         """Run a series of test LSF commands to populate the command history"""
         test_commands = [
-            ['which', 'bjobs'],
             ['bjobs', '-h'],
-            ['which', 'bsub'],
-            ['which', 'bkill'],
+            ['bsub', '-h'],
+            ['bkill', '-h'],
             ['ls', '-la']
         ]
         
@@ -173,6 +189,8 @@ class LSFManager:
         Raises:
             RuntimeError: If LSF is not available
         """
+        self.logger.info("Checking LSF command availability")
+        
         # Initialize command paths dictionary
         self.lsf_cmd_paths = {}
         
@@ -183,10 +201,11 @@ class LSFManager:
         for cmd in lsf_commands:
             try:
                 # Compatible with Python 3.6 - removed text=True
+                self.logger.debug(f"Running 'which {cmd}' to find command path")
                 result = subprocess.run(['which', cmd], check=True, 
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 cmd_path = result.stdout.decode('utf-8').strip()
-                print(f"{cmd} available at: {cmd_path}", file=sys.stderr)
+                self.logger.info(f"Found {cmd} at: {cmd_path}")
                 
                 # Store the path in the dictionary
                 self.lsf_cmd_paths[cmd] = cmd_path
@@ -196,7 +215,7 @@ class LSFManager:
                     self.bjobs_path = cmd_path
             except subprocess.CalledProcessError as e:
                 stderr = e.stderr.decode('utf-8')
-                print(f"{cmd} not available: {stderr}", file=sys.stderr)
+                self.logger.error(f"{cmd} not available: {stderr}")
                 
                 # If bjobs is not available, LSF is not available
                 if cmd == 'bjobs':
@@ -205,7 +224,9 @@ class LSFManager:
         # Verify that all commands were found
         if not all(cmd in self.lsf_cmd_paths for cmd in lsf_commands):
             missing = [cmd for cmd in lsf_commands if cmd not in self.lsf_cmd_paths]
-            print(f"Warning: Some LSF commands not found: {', '.join(missing)}", file=sys.stderr)
+            self.logger.warning(f"Some LSF commands not found: {', '.join(missing)}")
+        else:
+            self.logger.info(f"All LSF commands found successfully: {', '.join(lsf_commands)}")
     
     def _run_command(self, cmd: List[str], authenticated_user: str = None) -> str:
         """

@@ -121,6 +121,20 @@ class LoggingHTTPServer(http.server.HTTPServer):
     
     def handle_error(self, request, client_address):
         """Log server errors"""
+        error_type, error_value, error_tb = sys.exc_info()
+        
+        # Check if it's a common connection error from client disconnection
+        if error_type in (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            # Just log these common errors as info, not error
+            self.logger.info(f"Client {client_address[0]}:{client_address[1]} disconnected: {error_type.__name__}: {error_value}")
+            return
+        
+        # Check for OSError with common socket error codes
+        if error_type is OSError and error_value.errno in (32, 104, 110):  # Broken pipe, Connection reset, Connection timed out
+            self.logger.info(f"Socket error from {client_address[0]}:{client_address[1]}: {error_value}")
+            return
+        
+        # Log other errors as actual errors with traceback
         self.logger.error(f"Error handling request from {client_address[0]}:{client_address[1]}")
         self.logger.error(traceback.format_exc())
         super().handle_error(request, client_address)
@@ -397,7 +411,28 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.send_response(200)
             self.send_header('Content-type', 'text/html')
             self.end_headers()
-            self.wfile.write(content)
+            
+            try:
+                self.wfile.write(content)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as e:
+                # Client disconnected - this is normal and not worth a stack trace
+                self.logger.info(f"Client disconnected while serving {filename}: {str(e)}")
+                return
+            except OSError as e:
+                # Handle other socket errors gracefully
+                if e.errno in (32, 104, 110):  # Broken pipe, Connection reset, Connection timed out
+                    self.logger.info(f"Socket error while serving {filename}: {str(e)}")
+                    return
+                else:
+                    # Re-raise unexpected OS errors
+                    self.logger.error(f"OS error serving {filename}: {str(e)}")
+                    raise
+        except FileNotFoundError:
+            self.logger.error(f"File not found: {filename}")
+            self.send_error(404)
+        except PermissionError:
+            self.logger.error(f"Permission denied reading file: {filename}")
+            self.send_error(403)
         except Exception as e:
             self.logger.error(f"Error serving file {filename}: {str(e)}")
             self.send_error(500)
@@ -1129,9 +1164,22 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             else:
                 self.logger.debug(f"Response data: {data}")
                 
-            # Write the data to the response
-            self.wfile.write(json_data.encode())
-            self.logger.debug("JSON response sent successfully")
+            # Write the data to the response with error handling
+            try:
+                self.wfile.write(json_data.encode())
+                self.logger.debug("JSON response sent successfully")
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as e:
+                # Client disconnected - this is normal and not worth a stack trace
+                self.logger.info(f"Client disconnected while sending JSON response: {str(e)}")
+                return
+            except OSError as e:
+                # Handle other socket errors gracefully
+                if e.errno in (32, 104, 110):  # Broken pipe, Connection reset, Connection timed out
+                    self.logger.info(f"Socket error while sending JSON response: {str(e)}")
+                    return
+                # Re-raise other OS errors
+                self.logger.error(f"OS error in send_json_response: {str(e)}")
+                raise
         except Exception as e:
             self.logger.error(f"Error in send_json_response: {str(e)}")
             self.logger.error(traceback.format_exc())
@@ -1151,7 +1199,21 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         
         # Ensure we're sending a string that can be encoded to bytes
         error_json = json.dumps({'error': message})
-        self.wfile.write(error_json.encode('utf-8'))
+        
+        try:
+            self.wfile.write(error_json.encode('utf-8'))
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError) as e:
+            # Client disconnected - this is normal and not worth a stack trace
+            self.logger.info(f"Client disconnected while sending error response: {str(e)}")
+            return
+        except OSError as e:
+            # Handle other socket errors gracefully
+            if e.errno in (32, 104, 110):  # Broken pipe, Connection reset, Connection timed out
+                self.logger.info(f"Socket error while sending error response: {str(e)}")
+                return
+            # Re-raise other OS errors
+            self.logger.error(f"OS error in send_error_response: {str(e)}")
+            raise
 
     def handle_vnc_config(self):
         """Handle VNC configuration request"""
