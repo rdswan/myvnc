@@ -42,7 +42,6 @@ try:
     import ldap
     LDAP_AVAILABLE = True
 except ImportError:
-    print("LDAP module not available, LDAP authentication will be disabled")
     LDAP_AVAILABLE = False
     # Create a mock for LDAP errors
     class MockLDAP:
@@ -61,7 +60,6 @@ except ImportError:
 # Try to import MSAL, use mock implementation if not available
 try:
     import msal
-    print("Using real MSAL implementation")
 except ImportError:
     print("MSAL not available, using mock implementation")
     from .mock_msal import ConfidentialClientApplication
