@@ -6,10 +6,11 @@ from PyQt6.QtCore import QTimer, Qt
 from ..utils.lsf_manager import LSFManager
 
 class VNCManagerTab(QWidget):
-    def __init__(self, config_manager):
+    def __init__(self, config_manager, authenticated_user=None):
         super().__init__()
         self.config_manager = config_manager
         self.lsf_manager = LSFManager()
+        self.authenticated_user = authenticated_user
         
         self.init_ui()
         
@@ -54,7 +55,7 @@ class VNCManagerTab(QWidget):
     
     def refresh_vnc_list(self):
         try:
-            jobs = self.lsf_manager.get_active_vnc_jobs()
+            jobs = self.lsf_manager.get_active_vnc_jobs(authenticated_user=self.authenticated_user)
             self.table.setRowCount(len(jobs))
             
             for row, job in enumerate(jobs):
@@ -81,5 +82,5 @@ class VNCManagerTab(QWidget):
         row = selected_rows[0].row()
         job_id = self.table.item(row, 0).text()
         
-        if self.lsf_manager.kill_vnc_job(job_id):
+        if self.lsf_manager.kill_vnc_job(job_id, authenticated_user=self.authenticated_user):
             self.refresh_vnc_list() 

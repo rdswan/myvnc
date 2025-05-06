@@ -14,11 +14,12 @@ def cli():
     pass
 
 @cli.command()
-def list():
+@click.option('--user', help='Run command as this user')
+def list(user):
     """List all active VNC sessions"""
     try:
         lsf_manager = LSFManager()
-        jobs = lsf_manager.get_active_vnc_jobs()
+        jobs = lsf_manager.get_active_vnc_jobs(authenticated_user=user)
         
         if not jobs:
             click.echo("No active VNC sessions found.")
@@ -46,7 +47,8 @@ def list():
 @click.option('--cores', type=int, default=2, help='Number of cores to allocate')
 @click.option('--memory', type=int, default=4096, help='Memory to allocate in MB')
 @click.option('--vncserver-path', help='Path to vncserver binary')
-def create(name, resolution, wm, queue, cores, memory, vncserver_path):
+@click.option('--user', help='Run command as this user')
+def create(name, resolution, wm, queue, cores, memory, vncserver_path, user):
     """Create a new VNC session"""
     try:
         config_manager = ConfigManager()
@@ -71,7 +73,7 @@ def create(name, resolution, wm, queue, cores, memory, vncserver_path):
         }
         
         # Submit job
-        job_id = lsf_manager.submit_vnc_job(vnc_config, lsf_config)
+        job_id = lsf_manager.submit_vnc_job(vnc_config, lsf_config, authenticated_user=user)
         click.echo(f"VNC session created successfully! Job ID: {job_id}")
         
     except Exception as e:
@@ -80,12 +82,13 @@ def create(name, resolution, wm, queue, cores, memory, vncserver_path):
 
 @cli.command()
 @click.argument('job_id')
-def kill(job_id):
+@click.option('--user', help='Run command as this user')
+def kill(job_id, user):
     """Kill a VNC session by job ID"""
     try:
         lsf_manager = LSFManager()
         
-        if lsf_manager.kill_vnc_job(job_id):
+        if lsf_manager.kill_vnc_job(job_id, authenticated_user=user):
             click.echo(f"VNC session {job_id} killed successfully.")
         else:
             click.echo(f"Failed to kill VNC session {job_id}.", err=True)

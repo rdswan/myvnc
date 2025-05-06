@@ -758,7 +758,17 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         """Handle VNC sessions request"""
         try:
             self.logger.info("Fetching active VNC sessions")
-            jobs = self.lsf_manager.get_active_vnc_jobs()
+            
+            # Get authenticated user if available
+            authenticated_user = None
+            if self.is_auth_enabled():
+                is_authenticated, message, session = self.check_auth()
+                if is_authenticated and session and 'username' in session:
+                    authenticated_user = session.get('username')
+                    self.logger.debug(f"Using authenticated user for LSF commands: {authenticated_user}")
+            
+            # Get VNC jobs with authenticated user
+            jobs = self.lsf_manager.get_active_vnc_jobs(authenticated_user)
             
             # Add connection details including port to each job
             for job in jobs:
@@ -782,7 +792,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                                                 
                         # Get connection details if needed
                         if ('display' not in job or 'port' not in job) and job.get('host') and job.get('host') != 'N/A':
-                            conn_details = self.lsf_manager.get_vnc_connection_details(job['job_id'])
+                            conn_details = self.lsf_manager.get_vnc_connection_details(job['job_id'], authenticated_user)
                             if conn_details:
                                 if 'port' in conn_details and 'port' not in job:
                                     job['port'] = conn_details['port']
@@ -1163,19 +1173,17 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
     def handle_vnc_start(self):
         """Handle VNC start request"""
         try:
+            self.logger.info("Handling VNC start request")
             # Read request body
             content_length = int(self.headers.get("Content-Length", 0))
             post_data = self.rfile.read(content_length).decode("utf-8")
-            self.logger.debug(f"Received raw post data: {post_data}")
-            
             data = json.loads(post_data)
-            self.logger.debug(f"Parsed JSON data: {data}")
             
             # Get default settings from config
             vnc_defaults = self.config_manager.get_vnc_defaults()
             lsf_defaults = self.config_manager.get_lsf_defaults()
             
-            # Extract VNC settings
+            # Extract VNC settings from request
             vnc_settings = {
                 "resolution": data.get("resolution", vnc_defaults.get("resolution")),
                 "window_manager": data.get("window_manager", vnc_defaults.get("window_manager")),
@@ -1188,7 +1196,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 "use_custom_xstartup": vnc_defaults.get("use_custom_xstartup", False)
             }
             
-            # Extract LSF settings
+            # Extract LSF settings from request
             lsf_settings = {
                 "queue": data.get("queue", lsf_defaults.get("queue")),
                 "num_cores": int(data.get("num_cores", lsf_defaults.get("num_cores"))),
@@ -1196,11 +1204,16 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 "job_name": lsf_defaults.get("job_name", "myvnc_vncserver")
             }
             
-            self.logger.info(f"Submitting VNC job with config: {vnc_settings}")
-            self.logger.info(f"Using LSF settings: {lsf_settings}")
+            # Get authenticated user if available
+            authenticated_user = None
+            if self.is_auth_enabled():
+                is_authenticated, message, session = self.check_auth()
+                if is_authenticated and session and 'username' in session:
+                    authenticated_user = session.get('username')
+                    self.logger.debug(f"Using authenticated user for LSF commands: {authenticated_user}")
             
-            # Submit VNC job
-            job_id = self.lsf_manager.submit_vnc_job(vnc_settings, lsf_settings)
+            # Submit VNC job with authenticated user
+            job_id = self.lsf_manager.submit_vnc_job(vnc_settings, lsf_settings, authenticated_user)
             
             # Return result - job_id is a string, not a dictionary
             self.send_json_response({
@@ -1238,9 +1251,17 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             if not job_id:
                 raise ValueError("No job ID provided")
             
-            # Kill VNC job using the correct method name
+            # Get authenticated user if available
+            authenticated_user = None
+            if self.is_auth_enabled():
+                is_authenticated, message, session = self.check_auth()
+                if is_authenticated and session and 'username' in session:
+                    authenticated_user = session.get('username')
+                    self.logger.debug(f"Using authenticated user for LSF commands: {authenticated_user}")
+            
+            # Kill VNC job using the correct method name and authenticated user
             self.logger.info(f"Stopping VNC job: {job_id}")
-            result = self.lsf_manager.kill_vnc_job(job_id)
+            result = self.lsf_manager.kill_vnc_job(job_id, authenticated_user)
             
             # Return result
             self.send_json_response({
@@ -1272,8 +1293,16 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             
             self.logger.info(f"Copying VNC session: {session_id}")
             
+            # Get authenticated user if available
+            authenticated_user = None
+            if self.is_auth_enabled():
+                is_authenticated, message, session = self.check_auth()
+                if is_authenticated and session and 'username' in session:
+                    authenticated_user = session.get('username')
+                    self.logger.debug(f"Using authenticated user for LSF commands: {authenticated_user}")
+            
             # Get session details
-            active_sessions = self.lsf_manager.get_active_vnc_jobs()
+            active_sessions = self.lsf_manager.get_active_vnc_jobs(authenticated_user)
             session_to_copy = None
             
             for session in active_sessions:
@@ -1308,15 +1337,15 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 "job_name": lsf_defaults.get("job_name", "myvnc_vncserver")
             }
             
-            # Submit new VNC job
-            result = self.lsf_manager.submit_vnc_job(vnc_settings, lsf_settings)
+            # Submit new VNC job with the authenticated user
+            job_id = self.lsf_manager.submit_vnc_job(vnc_settings, lsf_settings, authenticated_user)
             
             # Return result
             self.send_json_response({
                 "success": True,
                 "message": "VNC session copied successfully",
-                "job_id": result.get("job_id", "unknown"),
-                "status": result.get("status", "pending")
+                "job_id": job_id,
+                "status": "pending"
             })
         except Exception as e:
             error_msg = f"Error copying VNC session: {str(e)}"

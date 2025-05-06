@@ -73,10 +73,40 @@ def register_subprocess_handler():
     old_popen = subprocess.Popen
     
     def new_popen(*args, **kwargs):
-        # Log the command that's about to be executed
+        # Get the command that's about to be executed
         cmd_str = ' '.join(str(arg) for arg in args[0]) if args and isinstance(args[0], (list, tuple)) else str(args[0])
-        if logger:
-            logger.info(f"EXECUTING COMMAND: {cmd_str}")
+        
+        # For logging, filter out sudo information if present
+        log_cmd_str = cmd_str
+        
+        # Check if the command begins with sudo and is modifying an LSF command
+        if log_cmd_str.startswith('sudo -u') and any(lsf_cmd in log_cmd_str for lsf_cmd in ['/bjobs', '/bsub', '/bkill']):
+            # Extract the LSF command part
+            try:
+                # Find the LSF command part after sudo, extract just the command name without path
+                parts = log_cmd_str.split()
+                for i, part in enumerate(parts):
+                    if '/bjobs' in part:
+                        log_cmd_str = 'bjobs ' + ' '.join(parts[i+1:])
+                        break
+                    elif '/bsub' in part:
+                        log_cmd_str = 'bsub ' + ' '.join(parts[i+1:])
+                        break
+                    elif '/bkill' in part:
+                        log_cmd_str = 'bkill ' + ' '.join(parts[i+1:])
+                        break
+            except:
+                # If parsing fails, keep the original command
+                pass
+            
+            # Log the original command for INFO level
+            if logger:
+                logger.debug(f"DEBUG: Full command: {cmd_str}")
+                logger.info(f"EXECUTING COMMAND: {log_cmd_str}")
+        else:
+            # Log the command that's about to be executed (no modification needed)
+            if logger:
+                logger.info(f"EXECUTING COMMAND: {log_cmd_str}")
         
         # Make sure stdout and stderr are captured
         if 'stdout' not in kwargs:
@@ -103,7 +133,7 @@ def register_subprocess_handler():
                         output_str = output.decode('utf-8')
                         
                     if logger:
-                        logger.info(f"COMMAND OUTPUT from '{cmd_str}':")
+                        logger.info(f"COMMAND OUTPUT from '{log_cmd_str}':")
                         for line in output_str.splitlines():
                             logger.info(f"  {line}")
                 except Exception as e:
@@ -118,7 +148,7 @@ def register_subprocess_handler():
                         error_str = error.decode('utf-8')
                         
                     if logger:
-                        logger.error(f"COMMAND ERROR from '{cmd_str}':")
+                        logger.error(f"COMMAND ERROR from '{log_cmd_str}':")
                         for line in error_str.splitlines():
                             logger.error(f"  {line}")
                 except Exception as e:
@@ -371,32 +401,65 @@ def get_current_log_file():
 
 def log_command_output(command, stdout, stderr=None, success=True):
     """
-    Log command output to the log file
+    Log command output with standard formatting
     
     Args:
-        command: Command that was executed
+        command: Command string that was executed
         stdout: Standard output from the command
-        stderr: Standard error from the command (optional)
+        stderr: Standard error from the command
         success: Whether the command was successful
     """
     logger = get_logger()
     
-    if logger:
-        logger.info(f"Command executed: {command}")
+    # Filter out sudo information if present for LSF commands
+    log_command = command
+    if isinstance(command, str) and command.startswith('sudo -u') and any(lsf_cmd in command for lsf_cmd in ['/bjobs', '/bsub', '/bkill']):
+        # Extract the LSF command part
+        try:
+            # Find the LSF command part after sudo, extract just the command name without path
+            parts = command.split()
+            for i, part in enumerate(parts):
+                if '/bjobs' in part:
+                    log_command = 'bjobs ' + ' '.join(parts[i+1:])
+                    break
+                elif '/bsub' in part:
+                    log_command = 'bsub ' + ' '.join(parts[i+1:])
+                    break
+                elif '/bkill' in part:
+                    log_command = 'bkill ' + ' '.join(parts[i+1:])
+                    break
+        except:
+            # If parsing fails, keep the original command
+            pass
         
-        if stdout:
-            stdout_str = stdout if isinstance(stdout, str) else stdout.decode('utf-8') if isinstance(stdout, bytes) else str(stdout)
-            for line in stdout_str.splitlines():
-                if line.strip():
-                    logger.info(f"Command output: {line}")
-        
-        if stderr:
-            stderr_str = stderr if isinstance(stderr, str) else stderr.decode('utf-8') if isinstance(stderr, bytes) else str(stderr)
-            for line in stderr_str.splitlines():
-                if line.strip():
-                    logger.warning(f"Command error: {line}")
-        
-        if not success:
-            logger.error(f"Command failed: {command}")
-    else:
-        print(f"Warning: Logger not initialized when logging command output for: {command}") 
+        # Log the full command as DEBUG
+        logger.debug(f"DEBUG: Full command: {command}")
+    
+    # Log the command that was executed
+    status = "SUCCESS" if success else "FAILED"
+    logger.info(f"COMMAND {status}: {log_command}")
+    
+    # Log standard output
+    if stdout:
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode('utf-8')
+            
+        logger.info(f"COMMAND OUTPUT:")
+        for line in stdout.splitlines():
+            logger.info(f"  {line}")
+    
+    # Log standard error if available
+    if stderr:
+        if isinstance(stderr, bytes):
+            stderr = stderr.decode('utf-8')
+            
+        if success:
+            logger.info(f"COMMAND STDERR (non-fatal):")
+        else:
+            logger.error(f"COMMAND ERROR:")
+            
+        for line in stderr.splitlines():
+            if success:
+                logger.info(f"  {line}")
+            else:
+                logger.error(f"  {line}") 
