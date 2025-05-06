@@ -335,7 +335,9 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.handle_vnc_config()
         elif path == "/auth/entra" and auth_enabled and self.authentication_enabled.lower() == "entra":
             self.handle_auth_entra()
-        elif path == "/auth/callback" and auth_enabled and self.authentication_enabled.lower() == "entra":
+        elif (path == "/auth/callback" or path == "/auth/callback/") and auth_enabled and self.authentication_enabled.lower() == "entra":
+            # Handle both with and without trailing slash
+            self.logger.info(f"Handling Entra callback at: {path}")
             self.handle_auth_callback()
         elif path == "/api/auth/ldap/diagnose" and auth_enabled and self.authentication_enabled.lower() == "ldap":
             self.ldap_diagnostics()
@@ -743,12 +745,18 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         try:
             # Parse query parameters
             parsed_url = urlparse(self.path)
+            
+            # Log the full URL for debugging
+            self.logger.info(f"Processing Entra ID callback URL: {self.path}")
+            
+            # Extract query parameters
             query_params = parse_qs(parsed_url.query)
             
             # Get authorization code
             code = query_params.get("code", [""])[0]
             
             if code:
+                self.logger.info("Received authorization code from Entra ID")
                 # Process authorization code
                 success, message, session_id = self.auth_manager.handle_auth_code(code)
                 
@@ -760,12 +768,14 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                     self.end_headers()
                 else:
                     # Authentication failed
+                    self.logger.error(f"Entra ID authentication failed: {message}")
                     self.send_response(401)
                     self.send_header("Content-Type", "text/html")
                     self.end_headers()
                     self.wfile.write(f"Authentication failed: {message}".encode())
             else:
                 # No authorization code provided
+                self.logger.error("No authorization code provided in Entra ID callback")
                 self.send_response(400)
                 self.send_header("Content-Type", "text/html")
                 self.end_headers()
@@ -773,6 +783,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 
         except Exception as e:
             # Send error response for any exceptions
+            self.logger.error(f"Authentication callback error: {str(e)}")
+            self.logger.error(traceback.format_exc())
             self.send_response(500)
             self.send_header("Content-Type", "text/html")
             self.end_headers()

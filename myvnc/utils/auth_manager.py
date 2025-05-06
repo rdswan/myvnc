@@ -172,37 +172,23 @@ class AuthManager:
     def _load_entra_config_from_file(self):
         """Load Entra ID configuration from the config file"""
         try:
-            # Get the path from server config - this should be the absolute path
+            # Get config file path from server config
             config_path_str = self.server_config.get('entra_config')
-            self.logger.info(f"DEBUG: Server config provides entra_config path: {config_path_str}")
-            
             if not config_path_str:
-                # Fallback to default path
-                config_path_str = "config/auth/entra_config.json"
-                # Resolve relative path from the application root
-                config_path = Path(__file__).parent.parent.parent / config_path_str
-                self.logger.info(f"DEBUG: Using default relative path: {config_path}")
-            else:
-                # Use the absolute path directly from server config
-                config_path = Path(config_path_str)
-                self.logger.info(f"DEBUG: Using absolute path from server config: {config_path}")
+                self.logger.error("No Entra ID config file path specified in server config")
+                return
+                
+            config_path = Path(config_path_str)
+            self.logger.info(f"Loading Entra ID configuration from {config_path}")
             
-            self.logger.info(f"DEBUG: Checking if file exists at: {config_path}")
-            
-            # Check if the file exists
             if not config_path.exists():
                 self.logger.error(f"Entra ID config file not found: {config_path}")
                 return
-            
-            self.logger.info(f"DEBUG: File exists, loading config from: {config_path}")
-            
-            # Load the config file
+                
             with open(config_path, 'r') as f:
                 config = json.load(f)
-            
-            self.logger.info(f"DEBUG: Successfully loaded config JSON with keys: {list(config.keys())}")
-            
-            # Set the configuration values if not already set from environment variables
+                
+            # Extract configuration values
             if not self.client_id and 'client_id' in config:
                 self.client_id = config['client_id']
                 self.logger.info(f"Using client_id from config: {self.client_id}")
@@ -221,7 +207,9 @@ class AuthManager:
             # ALWAYS use the redirect_uri from config file
             if 'redirect_uri' in config:
                 self.redirect_uri = config['redirect_uri']
-                self.logger.info(f"Using redirect_uri from config: {self.redirect_uri}")
+                # Check if redirect_uri ends with a trailing slash
+                has_trailing_slash = self.redirect_uri.endswith('/')
+                self.logger.info(f"Using redirect_uri from config: {self.redirect_uri} (with trailing slash: {has_trailing_slash})")
                 os.environ['ENTRA_REDIRECT_URI'] = self.redirect_uri
             else:
                 self.logger.error("No redirect_uri found in Entra config file!")
@@ -469,6 +457,22 @@ class AuthManager:
                 
             self.logger.info(f"Acquiring token with redirect_uri: {self.redirect_uri}")
             
+            # Confirm the redirect_uri format matches what's in the config file
+            # If the trailing slash is missing or present it can cause issues
+            config_path_str = self.server_config.get('entra_config')
+            if config_path_str:
+                try:
+                    with open(config_path_str, 'r') as f:
+                        config = json.load(f)
+                    config_redirect_uri = config.get('redirect_uri', '')
+                    if config_redirect_uri != self.redirect_uri:
+                        self.logger.warning(f"redirect_uri mismatch: config has '{config_redirect_uri}', using '{self.redirect_uri}'")
+                        # Update to match config file
+                        self.redirect_uri = config_redirect_uri
+                        self.logger.info(f"Updated redirect_uri to match config file: {self.redirect_uri}")
+                except Exception as e:
+                    self.logger.error(f"Error reading redirect_uri from config: {str(e)}")
+            
             result = self.msal_app.acquire_token_by_authorization_code(
                 code=code,
                 scopes=self.scopes,
@@ -476,7 +480,9 @@ class AuthManager:
             )
             
             if "error" in result:
-                return False, f"Authentication error: {result.get('error_description', 'Unknown error')}", None
+                error_desc = result.get('error_description', 'Unknown error')
+                self.logger.error(f"Entra ID error: {error_desc}")
+                return False, f"Authentication error: {error_desc}", None
                 
             # Get user info from Microsoft Graph
             graph_data = self._get_user_info_from_graph(result['access_token'])
@@ -494,11 +500,13 @@ class AuthManager:
             # Create session - returns session_id string
             session_id = self.create_session(username, display_name, email, groups)
             
+            self.logger.info(f"Successfully authenticated Entra ID user: {username}")
             return True, "Authentication successful", session_id
             
         except Exception as e:
             error_msg = f"Entra ID authentication error: {str(e)}"
-            print(error_msg, file=sys.stderr)
+            self.logger.error(error_msg)
+            self.logger.error(traceback.format_exc())
             return False, error_msg, None
     
     def validate_session(self, session_id: str) -> Tuple[bool, str, Optional[Dict]]:
@@ -655,7 +663,9 @@ class AuthManager:
                 self.logger.error("Still missing redirect_uri after direct load attempt")
                 return ""
         
-        self.logger.info(f"Generating auth URL with redirect_uri: {self.redirect_uri}")
+        # Log whether the redirect_uri has a trailing slash
+        has_trailing_slash = self.redirect_uri.endswith('/')
+        self.logger.info(f"Generating auth URL with redirect_uri: {self.redirect_uri} (has trailing slash: {has_trailing_slash})")
         
         # Generate the authorization URL
         auth_params = {
