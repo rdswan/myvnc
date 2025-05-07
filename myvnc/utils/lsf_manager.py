@@ -139,12 +139,13 @@ class LSFManager:
             }
             
             # Format the R resource requirement string
-            resource_req = f"affinity[core({lsf_config['num_cores']})] rusage[mem={lsf_config['memory_gb']}G]"
+            resource_req = f"span[hosts=1] rusage[mem={lsf_config['memory_gb']}G]"
             
             # Build the command but don't execute it (dry run)
             cmd = [
                 'bsub',
                 '-q', lsf_config['queue'],
+                '-n', str(lsf_config['num_cores']),
                 '-R', resource_req,
                 '-W', lsf_config['time_limit'],
                 '-J', vnc_config['name']
@@ -352,13 +353,14 @@ class LSFManager:
                 # It's a number, convert to string
                 memory_value = str(memory_gb)
             
-            # Format the R resource requirement string
-            resource_req = f"affinity[core({num_cores})] rusage[mem={memory_value}G]"
+            # Format the resource requirement string with span[hosts=1] for one host and rusage for memory
+            resource_req = f"span[hosts=1] rusage[mem={memory_value}G]"
             
-            # Build LSF command with affinity and rusage resource requirements
+            # Build LSF command with -n for cores and -R for resource requirements
             bsub_cmd = [
                 'bsub',
                 '-q', lsf_config.get('queue', 'interactive'),
+                '-n', str(num_cores),
                 '-R', resource_req,
                 '-J', job_name
             ]
@@ -501,7 +503,7 @@ class LSFManager:
             # Create the base command as a list of arguments - this will be properly quoted
             cmd = [
                 'bjobs',
-                '-o', "jobid stat user queue first_host run_time combined_resreq command delimiter=';'",
+                '-o', "jobid stat user queue first_host run_time slots max_req_proc combined_resreq command delimiter=';'",
                 '-noheader',
                 '-u', user,
                 '-J', 'myvnc_vncserver'
@@ -563,8 +565,8 @@ class LSFManager:
                 
                 # Split the line by the delimiter
                 fields = line.split(';')
-                if len(fields) < 7:  # Need at least jobid, status, user, queue, first_host, run_time, combined_resreq
-                    self.logger.warning(f"Incomplete fields in line, expected at least 7, got {len(fields)}")
+                if len(fields) < 9:  # Need at least jobid, status, user, queue, first_host, run_time, slots, max_req_proc, combined_resreq
+                    self.logger.warning(f"Incomplete fields in line, expected at least 9, got {len(fields)}")
                     continue
                     
                 # Extract job information from fields
@@ -575,8 +577,13 @@ class LSFManager:
                     queue = fields[3].strip()
                     first_host = fields[4].strip()
                     run_time_raw = fields[5].strip()
-                    combined_resreq = fields[6].strip()
-                    command = ';'.join(fields[7:]).strip() if len(fields) > 7 else ""
+                    slots = fields[6].strip()  # Current allocation
+                    max_req_proc = fields[7].strip()  # Maximum requested processors
+                    combined_resreq = fields[8].strip()
+                    command = ';'.join(fields[9:]).strip() if len(fields) > 9 else ""
+                    
+                    # Log exact values for debugging
+                    self.logger.debug(f"Job {job_id} raw field values - slots: '{slots}', max_req_proc: '{max_req_proc}'")
                     
                     # Format runtime from the run_time_raw field
                     runtime_display = "N/A"
@@ -655,13 +662,40 @@ class LSFManager:
                         num_cores = 2  # Default
                         memory_gb = 16  # Default in GB
                         
-                        # Extract cores from affinity[core(N)] pattern
-                        core_match = re.search(r'affinity\[core\((\d+)\)(?:\*(\d+))?\]', combined_resreq)
-                        if core_match:
-                            cores_per_node = int(core_match.group(1))
-                            nodes = int(core_match.group(2)) if core_match.group(2) else 1
-                            num_cores = cores_per_node * nodes
-                            self.logger.debug(f"Parsed cores from combined_resreq: {num_cores}")
+                        # Try to get cores directly
+                        num_cores = None
+                        
+                        # First try max_req_proc if it's a valid value (not a dash or empty)
+                        if max_req_proc and max_req_proc != '-':
+                            try:
+                                num_cores = int(max_req_proc)
+                                self.logger.debug(f"Using max_req_proc value for cores: {num_cores}")
+                            except (ValueError, TypeError):
+                                self.logger.warning(f"Could not parse max_req_proc value '{max_req_proc}' as integer")
+                        # If max_req_proc is not valid, try slots
+                        elif slots and slots != '-':
+                            try:
+                                num_cores = int(slots)
+                                self.logger.debug(f"Using slots value for cores: {num_cores}")
+                            except (ValueError, TypeError):
+                                self.logger.warning(f"Could not parse slots value '{slots}' as integer")
+                        
+                        # Fall back to regex parsing only if we couldn't get a value from fields
+                        if num_cores is None:
+                            # Look for span[hosts=1] pattern which indicates using the new format
+                            if 'span[hosts=1]' in combined_resreq:
+                                # For the new format, the cores are specified with -n parameter
+                                # but we can't directly see that in combined_resreq
+                                # Just leave at default
+                                self.logger.debug(f"Found span[hosts=1] pattern indicating new resource format")
+                            else:
+                                # Try the old affinity[core(N)] pattern as fallback
+                                core_match = re.search(r'affinity\[core\((\d+)\)(?:\*(\d+))?\]', combined_resreq)
+                                if core_match:
+                                    cores_per_node = int(core_match.group(1))
+                                    nodes = int(core_match.group(2)) if core_match.group(2) else 1
+                                    num_cores = cores_per_node * nodes
+                                    self.logger.debug(f"Parsed cores from affinity pattern: {num_cores}")
                         
                         # Extract memory from rusage[mem=N] pattern
                         mem_match = re.search(r'rusage\[mem=(\d+(\.\d+)?)([KMG]?)\]', combined_resreq)
@@ -777,6 +811,9 @@ class LSFManager:
                         job['memory_gb'] = memory_gb  # Add for consistency with frontend
                         job['resources_unknown'] = False
                     
+                    # Log the final core count and memory values
+                    self.logger.debug(f"Job {job_id} final values - cores: {num_cores}, memory_gb: {memory_gb}")
+                    
                     # Add connection details if available
                     if display is not None:
                         job['display'] = display
@@ -811,7 +848,7 @@ class LSFManager:
             
             # Use simple bjobs command to get job list - _run_command will handle using sudo and the full path
             # Use -o format instead of -w to get resource requirements in one call
-            cmd = ['bjobs', '-u', user, '-J', 'myvnc_vncserver', '-o', "jobid stat user queue from_host exec_host job_name submit_time combined_resreq"]
+            cmd = ['bjobs', '-u', user, '-J', 'myvnc_vncserver', '-o', "jobid stat user queue from_host exec_host job_name submit_time slots max_req_proc combined_resreq"]
             self.logger.info(f"Executing command: {' '.join(cmd)}")
             
             output = self._run_command(cmd, authenticated_user)
@@ -878,11 +915,43 @@ class LSFManager:
                     memory_gb = 16  # Default in GB
                     combined_resreq = ""
                     resources_unknown = False
+                    slots = None
+                    max_req_proc = None
+                    
+                    # Extract slots if present (should be in column 9 after submit time)
+                    if len(fields) > 9:
+                        slots = fields[9].strip()
+                    
+                    # Extract max_req_proc if present (should be in column 10 after slots)
+                    if len(fields) > 10:
+                        max_req_proc = fields[10].strip()
+                    
+                    # Log exact values for debugging
+                    self.logger.debug(f"Job {fields[0].strip()} raw field values - slots: '{slots}', max_req_proc: '{max_req_proc}'")
+                    
+                    # Determine number of cores - first try max_req_proc, then slots
+                    # Default value first
+                    num_cores = 2  # Default
+                    
+                    # Try max_req_proc if it's a valid value (not empty or dash)
+                    if max_req_proc and max_req_proc != '-':
+                        try:
+                            num_cores = int(max_req_proc)
+                            self.logger.debug(f"Using max_req_proc value for cores: {num_cores}")
+                        except (ValueError, TypeError):
+                            self.logger.warning(f"Could not parse max_req_proc value '{max_req_proc}' as integer")
+                    # If max_req_proc not available or not valid, try slots
+                    elif slots and slots != '-':
+                        try:
+                            num_cores = int(slots)
+                            self.logger.debug(f"Using slots value for cores: {num_cores}")
+                        except (ValueError, TypeError):
+                            self.logger.warning(f"Could not parse slots value '{slots}' as integer")
                     
                     # Extract combined resource requirements if present
-                    # In newer bjobs -o output, it would be in the last field
-                    if len(fields) > 9:
-                        combined_resreq = ' '.join(fields[9:])
+                    # In newer bjobs -o output, it would be after max_req_proc field
+                    if len(fields) > 11:
+                        combined_resreq = ' '.join(fields[11:])
                         
                         # Check if combined_resreq is just a dash, indicating unknown resources
                         if combined_resreq == "-":
@@ -965,6 +1034,9 @@ class LSFManager:
                         job['mem_gb'] = memory_gb
                         job['memory_gb'] = memory_gb  # Add for consistency with frontend
                     
+                    # Log the final core count and memory values
+                    self.logger.debug(f"Job {job_id} final values - cores: {num_cores}, memory_gb: {memory_gb}")
+                    
                     # Add to jobs list
                     jobs.append(job)
                 except Exception as e:
@@ -990,7 +1062,7 @@ class LSFManager:
             self.logger.info(f"Getting connection details for job {job_id}")
             comprehensive_output = self._run_command([
                 'bjobs', 
-                '-o', "stat:6 user:8 exec_host:25 combined_resreq:50 command:100 job_name output_info delimiter=';'", 
+                '-o', "stat:6 user:8 exec_host:25 slots:5 max_req_proc:5 combined_resreq:50 command:100 job_name output_info delimiter=';'", 
                 '-noheader', 
                 job_id
             ], authenticated_user)
@@ -1000,6 +1072,8 @@ class LSFManager:
             user = None
             display_num = None
             status = "UNKNOWN"
+            slots = None
+            max_req_proc = None
             combined_resreq = ""
             command = ""
             job_name = ""
@@ -1014,14 +1088,16 @@ class LSFManager:
                 if ';' in basic_line:
                     # Split by the delimiter
                     fields = basic_line.split(';')
-                    if len(fields) >= 6:
+                    if len(fields) >= 8:
                         status = fields[0].strip()
                         user = fields[1].strip()
                         exec_host = fields[2].strip()
-                        combined_resreq = fields[3].strip()
-                        command = fields[4].strip() if len(fields) > 4 else ""
-                        job_name = fields[5].strip() if len(fields) > 5 else ""
-                        output_info = fields[6].strip() if len(fields) > 6 else ""
+                        slots = fields[3].strip()
+                        max_req_proc = fields[4].strip()
+                        combined_resreq = fields[5].strip()
+                        command = fields[6].strip() if len(fields) > 6 else ""
+                        job_name = fields[7].strip() if len(fields) > 7 else ""
+                        output_info = fields[8].strip() if len(fields) > 8 else ""
                         
                         if exec_host and exec_host != '-':
                             if ":" in exec_host:
@@ -1035,13 +1111,40 @@ class LSFManager:
                         if combined_resreq:
                             self.logger.debug(f"Resource requirements: {combined_resreq}")
                             
-                            # Extract cores from affinity[core(N)] pattern
-                            core_match = re.search(r'affinity\[core\((\d+)\)(?:\*(\d+))?\]', combined_resreq)
-                            if core_match:
-                                cores_per_node = int(core_match.group(1))
-                                nodes = int(core_match.group(2)) if core_match.group(2) else 1
-                                num_cores = cores_per_node * nodes
-                                self.logger.debug(f"Job using {num_cores} cores")
+                            # Try to get cores directly
+                            num_cores = None
+                            
+                            # First try max_req_proc if it's a valid value (not a dash or empty)
+                            if max_req_proc and max_req_proc != '-':
+                                try:
+                                    num_cores = int(max_req_proc)
+                                    self.logger.debug(f"Using max_req_proc value for cores: {num_cores}")
+                                except (ValueError, TypeError):
+                                    self.logger.warning(f"Could not parse max_req_proc value '{max_req_proc}' as integer")
+                            # If max_req_proc is not valid, try slots
+                            elif slots and slots != '-':
+                                try:
+                                    num_cores = int(slots)
+                                    self.logger.debug(f"Using slots value for cores: {num_cores}")
+                                except (ValueError, TypeError):
+                                    self.logger.warning(f"Could not parse slots value '{slots}' as integer")
+                            
+                            # Fall back to regex parsing only if we couldn't get a value from fields
+                            if num_cores is None:
+                                # Look for span[hosts=1] pattern which indicates using the new format
+                                if 'span[hosts=1]' in combined_resreq:
+                                    # For the new format, the cores are specified with -n parameter
+                                    # but we can't directly see that in combined_resreq
+                                    # Just leave at default
+                                    self.logger.debug(f"Found span[hosts=1] pattern indicating new resource format")
+                                else:
+                                    # Try the old affinity[core(N)] pattern as fallback
+                                    core_match = re.search(r'affinity\[core\((\d+)\)(?:\*(\d+))?\]', combined_resreq)
+                                    if core_match:
+                                        cores_per_node = int(core_match.group(1))
+                                        nodes = int(core_match.group(2)) if core_match.group(2) else 1
+                                        num_cores = cores_per_node * nodes
+                                        self.logger.debug(f"Parsed cores from affinity pattern: {num_cores}")
                             
                             # Extract memory from rusage[mem=N] pattern
                             mem_match = re.search(r'rusage\[mem=(\d+(\.\d+)?)([KMG]?)\]', combined_resreq)
@@ -1059,7 +1162,7 @@ class LSFManager:
                         else:
                             self.logger.debug(f"No memory information found in combined_resreq: {combined_resreq}")
                     else:
-                        self.logger.warning(f"Incomplete fields in job info, expected at least 6, got {len(fields)}")
+                        self.logger.warning(f"Incomplete fields in job info, expected at least 8, got {len(fields)}")
                 else:
                     self.logger.warning(f"No delimiter found in output: {basic_line}")
             except Exception as e:
