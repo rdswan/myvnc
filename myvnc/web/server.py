@@ -838,13 +838,16 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                             job['memory_gb'] = job['mem_gb']
                             self.logger.debug(f"Job {job_id} - mapped mem_gb to memory_gb: {job['memory_gb']}")
                         
-                        # Add default resource values if not present
-                        if 'num_cores' not in job:
-                            job['num_cores'] = 2  # Default value
-                            self.logger.debug(f"Job {job_id} - using default num_cores: {job['num_cores']}")
-                        if 'memory_gb' not in job:
-                            job['memory_gb'] = 16  # Default value
-                            self.logger.debug(f"Job {job_id} - using default memory_gb: {job['memory_gb']}")
+                        # Add default resource values if not present and resources_unknown is not True
+                        if 'resources_unknown' not in job or job['resources_unknown'] is not True:
+                            if 'num_cores' not in job:
+                                job['num_cores'] = 2  # Default value
+                                self.logger.debug(f"Job {job_id} - using default num_cores: {job['num_cores']}")
+                            if 'memory_gb' not in job:
+                                job['memory_gb'] = 16  # Default value
+                                self.logger.debug(f"Job {job_id} - using default memory_gb: {job['memory_gb']}")
+                        else:
+                            self.logger.debug(f"Job {job_id} - not applying default resources because resources_unknown is True")
                         
                         # Ensure runtime_display is set (for compatibility)
                         if 'runtime' in job and 'runtime_display' not in job:

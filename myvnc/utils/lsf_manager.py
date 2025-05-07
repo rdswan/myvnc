@@ -641,29 +641,39 @@ class LSFManager:
                             runtime_display = "0m"
                     
                     # Parse the combined_resreq to extract cores and memory
-                    # Default values
-                    num_cores = 2  # Default
-                    memory_gb = 16  # Default in GB
-                    
-                    # Extract cores from affinity[core(N)] pattern
-                    core_match = re.search(r'affinity\[core\((\d+)\)(?:\*(\d+))?\]', combined_resreq)
-                    if core_match:
-                        cores_per_node = int(core_match.group(1))
-                        nodes = int(core_match.group(2)) if core_match.group(2) else 1
-                        num_cores = cores_per_node * nodes
-                        self.logger.debug(f"Parsed cores from combined_resreq: {num_cores}")
-                    
-                    # Extract memory from rusage[mem=N] pattern
-                    mem_match = re.search(r'rusage\[mem=(\d+(\.\d+)?)([KMG]?)\]', combined_resreq)
-                    if mem_match:
-                        mem_value = float(mem_match.group(1))
-                        mem_unit = mem_match.group(3)
+                    # Check if combined_resreq is missing or just a dash
+                    if not combined_resreq or combined_resreq == '-':
+                        self.logger.info(f"Job {job_id} has no resource requirements yet (value: '{combined_resreq}')")
+                        # Use "Unknown" for pending jobs with no resource requirements
+                        resources_unknown = True
+                        num_cores = None
+                        memory_gb = None
+                    else:
+                        # We have resource requirements, parse them
+                        resources_unknown = False
+                        # Default values
+                        num_cores = 2  # Default
+                        memory_gb = 16  # Default in GB
                         
-                        self.logger.info(f"Found memory in connection details: mem={mem_value}{mem_unit}")
+                        # Extract cores from affinity[core(N)] pattern
+                        core_match = re.search(r'affinity\[core\((\d+)\)(?:\*(\d+))?\]', combined_resreq)
+                        if core_match:
+                            cores_per_node = int(core_match.group(1))
+                            nodes = int(core_match.group(2)) if core_match.group(2) else 1
+                            num_cores = cores_per_node * nodes
+                            self.logger.debug(f"Parsed cores from combined_resreq: {num_cores}")
                         
-                        # Special case for your LSF configuration: values without units are already in GB
-                        memory_gb = mem_value
-                        self.logger.info(f"Treating memory value {mem_value} as GB")
+                        # Extract memory from rusage[mem=N] pattern
+                        mem_match = re.search(r'rusage\[mem=(\d+(\.\d+)?)([KMG]?)\]', combined_resreq)
+                        if mem_match:
+                            mem_value = float(mem_match.group(1))
+                            mem_unit = mem_match.group(3)
+                            
+                            self.logger.info(f"Found memory in connection details: mem={mem_value}{mem_unit}")
+                            
+                            # Special case for your LSF configuration: values without units are already in GB
+                            memory_gb = mem_value
+                            self.logger.info(f"Treating memory value {mem_value} as GB")
                     
                     # Get VNC connection details
                     display = None
@@ -745,16 +755,27 @@ class LSFManager:
                         'exec_host': exec_host,
                         'host': host,  # Use the cleaned host name for display
                         'user': user,
-                        'cores': num_cores,      # Keep for backward compatibility
-                        'num_cores': num_cores,  # Use num_cores directly for frontend compatibility
-                        'mem_gb': memory_gb,
-                        'submit_time': '2025-04-25 00:00:00',  # Default value
-                        'submit_time_raw': 'Unknown',  # Default value
                         'runtime': runtime_display,  # Explicitly include runtime
                         'runtime_display': runtime_display,  # Add runtime_display for consistency with client
                         'run_time_seconds': run_time_seconds if 'run_time_seconds' in locals() else 0,
                         'resource_req': combined_resreq  # Add the raw resource requirements string
                     }
+                    
+                    # Add resource information based on what we found
+                    if resources_unknown:
+                        # For pending jobs with unknown resources, use null values
+                        job['num_cores'] = None
+                        job['cores'] = None
+                        job['mem_gb'] = None
+                        job['memory_gb'] = None
+                        job['resources_unknown'] = True
+                    else:
+                        # We have resource info, use what we parsed
+                        job['num_cores'] = num_cores
+                        job['cores'] = num_cores      # Keep for backward compatibility
+                        job['mem_gb'] = memory_gb
+                        job['memory_gb'] = memory_gb  # Add for consistency with frontend
+                        job['resources_unknown'] = False
                     
                     # Add connection details if available
                     if display is not None:
@@ -856,11 +877,41 @@ class LSFManager:
                     num_cores = 2  # Default
                     memory_gb = 16  # Default in GB
                     combined_resreq = ""
+                    resources_unknown = False
                     
                     # Extract combined resource requirements if present
                     # In newer bjobs -o output, it would be in the last field
                     if len(fields) > 9:
                         combined_resreq = ' '.join(fields[9:])
+                        
+                        # Check if combined_resreq is just a dash, indicating unknown resources
+                        if combined_resreq == "-":
+                            self.logger.info(f"Job {job_id} has unknown resource requirements")
+                            num_cores = None
+                            memory_gb = None
+                            resources_unknown = True
+                            job = {
+                                'job_id': fields[0].strip(),
+                                'user': fields[2].strip(),
+                                'status': fields[1].strip(),
+                                'queue': fields[3].strip(),
+                                'from_host': fields[4].strip(),
+                                'exec_host': fields[5].strip(),
+                                'host': fields[5].strip(),
+                                'runtime': 'N/A',
+                                'runtime_display': 'N/A',
+                                'submit_time': submit_time,
+                                'submit_time_raw': submit_time_raw,
+                                'resource_req': combined_resreq,
+                                'num_cores': None,
+                                'cores': None,
+                                'mem_gb': None,
+                                'memory_gb': None,
+                                'resources_unknown': True
+                            }
+                            jobs.append(job)
+                            continue
+                            
                         self.logger.debug(f"Found combined resreq: {combined_resreq}")
                         
                         # Extract cores from affinity[core(N)] pattern
@@ -898,11 +949,21 @@ class LSFManager:
                         'runtime_display': 'N/A',  # Add runtime_display for consistency with client
                         'submit_time': submit_time,
                         'submit_time_raw': submit_time_raw,
-                        'num_cores': num_cores,  # Use num_cores directly for frontend compatibility
-                        'cores': num_cores,      # Keep cores for backward compatibility
-                        'mem_gb': memory_gb,
                         'resource_req': combined_resreq  # Add the raw resource requirements string
                     }
+                    
+                    # Add resource information based on what we found
+                    if resources_unknown:
+                        job['num_cores'] = None
+                        job['cores'] = None
+                        job['mem_gb'] = None
+                        job['memory_gb'] = None
+                        job['resources_unknown'] = True
+                    else:
+                        job['num_cores'] = num_cores
+                        job['cores'] = num_cores      # Keep for backward compatibility
+                        job['mem_gb'] = memory_gb
+                        job['memory_gb'] = memory_gb  # Add for consistency with frontend
                     
                     # Add to jobs list
                     jobs.append(job)

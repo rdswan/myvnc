@@ -892,7 +892,7 @@ async function refreshVNCList(withRetries = false) {
                     `<span class="status-badge ${statusClass}">${job.status}</span>`}
                 </td>
                 <td>${job.queue}</td>
-                <td>${job.num_cores || '-'} cores, ${job.memory_gb || '-'} GB</td>
+                <td>${job.resources_unknown ? 'Unknown' : `${job.num_cores || '-'} cores, ${job.memory_gb || '-'} GB`}</td>
                 <td title="VNC Connection: ${connectionInfo}">${job.host || 'N/A'}</td>
                 <td>:${job.display || 'N/A'}</td>
                 <td>${job.runtime_display || 'N/A'}</td>
