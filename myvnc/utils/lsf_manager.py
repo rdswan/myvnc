@@ -288,7 +288,8 @@ class LSFManager:
                 'command': cmd_str,
                 'stdout': stdout,
                 'stderr': stderr,
-                'success': True
+                'success': True,
+                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             })
             
             return stdout
@@ -306,7 +307,8 @@ class LSFManager:
                 'command': cmd_str,
                 'stdout': stdout,
                 'stderr': stderr,
-                'success': False
+                'success': False,
+                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             })
             
             raise RuntimeError(f"Command failed: {stderr}")
@@ -353,8 +355,35 @@ class LSFManager:
                 # It's a number, convert to string
                 memory_value = str(memory_gb)
             
-            # Format the resource requirement string with span[hosts=1] for one host and rusage for memory
+            # Format the resource requirement string with span[hosts=1] for memory
             resource_req = f"span[hosts=1] rusage[mem={memory_value}G]"
+            
+            # Check if OS selection is specified
+            os_name = lsf_config.get('os', 'Any')
+            self.logger.info(f"OS selection from form: {os_name}")
+            
+            # Load LSF config to get OS select value
+            config_manager = ConfigManager()
+            lsf_config_file = config_manager.lsf_config
+            os_options = lsf_config_file.get('os_options', [])
+            self.logger.debug(f"Available OS options: {os_options}")
+            
+            # Find the select value for the specified OS
+            os_select = ""
+            for os_option in os_options:
+                if os_option.get('name') == os_name and os_option.get('select'):
+                    os_select = os_option.get('select')
+                    self.logger.info(f"Found select value for OS '{os_name}': {os_select}")
+                    break
+            
+            # Modify resource requirements if we need to include OS selection
+            if os_select and os_select != "any":
+                self.logger.info(f"Adding OS selection '{os_select}' to resource requirements")
+                resource_req = f"select[{os_select}] {resource_req}"
+            else:
+                self.logger.info(f"Not adding OS selection - os_select is '{os_select}'")
+                
+            self.logger.info(f"Final resource requirements string: '{resource_req}'")
             
             # Build LSF command with -n for cores and -R for resource requirements
             bsub_cmd = [
@@ -1062,7 +1091,7 @@ class LSFManager:
             self.logger.info(f"Getting connection details for job {job_id}")
             comprehensive_output = self._run_command([
                 'bjobs', 
-                '-o', "stat:6 user:8 exec_host:25 slots:5 max_req_proc:5 combined_resreq:50 command:100 job_name output_info delimiter=';'", 
+                '-o', "stat:6 user:8 exec_host:25 slots:5 max_req_proc:5 combined_resreq:50 command:100 job_name delimiter=';'", 
                 '-noheader', 
                 job_id
             ], authenticated_user)
@@ -1077,7 +1106,6 @@ class LSFManager:
             combined_resreq = ""
             command = ""
             job_name = ""
-            output_info = ""
             
             # Try to parse the output with delimiter
             try:
@@ -1097,7 +1125,6 @@ class LSFManager:
                         combined_resreq = fields[5].strip()
                         command = fields[6].strip() if len(fields) > 6 else ""
                         job_name = fields[7].strip() if len(fields) > 7 else ""
-                        output_info = fields[8].strip() if len(fields) > 8 else ""
                         
                         if exec_host and exec_host != '-':
                             if ":" in exec_host:
@@ -1198,15 +1225,15 @@ class LSFManager:
                     self.logger.warning(f"Error extracting display number from command: {str(e)}")
             
             # If display number is still not found, try to find it in output_info
-            if not display_num and output_info:
+            if not display_num and comprehensive_output:
                 try:
                     # Look for VNC display pattern in output_info
-                    display_match = re.search(r'New \'[^:]+:(\d+)', output_info)
+                    display_match = re.search(r'New \'[^:]+:(\d+)', comprehensive_output)
                     if display_match:
                         display_num = display_match.group(1)
                         self.logger.debug(f"Found display number from output info: {display_num}")
                     else:
-                        display_match = re.search(r'Starting applications specified in\s+.*\s+for VNC display\s+(\d+)', output_info)
+                        display_match = re.search(r'Starting applications specified in\s+.*\s+for VNC display\s+(\d+)', comprehensive_output)
                         if display_match:
                             display_num = display_match.group(1)
                             self.logger.debug(f"Found display number from VNC output info: {display_num}")

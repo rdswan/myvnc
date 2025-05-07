@@ -746,6 +746,42 @@ async function loadLSFConfig() {
         populateSelect('lsf-queue', lsfConfig.queues, lsfConfig.defaults.queue);
         populateSelect('lsf-cores', lsfConfig.core_options, lsfConfig.defaults.num_cores);
         
+        // Populate OS options if available
+        if (lsfConfig.os_options && Array.isArray(lsfConfig.os_options)) {
+            const osElement = document.getElementById('lsf-os');
+            if (osElement) {
+                // Clear existing options
+                osElement.innerHTML = '';
+                
+                // Get default OS from config
+                const defaultOs = lsfConfig.defaults.os || "Any";
+                let foundDefault = false;
+                
+                // Add each OS option
+                lsfConfig.os_options.forEach(os => {
+                    const optionElement = document.createElement('option');
+                    optionElement.value = os.name;
+                    optionElement.textContent = os.name;
+                    
+                    if (os.name === defaultOs) {
+                        optionElement.selected = true;
+                        foundDefault = true;
+                    }
+                    
+                    osElement.appendChild(optionElement);
+                });
+                
+                // If default not found, add it
+                if (!foundDefault && defaultOs) {
+                    const optionElement = document.createElement('option');
+                    optionElement.value = defaultOs;
+                    optionElement.textContent = defaultOs + ' (Default)';
+                    optionElement.selected = true;
+                    osElement.appendChild(optionElement);
+                }
+            }
+        }
+        
         // Set memory slider based on memory options from config
         const memorySlider = document.getElementById('lsf-memory');
         const memoryValue = document.getElementById('memory-value');
@@ -1131,6 +1167,8 @@ async function createVNCSession(event) {
         const coresSelect = document.getElementById('lsf-cores');
         const queueSelect = document.getElementById('lsf-queue');
         const memorySlider = document.getElementById('lsf-memory');
+        const osSelect = document.getElementById('lsf-os');
+        const hostFilterInput = document.getElementById('lsf-host-filter');
         
         // Log all form element values for debugging
         console.log('Form values at submission:');
@@ -1141,6 +1179,8 @@ async function createVNCSession(event) {
         console.log('Cores:', coresSelect ? coresSelect.value : 'Not found');
         console.log('Queue:', queueSelect ? queueSelect.value : 'Not found');
         console.log('Memory:', memorySlider ? memorySlider.value : 'Not found');
+        console.log('OS:', osSelect ? osSelect.value : 'Not found');
+        console.log('Host Filter:', hostFilterInput ? hostFilterInput.value : 'Not found');
         
         // Build the data object manually from form elements
         const data = {};
@@ -1173,6 +1213,16 @@ async function createVNCSession(event) {
         // Add queue if available
         if (queueSelect && queueSelect.value) {
             data.queue = queueSelect.value;
+        }
+        
+        // Add OS if available
+        if (osSelect && osSelect.value) {
+            data.os = osSelect.value;
+        }
+        
+        // Add host filter if available and not empty
+        if (hostFilterInput && hostFilterInput.value && hostFilterInput.value.trim() !== '') {
+            data.host_filter = hostFilterInput.value.trim();
         }
         
         // Add memory if available
@@ -1316,13 +1366,27 @@ function populateSelect(elementId, options, defaultValue) {
     // Add each option
     options.forEach(option => {
         const optionElement = document.createElement('option');
-        optionElement.value = option;
-        optionElement.textContent = option;
         
-        if (option === defaultValue) {
-            optionElement.selected = true;
-            foundDefault = true;
-            console.log(`Found matching option for default value "${defaultValue}" in ${elementId}`);
+        // Check if the option is an object with value/label properties
+        if (option && typeof option === 'object' && option.value !== undefined) {
+            optionElement.value = option.value;
+            optionElement.textContent = option.label || option.value;
+            
+            if (option.value === defaultValue) {
+                optionElement.selected = true;
+                foundDefault = true;
+                console.log(`Found matching option for default value "${defaultValue}" in ${elementId}`);
+            }
+        } else {
+            // Simple string option
+            optionElement.value = option;
+            optionElement.textContent = option;
+            
+            if (option === defaultValue) {
+                optionElement.selected = true;
+                foundDefault = true;
+                console.log(`Found matching option for default value "${defaultValue}" in ${elementId}`);
+            }
         }
         
         select.appendChild(optionElement);

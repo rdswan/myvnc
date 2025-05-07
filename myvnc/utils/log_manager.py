@@ -8,6 +8,7 @@ import subprocess
 import datetime
 from pathlib import Path
 import json
+import shlex
 
 # Global logger instance
 logger = None
@@ -76,8 +77,22 @@ def register_subprocess_handler():
         # Get the command that's about to be executed
         cmd_str = ' '.join(str(arg) for arg in args[0]) if args and isinstance(args[0], (list, tuple)) else str(args[0])
         
+        # Create a properly quoted command string for logging
+        quoted_cmd_str = cmd_str
+        if args and isinstance(args[0], (list, tuple)):
+            cmd_list = args[0]
+            # Simple and reliable quoting for logging
+            quoted_args = []
+            for arg in cmd_list:
+                arg_str = str(arg)
+                if ' ' in arg_str or ';' in arg_str or '=' in arg_str or '[' in arg_str or ']' in arg_str:
+                    quoted_args.append(f'"{arg_str}"')
+                else:
+                    quoted_args.append(arg_str)
+            quoted_cmd_str = ' '.join(quoted_args)
+        
         # For logging, filter out sudo information if present
-        log_cmd_str = cmd_str
+        log_cmd_str = quoted_cmd_str
         
         # Check if the command begins with sudo and is modifying an LSF command
         if log_cmd_str.startswith('sudo -u') and any(lsf_cmd in log_cmd_str for lsf_cmd in ['/bjobs', '/bsub', '/bkill']):

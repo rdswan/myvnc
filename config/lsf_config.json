@@ -4,7 +4,8 @@
         "num_cores": 2,
         "memory_gb": 16,
         "job_name": "myvnc_vncserver",
-        "default_site": "Austin"
+        "default_site": "Austin",
+        "os": "Any"
     },
     "available_queues": [
         "interactive",
@@ -38,6 +39,20 @@
         {
             "name": "Bangalore",
             "domain": "bglr"
+        }
+    ],
+    "os_options": [
+        {
+            "name": "RedHat 8.10",
+            "select": "rh810"
+        },
+        {
+            "name": "CentOS 7",
+            "select": "c7"
+        },
+        {
+            "name": "Any",
+            "select": "any"
         }
     ],
     "env_file": "/site/lsf/aus-hw/conf/profile.lsf"

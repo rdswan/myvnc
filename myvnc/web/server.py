@@ -806,13 +806,22 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         try:
             # Get authenticated user
             authenticated_user = self.get_authenticated_user() if self.is_auth_enabled() else None
+            self.logger.info(f"Handling VNC sessions request for user: {authenticated_user}")
             
             # Get VNC sessions
             try:
+                self.logger.info("Calling get_active_vnc_jobs")
                 jobs = self.lsf_manager.get_active_vnc_jobs(authenticated_user)
                 self.logger.info(f"Retrieved {len(jobs)} VNC sessions")
+                
+                # Log job details for debugging
+                for i, job in enumerate(jobs):
+                    job_id = job.get('job_id', 'unknown')
+                    self.logger.debug(f"Job {i+1}/{len(jobs)}: id={job_id}, status={job.get('status')}, host={job.get('host')}")
             except Exception as e:
                 self.logger.error(f"Error getting VNC sessions: {str(e)}")
+                self.logger.error(f"Exception type: {type(e).__name__}")
+                self.logger.error(traceback.format_exc())
                 self.send_json_response({"error": f"Error getting VNC sessions: {str(e)}"}, status=500)
                 return
                 
@@ -853,6 +862,10 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                         if 'runtime' in job and 'runtime_display' not in job:
                             job['runtime_display'] = job['runtime']
                         
+                        # Add the name property if not present
+                        if 'name' not in job:
+                            job['name'] = 'VNC Session'
+                        
                         # Ensure host is present
                         if 'exec_host' not in job or not job['exec_host'] or job['exec_host'] == 'N/A':
                             self.logger.warning(f"Job {job_id} has no exec_host specified")
@@ -869,13 +882,16 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                                     job['display'] = conn_details['display']
                                     
                         # Log final resources for debugging
-                        self.logger.debug(f"Job {job_id} final resources - cores: {job.get('cores', 'None')}, num_cores: {job.get('num_cores', 'None')}, mem_gb: {job.get('mem_gb', 'None')}")
+                        self.logger.debug(f"Job {job_id} final resources - num_cores: {job.get('num_cores', 'None')}, memory_gb: {job.get('memory_gb', 'None')}")
+                        user_jobs.append(job)
                 except Exception as e:
                     self.logger.error(f"Error processing job {job.get('job_id', 'unknown')}: {str(e)}")
             
-            self.send_json_response(jobs)
+            self.logger.info(f"Sending {len(user_jobs)} processed jobs to client")
+            self.send_json_response(user_jobs)
         except Exception as e:
             self.logger.error(f"Error handling VNC sessions request: {str(e)}")
+            self.logger.error(traceback.format_exc())
             self.send_json_response({"error": str(e)}, status=500)
     
     def handle_lsf_config(self):
@@ -886,8 +902,10 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 'defaults': self.config_manager.get_lsf_defaults(),
                 'queues': self.config_manager.get_available_queues(),
                 'memory_options': self.config_manager.get_memory_options(),
+                'memory_options_gb': self.config_manager.get_memory_options(),  # For consistency
                 'core_options': self.config_manager.get_core_options(),
-                'sites': self.config_manager.get_available_sites()
+                'sites': self.config_manager.get_available_sites(),
+                'os_options': self.config_manager.lsf_config.get('os_options', [])
             }
             self.logger.debug(f"Sending LSF config: {config}")
             self.send_json_response(config)
@@ -1278,6 +1296,9 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             post_data = self.rfile.read(content_length).decode("utf-8")
             data = json.loads(post_data)
             
+            # Log all incoming data for debugging
+            self.logger.info(f"VNC start request data: {json.dumps(data)}")
+            
             # Get default settings from config
             vnc_defaults = self.config_manager.get_vnc_defaults()
             lsf_defaults = self.config_manager.get_lsf_defaults()
@@ -1300,8 +1321,14 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 "queue": data.get("queue", lsf_defaults.get("queue")),
                 "num_cores": int(data.get("num_cores", lsf_defaults.get("num_cores"))),
                 "memory_gb": int(data.get("memory_gb", lsf_defaults.get("memory_gb"))),
-                "job_name": lsf_defaults.get("job_name", "myvnc_vncserver")
+                "job_name": lsf_defaults.get("job_name", "myvnc_vncserver"),
+                # Add OS selection if provided
+                "os": data.get("os", lsf_defaults.get("os", "Any"))
             }
+            
+            # Log the settings that will be used
+            self.logger.info(f"Using VNC settings: {json.dumps(vnc_settings)}")
+            self.logger.info(f"Using LSF settings: {json.dumps(lsf_settings)}")
             
             # Get authenticated user if available
             authenticated_user = None
