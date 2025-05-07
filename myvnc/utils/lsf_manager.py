@@ -789,7 +789,8 @@ class LSFManager:
             user = authenticated_user if authenticated_user else os.environ.get('USER', '')
             
             # Use simple bjobs command to get job list - _run_command will handle using sudo and the full path
-            cmd = ['bjobs', '-u', user, '-J', 'myvnc_vncserver', '-w']
+            # Use -o format instead of -w to get resource requirements in one call
+            cmd = ['bjobs', '-u', user, '-J', 'myvnc_vncserver', '-o', "jobid stat user queue from_host exec_host job_name submit_time combined_resreq"]
             self.logger.info(f"Executing command: {' '.join(cmd)}")
             
             output = self._run_command(cmd, authenticated_user)
@@ -800,156 +801,95 @@ class LSFManager:
             if len(lines) <= 1:  # Only header or no output
                 self.logger.info("No jobs found in output. Lines: {}".format(len(lines)))
                 return jobs
+            
+            # Process job lines (skip header)
+            for i in range(1, len(lines)):
+                line = lines[i]
                 
-            # Skip header line and process each job line
-            for line in lines[1:]:
-                self.logger.debug(f"Processing job line: {line}")
-                
-                # Skip empty lines
-                if not line.strip():
-                    continue
-                
-                # Process job
                 try:
-                    # Split the line by whitespace
+                    # Split into fields
                     fields = line.split()
+                    
                     if len(fields) < 7:
+                        self.logger.warning(f"Incomplete fields in line, expected at least 7, got {len(fields)}")
                         continue
-                        
+                    
+                    # Get job ID and basic info
                     job_id = fields[0].strip()
                     
-                    # Extract submission time from the last two columns if there are at least 7 fields
-                    submit_time = "2025-04-25 00:00:00"  # Default value
-                    submit_time_raw = "Unknown"
+                    # Extract submit time
+                    submit_time = "N/A"  # Default value
+                    submit_time_raw = "N/A"
                     
-                    if len(fields) >= 7:
+                    # In standard bjobs -o output, submit time might be in column 7
+                    if len(fields) > 7:
+                        # Handle the submit time field
+                        submit_time_raw = ' '.join(fields[7:9])  # Get date and time parts
+                        
                         try:
-                            # Try to extract the submit time from fields
-                            # The format may be "Mon DD HH:MM" or "Mon DD YYYY" or just "HH:MM"
-                            submit_time_raw = ' '.join(fields[-2:])  # Last two fields
-                            
-                            # Parse different possible formats
-                            # The format may be "Mon DD HH:MM" or "Mon DD YYYY" or just "HH:MM"
-                            
-                            # Format: "Mon DD HH:MM"
-                            mon_dd_hhmm_match = re.match(r'([A-Za-z]{3})\s+(\d{1,2})\s+(\d{1,2}):(\d{2})', submit_time_raw)
-                            if mon_dd_hhmm_match:
-                                month_str, day, hour, minute = mon_dd_hhmm_match.groups()
-                                # Convert month string to number
-                                month_map = {'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6, 
-                                            'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12}
-                                month = month_map.get(month_str, 1)
+                            # Try to convert to standard datetime format for consistency
+                            dt_parts = submit_time_raw.split()
+                            if len(dt_parts) >= 2:
+                                # Format might be "Apr 25 12:34"
+                                month_name = dt_parts[0]
+                                day = dt_parts[1]
+                                time_part = dt_parts[2] if len(dt_parts) > 2 else "00:00:00"
                                 
-                                # Use current year, but check if date is in future
-                                current_date = datetime.now()
-                                year = current_date.year
+                                # Convert month name to month number
+                                month_dict = {
+                                    'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
+                                    'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08',
+                                    'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
+                                }
+                                month = month_dict.get(month_name, '01')
                                 
-                                # Create the date with the current year
-                                submit_date = datetime(year, month, int(day), int(hour), int(minute))
+                                # Current year - LSF might not include it
+                                year = datetime.now().year
                                 
-                                # If the date is in the future, it's likely from the previous year
-                                if submit_date > current_date:
-                                    submit_date = datetime(year - 1, month, int(day), int(hour), int(minute))
-                                
-                                # Format the date as string
-                                submit_time = submit_date.strftime("%Y-%m-%d %H:%M:%S")
-                                
-                            # Format: "Mon DD YYYY"
-                            elif re.match(r'([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})', submit_time_raw):
-                                mon_dd_yyyy_match = re.match(r'([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4})', submit_time_raw)
-                                month_str, day, year = mon_dd_yyyy_match.groups()
-                                month_map = {'Jan': 1, 'Feb': 2, 'Mar': 3, 'Apr': 4, 'May': 5, 'Jun': 6, 
-                                            'Jul': 7, 'Aug': 8, 'Sep': 9, 'Oct': 10, 'Nov': 11, 'Dec': 12}
-                                month = month_map.get(month_str, 1)
-                                
-                                # Create the date
-                                submit_date = datetime(int(year), month, int(day), 0, 0)
-                                
-                                # Format the date as string
-                                submit_time = submit_date.strftime("%Y-%m-%d %H:%M:%S")
-                            
-                            # Format: "HH:MM" (just time, assume today's date)
-                            elif re.match(r'(\d{1,2}):(\d{2})', submit_time_raw):
-                                hhmm_match = re.match(r'(\d{1,2}):(\d{2})', submit_time_raw)
-                                hour, minute = hhmm_match.groups()
-                                
-                                # Use current date
-                                current_date = datetime.now()
-                                
-                                # Create datetime with today's date and the given time
-                                submit_date = datetime(
-                                    current_date.year, 
-                                    current_date.month, 
-                                    current_date.day,
-                                    int(hour), 
-                                    int(minute)
-                                )
-                                
-                                # If the time is in the future (which is unlikely for a submission time),
-                                # assume it was from yesterday
-                                if submit_date > current_date:
-                                    submit_date = submit_date - datetime.timedelta(days=1)
-                                
-                                # Format the date as string
-                                submit_time = submit_date.strftime("%Y-%m-%d %H:%M:%S")
-                            
-                            # Unknown format: use default
-                            else:
-                                # Keep the default value and print a warning
-                                self.logger.warning(f"Unknown submit time format: '{submit_time_raw}'")
-                                
+                                # Construct a standard date time string
+                                submit_time = f"{year}-{month}-{day.zfill(2)} {time_part}"
                         except Exception as e:
                             # Keep the default value and print the error
                             self.logger.error(f"Error parsing submit time '{submit_time_raw}': {str(e)}")
                     
-                    # Get additional detailed information using bjobs -l
-                    # Default values
+                    # Default values for resources
                     num_cores = 2  # Default
                     memory_gb = 16  # Default in GB
                     combined_resreq = ""
                     
-                    try:
-                        # Get detailed job info for host, cores, memory
-                        detailed_cmd = ['bjobs', '-l', job_id]
-                        detailed_output = self._run_command(detailed_cmd, authenticated_user)
+                    # Extract combined resource requirements if present
+                    # In newer bjobs -o output, it would be in the last field
+                    if len(fields) > 9:
+                        combined_resreq = ' '.join(fields[9:])
+                        self.logger.debug(f"Found combined resreq: {combined_resreq}")
                         
-                        # Extract resource requirements from the detailed output
-                        resreq_match = re.search(r'Combined: ([^;]+)', detailed_output)
-                        if resreq_match:
-                            combined_resreq = resreq_match.group(1).strip()
-                            self.logger.debug(f"Found combined resreq: {combined_resreq}")
+                        # Extract cores from affinity[core(N)] pattern
+                        core_match = re.search(r'affinity\[core\((\d+)\)(?:\*(\d+))?\]', combined_resreq)
+                        if core_match:
+                            cores_per_node = int(core_match.group(1))
+                            nodes = int(core_match.group(2)) if core_match.group(2) else 1
+                            num_cores = cores_per_node * nodes
+                            self.logger.debug(f"Parsed cores from combined_resreq: {num_cores}")
+                        
+                        # Extract memory from rusage[mem=N] pattern
+                        mem_match = re.search(r'rusage\[mem=(\d+(\.\d+)?)([KMG]?)\]', combined_resreq)
+                        if mem_match:
+                            mem_value = float(mem_match.group(1))
+                            mem_unit = mem_match.group(3)
                             
-                            # Extract cores from affinity[core(N)] pattern
-                            core_match = re.search(r'affinity\[core\((\d+)\)(?:\*(\d+))?\]', combined_resreq)
-                            if core_match:
-                                cores_per_node = int(core_match.group(1))
-                                nodes = int(core_match.group(2)) if core_match.group(2) else 1
-                                num_cores = cores_per_node * nodes
-                                self.logger.debug(f"Parsed cores from combined_resreq: {num_cores}")
+                            self.logger.info(f"Found memory in connection details: mem={mem_value}{mem_unit}")
                             
-                            # Extract memory from rusage[mem=N] pattern
-                            mem_match = re.search(r'rusage\[mem=(\d+(\.\d+)?)([KMG]?)\]', combined_resreq)
-                            if mem_match:
-                                mem_value = float(mem_match.group(1))
-                                mem_unit = mem_match.group(3)
-                                
-                                self.logger.info(f"Found memory in connection details: mem={mem_value}{mem_unit}")
-                                
-                                # Special case for your LSF configuration: values without units are already in GB
-                                memory_gb = mem_value
-                                self.logger.info(f"Treating memory value {mem_value} as GB")
-                            else:
-                                self.logger.debug(f"No memory information found in combined_resreq: {combined_resreq}")
+                            # Special case for your LSF configuration: values without units are already in GB
+                            memory_gb = mem_value
+                            self.logger.info(f"Treating memory value {mem_value} as GB")
                         else:
                             self.logger.debug(f"No memory information found in combined_resreq: {combined_resreq}")
-                    except Exception as e:
-                        self.logger.error(f"Error getting detailed job info: {str(e)}")
                     
                     # Create basic job info
                     job = {
                         'job_id': fields[0].strip(),
-                        'user': fields[1].strip(),
-                        'status': fields[2].strip(),
+                        'user': fields[2].strip(),
+                        'status': fields[1].strip(),
                         'queue': fields[3].strip(),
                         'from_host': fields[4].strip(),
                         'exec_host': fields[5].strip(),
@@ -985,8 +925,14 @@ class LSFManager:
             Dictionary with connection details or None if not found
         """
         try:
-            # First get basic job info with combined resource requirements
-            basic_output = self._run_command(['bjobs', '-o', "stat:6 user:8 exec_host:15 combined_resreq:30 delimiter=';'", '-noheader', job_id], authenticated_user)
+            # Get all necessary information with a single comprehensive command
+            self.logger.info(f"Getting connection details for job {job_id}")
+            comprehensive_output = self._run_command([
+                'bjobs', 
+                '-o', "stat:6 user:8 exec_host:25 combined_resreq:50 command:100 job_name output_info delimiter=';'", 
+                '-noheader', 
+                job_id
+            ], authenticated_user)
             
             # Initialize values
             host = None
@@ -994,21 +940,27 @@ class LSFManager:
             display_num = None
             status = "UNKNOWN"
             combined_resreq = ""
+            command = ""
+            job_name = ""
+            output_info = ""
             
-            # Try to parse the basic output with delimiter
+            # Try to parse the output with delimiter
             try:
                 # Should return a single line with the job info
-                basic_line = basic_output.strip()
-                self.logger.debug(f"Basic job info with delimiter: {basic_line}")
+                basic_line = comprehensive_output.strip()
+                self.logger.debug(f"Job info with delimiter: {basic_line}")
                 
                 if ';' in basic_line:
                     # Split by the delimiter
                     fields = basic_line.split(';')
-                    if len(fields) >= 4:
+                    if len(fields) >= 6:
                         status = fields[0].strip()
                         user = fields[1].strip()
                         exec_host = fields[2].strip()
                         combined_resreq = fields[3].strip()
+                        command = fields[4].strip() if len(fields) > 4 else ""
+                        job_name = fields[5].strip() if len(fields) > 5 else ""
+                        output_info = fields[6].strip() if len(fields) > 6 else ""
                         
                         if exec_host and exec_host != '-':
                             if ":" in exec_host:
@@ -1016,7 +968,7 @@ class LSFManager:
                                 host = exec_host.split(':')[0]
                             else:
                                 host = exec_host
-                            self.logger.debug(f"Found host from basic job info with delimiter: {host}")
+                            self.logger.debug(f"Found host from job info with delimiter: {host}")
                             
                         # Extract resource information from the combined_resreq
                         if combined_resreq:
@@ -1045,161 +997,85 @@ class LSFManager:
                                 self.logger.debug(f"No memory information found in combined_resreq: {combined_resreq}")
                         else:
                             self.logger.debug(f"No memory information found in combined_resreq: {combined_resreq}")
+                    else:
+                        self.logger.warning(f"Incomplete fields in job info, expected at least 6, got {len(fields)}")
+                else:
+                    self.logger.warning(f"No delimiter found in output: {basic_line}")
             except Exception as e:
-                self.logger.error(f"Error parsing basic job info with delimiter: {str(e)}")
+                self.logger.error(f"Error parsing job info with delimiter: {str(e)}")
             
-            # If we didn't get the host from basic output with delimiter, fall back to standard format
+            # If we can't determine the host, we can't determine connection details
             if not host:
-                try:
-                    # Get basic job info in standard format as backup
-                    standard_output = self._run_command(['bjobs', '-w', job_id], authenticated_user)
-                    standard_lines = standard_output.strip().split('\n')
-                    
-                    # Extract host from the standard output
-                    if len(standard_lines) > 1:  # Header + job line
-                        job_line = standard_lines[1]
-                        self.logger.debug(f"Basic job info (standard): {job_line}")
-                        fields = job_line.split()
-                        
-                        if len(fields) >= 6:
-                            # Format: JOBID USER STATUS QUEUE FROM_HOST EXEC_HOST JOB_NAME SUBMIT_TIME
-                            status = fields[2]  # STATUS is the 3rd field
-                            user = fields[1]  # USER is the 2nd field
-                            exec_host = fields[5]  # EXEC_HOST is the 6th field
-                            
-                            if exec_host and exec_host != '-':
-                                if ":" in exec_host:
-                                    # For multi-host jobs, take the first host
-                                    host = exec_host.split(':')[0]
-                                else:
-                                    host = exec_host
-                                self.logger.debug(f"Found host from standard job info: {host}")
-                except Exception as e:
-                    self.logger.error(f"Error getting standard job info: {str(e)}")
-            
-            # If we still don't have a host, get detailed info
-            if not host:
-                try:
-                    # Get detailed job info
-                    output = self._run_command(['bjobs', '-l', job_id], authenticated_user)
-                    
-                    # Try to extract host information from detailed output
-                    host_match = re.search(r'Started on <([^>]+)>', output)
-                    if host_match:
-                        host = host_match.group(1)
-                        self.logger.debug(f"Found host from 'Started on' pattern: {host}")
-                    
-                    # Look for EXEC_HOST pattern as fallback
-                    if not host:
-                        exec_host_match = re.search(r'EXEC_HOST\s*:\s*(\S+)', output, re.IGNORECASE)
-                        if exec_host_match:
-                            host_info = exec_host_match.group(1)
-                            if ":" in host_info:
-                                host = host_info.split(':')[0]
-                            else:
-                                host = host_info
-                            self.logger.debug(f"Found host from EXEC_HOST pattern: {host}")
-                            
-                    # Get the user running the job if we don't have it yet
-                    if not user:
-                        user_match = re.search(r'User <([^>]+)>', output)
-                        if user_match:
-                            user = user_match.group(1)
-                            self.logger.debug(f"Found user from detailed output: {user}")
-                            
-                    # Get resource requirements if we don't have them yet
-                    if not combined_resreq:
-                        resreq_match = re.search(r'Combined: ([^;]+)', output)
-                        if resreq_match:
-                            combined_resreq = resreq_match.group(1).strip()
-                            self.logger.debug(f"Found resource requirements from detailed output: {combined_resreq}")
-                except Exception as e:
-                    self.logger.error(f"Error getting detailed job info: {str(e)}")
-            
-            # If we still don't have a host, print error and exit
-            if not host:
-                self.logger.error(f"Could not determine execution host for job {job_id}")
+                self.logger.warning(f"Could not determine execution host for job {job_id}")
                 return None
                 
-            # If we don't have a user, use the current user as fallback
-            if not user:
-                user = os.environ.get('USER', '')
-                self.logger.debug(f"Using current user as fallback: {user}")
+            # Clean up the hostname
+            if host:
+                # Remove domain if present
+                if '.' in host:
+                    host = host.split('.')[0]
+                # Remove subdomain if present
+                if '*' in host:
+                    host = host.split('*')[0]
+                # Handle multiple hosts by taking the first one
+                if ':' in host:
+                    host = host.split(':')[0]
             
-            # Query the remote host for VNC process information
-            try:
-                # Clean up the hostname - remove any non-alphanumeric characters except for hyphens
-                host = host.strip()
-                # More aggressive cleaning - keep only alphanumeric chars, hyphens, and dots
-                host = re.sub(r'[^a-zA-Z0-9\-\.]', '', host)
-                self.logger.debug(f"Cleaned host name: '{host}'")
-                
-                if not host or not re.match(r'^[a-zA-Z0-9\-\.]+$', host):
-                    self.logger.error(f"Host name is invalid after cleaning: '{host}'")
-                    raise ValueError(f"Invalid hostname: {host}")
-                
-                # Skip querying for VNC process if the job isn't running
-                if status != "RUN":
-                    self.logger.info(f"Job {job_id} is in {status} state, not querying for VNC process")
-                    display_num = None
-                else:
-                    self.logger.info(f"Attempting to query VNC information on host: {host} for user: {user}")
-                    
-                    # Use SSH to run a command on the remote host to find the Xvnc process
-                    ssh_cmd = ['ssh', 
-                              '-o', 'StrictHostKeyChecking=no', 
-                              '-o', 'UserKnownHostsFile=/dev/null',
-                              host, 
-                              f"ps -u {user} -o pid,command | grep Xvnc"]
-                    self.logger.debug(f"Running SSH command: {' '.join(ssh_cmd)}")
-                    
-                    # Run ssh command with sudo if authenticated user is provided
-                    vnc_process_output = self._run_command(ssh_cmd, authenticated_user)
-                    self.logger.debug(f"SSH command output: {vnc_process_output}")
-                    
-                    # Look for the display number in the Xvnc process command line
-                    # Format will be something like: Xvnc :1 
-                    display_match = re.search(r'Xvnc\s+:(\d+)', vnc_process_output)
-                    
+            # Extract the display value from command output if possible
+            if command:
+                # Extract display number from vnc command string
+                try:
+                    # Look for :N in the command string (VNC display number)
+                    display_match = re.search(r':(\d+)', command)
                     if display_match:
-                        display_num = int(display_match.group(1))
-                        self.logger.info(f"Found display number from Xvnc pattern: {display_num}")
+                        display_num = display_match.group(1)
+                        self.logger.debug(f"Found display number from command: {display_num}")
+                except Exception as e:
+                    self.logger.warning(f"Error extracting display number from command: {str(e)}")
+            
+            # If display number is still not found, try to find it in output_info
+            if not display_num and output_info:
+                try:
+                    # Look for VNC display pattern in output_info
+                    display_match = re.search(r'New \'[^:]+:(\d+)', output_info)
+                    if display_match:
+                        display_num = display_match.group(1)
+                        self.logger.debug(f"Found display number from output info: {display_num}")
                     else:
-                        # Fallback to scanning through all command line arguments
-                        args_match = re.search(r'Xvnc.*?:(\d+)', vnc_process_output)
-                        if args_match:
-                            display_num = int(args_match.group(1))
-                            self.logger.info(f"Found display number from args pattern: {display_num}")
-                        else:
-                            # If we can't find the display number, use a fallback
-                            display_num = (int(job_id) % 5) + 1  # Results in 1-5
-                            self.logger.info(f"Using fallback display number: {display_num}")
+                        display_match = re.search(r'Starting applications specified in\s+.*\s+for VNC display\s+(\d+)', output_info)
+                        if display_match:
+                            display_num = display_match.group(1)
+                            self.logger.debug(f"Found display number from VNC output info: {display_num}")
+                except Exception as e:
+                    self.logger.warning(f"Error extracting display number from output info: {str(e)}")
+            
+            # Last resort - use default display number
+            if not display_num:
+                self.logger.debug(f"No display number found, using default (1)")
+                display_num = "1"  # Default value
+            
+            # Calculate VNC port from display number
+            try:
+                if display_num:
+                    port = 5900 + int(display_num)
+                    self.logger.debug(f"Calculated VNC port: {port}")
+                else:
+                    port = None
+                    self.logger.warning("Could not calculate VNC port (no display number)")
             except Exception as e:
-                # If we can't query the remote host, use the fallback method
-                self.logger.error(f"Error querying remote host for VNC process: {str(e)}")
-                # Use fallback display number
-                display_num = (int(job_id) % 5) + 1  # Results in 1-5
-                self.logger.info(f"Using fallback display number after error: {display_num}")
+                self.logger.warning(f"Error calculating VNC port: {str(e)}")
+                port = None
             
-            # VNC uses port 5900+display number
-            vnc_port = 5900 + display_num if display_num is not None else None
-            
-            # Create the result dictionary
-            result = {
+            # Return connection details
+            return {
                 'job_id': job_id,
-                'status': status,
                 'host': host,
+                'display': display_num,
+                'port': port,
                 'user': user,
-                'resource_req': combined_resreq
+                'status': status
             }
             
-            # Add display and port only if we have a display number
-            if display_num is not None:
-                result['display'] = display_num
-                result['port'] = vnc_port
-                result['connection_string'] = f"{host}:{display_num}"
-            
-            return result
-        except (RuntimeError, ValueError) as e:
-            self.logger.error(f"Error getting connection details for job {job_id}: {str(e)}")
+        except Exception as e:
+            self.logger.error(f"Failed to get VNC connection details: {str(e)}")
             return None 
