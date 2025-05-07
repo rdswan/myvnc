@@ -197,6 +197,21 @@
             display: none !important;
             color: var(--color-danger);
         }
+        
+        /* Loading spinner styles */
+        .loading-cell {
+            text-align: center;
+            padding: 2rem !important;
+        }
+        
+        .loading-spinner {
+            color: var(--color-primary);
+            font-size: 1.1rem;
+        }
+        
+        .loading-spinner i {
+            margin-right: 0.5rem;
+        }
     </style>
 </head>
 <body>
@@ -251,7 +266,14 @@
                         </tr>
                     </thead>
                     <tbody id="vnc-table-body">
-                        <!-- VNC sessions will be loaded here dynamically -->
+                        <!-- Show loading state by default -->
+                        <tr class="loading-row">
+                            <td colspan="10" class="loading-cell">
+                                <div class="loading-spinner">
+                                    <i class="fas fa-spinner fa-spin"></i> Loading VNC sessions...
+                                </div>
+                            </td>
+                        </tr>
                     </tbody>
                 </table>
             </div>

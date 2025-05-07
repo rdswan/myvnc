@@ -110,32 +110,66 @@ document.addEventListener('DOMContentLoaded', function() {
 async function initializeApplication() {
     console.log('==== INITIALIZING APPLICATION ====');
     try {
-        // First step: Check debug mode to hide/show debug tab
-        console.log('Checking debug mode...');
-        await checkDebugMode();
+        // Check if the VNC Manager tab is active (this will be true on initial page load)
+        const isVncManagerActive = document.getElementById('vnc-manager').classList.contains('active');
         
-        // Second redundant check after a short delay, just to be sure
-        setTimeout(async () => {
-            console.log('Performing redundant debug mode check...');
+        // If the VNC Manager tab is active, immediately refresh the VNC list
+        if (isVncManagerActive) {
+            console.log('VNC Manager tab is active, prioritizing VNC list refresh...');
+            // Start refreshing VNC list immediately (don't await to allow other initialization to proceed)
+            const refreshPromise = refreshVNCList();
+            
+            // Continue with other initialization in parallel
             await checkDebugMode();
-        }, 1000);
-        
-        // Load configuration data
-        console.log('Loading configuration data...');
-        await Promise.all([
-            loadVNCConfig(),
-            loadLSFConfig()
-        ]);
-        
-        // Setup memory slider functionality if present
-        const memorySlider = document.getElementById('lsf-memory');
-        if (memorySlider) {
-            memorySlider.addEventListener('input', handleMemorySliderInput);
-            memorySlider.addEventListener('change', handleMemorySliderChange);
+            
+            // Second redundant check after a short delay
+            setTimeout(async () => {
+                console.log('Performing redundant debug mode check...');
+                await checkDebugMode();
+            }, 1000);
+            
+            // Load configuration data
+            console.log('Loading configuration data...');
+            await Promise.all([
+                loadVNCConfig(),
+                loadLSFConfig()
+            ]);
+            
+            // Setup memory slider functionality if present
+            const memorySlider = document.getElementById('lsf-memory');
+            if (memorySlider) {
+                memorySlider.addEventListener('input', handleMemorySliderInput);
+                memorySlider.addEventListener('change', handleMemorySliderChange);
+            }
+            
+            // Wait for the VNC list refresh to complete if it hasn't already
+            await refreshPromise;
+        } else {
+            // Standard initialization sequence if the VNC Manager tab is not active
+            await checkDebugMode();
+            
+            setTimeout(async () => {
+                console.log('Performing redundant debug mode check...');
+                await checkDebugMode();
+            }, 1000);
+            
+            // Load configuration data
+            console.log('Loading configuration data...');
+            await Promise.all([
+                loadVNCConfig(),
+                loadLSFConfig()
+            ]);
+            
+            // Setup memory slider functionality if present
+            const memorySlider = document.getElementById('lsf-memory');
+            if (memorySlider) {
+                memorySlider.addEventListener('input', handleMemorySliderInput);
+                memorySlider.addEventListener('change', handleMemorySliderChange);
+            }
+            
+            // Initial load of VNC sessions list
+            await refreshVNCList();
         }
-        
-        // Initial load of VNC sessions list
-        await refreshVNCList();
         
         // Register interval to periodically refresh VNC list
         console.log('Setting up periodic refresh interval');
@@ -594,6 +628,17 @@ function changeTab(tabId) {
         // Print current form settings after a delay to allow dropdowns to update
         setTimeout(printFormSettings, 500);
     } else if (tabId === 'vnc-manager') {
+        // Show loading state immediately
+        vncTableBody.innerHTML = `
+            <tr class="loading-row">
+                <td colspan="10" class="loading-cell">
+                    <div class="loading-spinner">
+                        <i class="fas fa-spinner fa-spin"></i> Loading VNC sessions...
+                    </div>
+                </td>
+            </tr>
+        `;
+        
         // Refresh VNC list when switching to manager tab
         refreshVNCList();
     } else if (tabId === 'debug-panel') {
@@ -853,9 +898,10 @@ async function refreshVNCList(withRetries = false) {
     }
     
     try {
+        // The table already has a loading indicator from HTML
         const jobs = await apiRequest('vnc/list');
         
-        // Clear table
+        // Always clear table (removes loading indicator too)
         vncTableBody.innerHTML = '';
         
         if (jobs.length === 0) {
