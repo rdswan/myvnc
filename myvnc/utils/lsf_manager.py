@@ -134,7 +134,7 @@ class LSFManager:
             lsf_config = {
                 'queue': 'interactive',
                 'num_cores': 1,
-                'memory_gb': 2048,
+                'memory_gb': 2,
                 'time_limit': '00:30'
             }
             
@@ -142,8 +142,7 @@ class LSFManager:
             cmd = [
                 'bsub',
                 '-q', lsf_config['queue'],
-                '-n', str(lsf_config['num_cores']),
-                '-M', str(lsf_config['memory_gb']),
+                '-R', f"affinity[core({lsf_config['num_cores']})] rusage[mem={lsf_config['memory_gb']}G]",
                 '-W', lsf_config['time_limit'],
                 '-J', vnc_config['name']
             ]
@@ -331,13 +330,13 @@ class LSFManager:
             
             # Use memory directly in GB (no conversion)
             memory_gb = lsf_config.get('memory_gb', 16)
+            num_cores = lsf_config.get('num_cores', 2)
             
-            # Build LSF command with -R for memory instead of -M
+            # Build LSF command with affinity and rusage resource requirements
             bsub_cmd = [
-            'bsub',
+                'bsub',
                 '-q', lsf_config.get('queue', 'interactive'),
-                '-n', str(lsf_config.get('num_cores', 2)),
-                '-R', f"rusage[mem={memory_gb}G]",
+                '-R', f"affinity[core({num_cores})] rusage[mem={memory_gb}G]",
                 '-J', job_name
             ]
             
