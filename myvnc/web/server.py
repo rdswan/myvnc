@@ -804,28 +804,47 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
     def handle_vnc_sessions(self):
         """Handle VNC sessions request"""
         try:
-            self.logger.info("Fetching active VNC sessions")
+            # Get authenticated user
+            authenticated_user = self.get_authenticated_user() if self.is_auth_enabled() else None
             
-            # Get authenticated user if available
-            authenticated_user = None
-            if self.is_auth_enabled():
-                is_authenticated, message, session = self.check_auth()
-                if is_authenticated and session and 'username' in session:
-                    authenticated_user = session.get('username')
-                    self.logger.debug(f"Using authenticated user for LSF commands: {authenticated_user}")
-            
-            # Get VNC jobs with authenticated user
-            jobs = self.lsf_manager.get_active_vnc_jobs(authenticated_user)
-            
-            # Add connection details including port to each job
+            # Get VNC sessions
+            try:
+                jobs = self.lsf_manager.get_active_vnc_jobs(authenticated_user)
+                self.logger.info(f"Retrieved {len(jobs)} VNC sessions")
+            except Exception as e:
+                self.logger.error(f"Error getting VNC sessions: {str(e)}")
+                self.send_json_response({"error": f"Error getting VNC sessions: {str(e)}"}, status=500)
+                return
+                
+            # Analyze job permissions
+            user_jobs = []
             for job in jobs:
+                # Process job information
                 try:
                     if 'job_id' in job:
+                        job_id = job['job_id']
+                        self.logger.debug(f"Processing job {job_id} with resource requirements: {job.get('resource_req', 'None')}")
+                        
+                        # Log original resources for debugging
+                        self.logger.debug(f"Job {job_id} original resources - cores: {job.get('cores', 'None')}, num_cores: {job.get('num_cores', 'None')}, mem_gb: {job.get('mem_gb', 'None')}")
+                        
+                        # Map 'cores' to 'num_cores' for consistency with the frontend
+                        if 'cores' in job and 'num_cores' not in job:
+                            job['num_cores'] = job['cores']
+                            self.logger.debug(f"Job {job_id} - mapped cores to num_cores: {job['num_cores']}")
+                        
+                        # Map 'mem_gb' to 'memory_gb' for consistency with the frontend
+                        if 'mem_gb' in job and 'memory_gb' not in job:
+                            job['memory_gb'] = job['mem_gb']
+                            self.logger.debug(f"Job {job_id} - mapped mem_gb to memory_gb: {job['memory_gb']}")
+                        
                         # Add default resource values if not present
                         if 'num_cores' not in job:
                             job['num_cores'] = 2  # Default value
+                            self.logger.debug(f"Job {job_id} - using default num_cores: {job['num_cores']}")
                         if 'memory_gb' not in job:
                             job['memory_gb'] = 16  # Default value
+                            self.logger.debug(f"Job {job_id} - using default memory_gb: {job['memory_gb']}")
                         
                         # Ensure runtime_display is set (for compatibility)
                         if 'runtime' in job and 'runtime_display' not in job:
@@ -833,25 +852,28 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                         
                         # Ensure host is present
                         if 'exec_host' not in job or not job['exec_host'] or job['exec_host'] == 'N/A':
-                            self.logger.warning(f"Job {job['job_id']} has no exec_host specified")
+                            self.logger.warning(f"Job {job_id} has no exec_host specified")
                         else:
                             job['host'] = job['exec_host']  # Duplicate for backward compatibility
                                                 
                         # Get connection details if needed
                         if ('display' not in job or 'port' not in job) and job.get('host') and job.get('host') != 'N/A':
-                            conn_details = self.lsf_manager.get_vnc_connection_details(job['job_id'], authenticated_user)
+                            conn_details = self.lsf_manager.get_vnc_connection_details(job_id, authenticated_user)
                             if conn_details:
                                 if 'port' in conn_details and 'port' not in job:
                                     job['port'] = conn_details['port']
                                 if 'display' in conn_details and 'display' not in job:
                                     job['display'] = conn_details['display']
+                                    
+                        # Log final resources for debugging
+                        self.logger.debug(f"Job {job_id} final resources - cores: {job.get('cores', 'None')}, num_cores: {job.get('num_cores', 'None')}, mem_gb: {job.get('mem_gb', 'None')}")
                 except Exception as e:
                     self.logger.error(f"Error processing job {job.get('job_id', 'unknown')}: {str(e)}")
             
             self.send_json_response(jobs)
         except Exception as e:
-            self.logger.error(f"Error handling VNC sessions: {str(e)}")
-            self.send_error_response(str(e))
+            self.logger.error(f"Error handling VNC sessions request: {str(e)}")
+            self.send_json_response({"error": str(e)}, status=500)
     
     def handle_lsf_config(self):
         """Handle LSF configuration request"""
@@ -1739,6 +1761,18 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         except Exception as e:
             self.logger.error(f"Error handling server status request: {str(e)}")
             self.send_error_response(f"Error getting server status: {str(e)}", 500)
+
+    def get_authenticated_user(self):
+        """Get the authenticated username from the session"""
+        auth_enabled = self.is_auth_enabled()
+        if not auth_enabled:
+            return None
+            
+        is_authenticated, message, session = self.check_auth()
+        if is_authenticated and session and 'username' in session:
+            return session.get('username')
+        
+        return None
 
 def source_lsf_environment():
     """Source the LSF environment file"""

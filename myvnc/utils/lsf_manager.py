@@ -138,11 +138,14 @@ class LSFManager:
                 'time_limit': '00:30'
             }
             
+            # Format the R resource requirement string
+            resource_req = f"affinity[core({lsf_config['num_cores']})] rusage[mem={lsf_config['memory_gb']}G]"
+            
             # Build the command but don't execute it (dry run)
             cmd = [
                 'bsub',
                 '-q', lsf_config['queue'],
-                '-R', f"affinity[core({lsf_config['num_cores']})] rusage[mem={lsf_config['memory_gb']}G]",
+                '-R', resource_req,
                 '-W', lsf_config['time_limit'],
                 '-J', vnc_config['name']
             ]
@@ -328,17 +331,42 @@ class LSFManager:
             # Use the job_name from LSF config (or default value if not set)
             job_name = lsf_config.get('job_name', 'myvnc_vncserver')
             
-            # Use memory directly in GB (no conversion)
+            # Get memory and cores
             memory_gb = lsf_config.get('memory_gb', 16)
             num_cores = lsf_config.get('num_cores', 2)
+            
+            # Handle memory format: convert to a string with G suffix if it doesn't already have one
+            if isinstance(memory_gb, str):
+                # Check if memory already has a unit suffix
+                if memory_gb.upper().endswith('G') or memory_gb.upper().endswith('GB'):
+                    # If it already has GB suffix, extract the numeric part
+                    mem_value = re.match(r'(\d+(?:\.\d+)?)', memory_gb)
+                    if mem_value:
+                        memory_value = mem_value.group(1)
+                    else:
+                        memory_value = "16"  # Default if parsing fails
+                else:
+                    # No unit suffix, use as is
+                    memory_value = memory_gb
+            else:
+                # It's a number, convert to string
+                memory_value = str(memory_gb)
+            
+            # Format the R resource requirement string
+            resource_req = f"affinity[core({num_cores})] rusage[mem={memory_value}G]"
             
             # Build LSF command with affinity and rusage resource requirements
             bsub_cmd = [
                 'bsub',
                 '-q', lsf_config.get('queue', 'interactive'),
-                '-R', f"affinity[core({num_cores})] rusage[mem={memory_gb}G]",
+                '-R', resource_req,
                 '-J', job_name
             ]
+            
+            # Add time limit if specified
+            time_limit = lsf_config.get('time_limit', '')
+            if time_limit and time_limit.strip():
+                bsub_cmd.extend(['-W', time_limit])
             
             # Add host filter only if specified
             host_filter = lsf_config.get('host_filter', '')
@@ -473,7 +501,7 @@ class LSFManager:
             # Create the base command as a list of arguments - this will be properly quoted
             cmd = [
                 'bjobs',
-                '-o', "jobid stat user queue first_host run_time command delimiter=';'",
+                '-o', "jobid stat user queue first_host run_time combined_resreq command delimiter=';'",
                 '-noheader',
                 '-u', user,
                 '-J', 'myvnc_vncserver'
@@ -535,8 +563,8 @@ class LSFManager:
                 
                 # Split the line by the delimiter
                 fields = line.split(';')
-                if len(fields) < 6:  # Need at least jobid, status, user, queue, first_host, run_time
-                    self.logger.warning(f"Incomplete fields in line, expected at least 6, got {len(fields)}")
+                if len(fields) < 7:  # Need at least jobid, status, user, queue, first_host, run_time, combined_resreq
+                    self.logger.warning(f"Incomplete fields in line, expected at least 7, got {len(fields)}")
                     continue
                     
                 # Extract job information from fields
@@ -547,7 +575,8 @@ class LSFManager:
                     queue = fields[3].strip()
                     first_host = fields[4].strip()
                     run_time_raw = fields[5].strip()
-                    command = ';'.join(fields[6:]).strip() if len(fields) > 6 else ""
+                    combined_resreq = fields[6].strip()
+                    command = ';'.join(fields[7:]).strip() if len(fields) > 7 else ""
                     
                     # Format runtime from the run_time_raw field
                     runtime_display = "N/A"
@@ -611,23 +640,39 @@ class LSFManager:
                         if status == "PEND" or status == "PSUSP":
                             runtime_display = "0m"
                     
-                    # Get detailed job information
-                    try:
-                        # Get detailed job info for host, cores, memory
-                        detailed_cmd = ['bjobs', '-l', job_id]
-                        detailed_output = self._run_command(detailed_cmd, authenticated_user)
+                    # Parse the combined_resreq to extract cores and memory
+                    # Default values
+                    num_cores = 2  # Default
+                    memory_gb = 16  # Default in GB
+                    
+                    # Extract cores from affinity[core(N)] pattern
+                    core_match = re.search(r'affinity\[core\((\d+)\)(?:\*(\d+))?\]', combined_resreq)
+                    if core_match:
+                        cores_per_node = int(core_match.group(1))
+                        nodes = int(core_match.group(2)) if core_match.group(2) else 1
+                        num_cores = cores_per_node * nodes
+                        self.logger.debug(f"Parsed cores from combined_resreq: {num_cores}")
+                    
+                    # Extract memory from rusage[mem=N] pattern
+                    mem_match = re.search(r'rusage\[mem=(\d+(\.\d+)?)([KMG]?)\]', combined_resreq)
+                    if mem_match:
+                        mem_value = float(mem_match.group(1))
+                        mem_unit = mem_match.group(3)
                         
-                        # Extract host information
-                        host_match = re.search(r'Started on <([^>]+)>', detailed_output)
-                        if host_match:
-                            exec_host = host_match.group(1)
-                            self.logger.debug(f"Found exec_host: {exec_host}")
-                        else:
-                            exec_host = first_host
-                            self.logger.debug(f"Using first_host as exec_host: {exec_host}")
+                        self.logger.info(f"Found memory in connection details: mem={mem_value}{mem_unit}")
                         
-                        # Clean up hostname for display
-                        host = exec_host
+                        # Special case for your LSF configuration: values without units are already in GB
+                        memory_gb = mem_value
+                        self.logger.info(f"Treating memory value {mem_value} as GB")
+                    
+                    # Get VNC connection details
+                    display = None
+                    port = None
+                    exec_host = first_host
+                    host = first_host
+                    
+                    # Clean up hostname for display
+                    if host:
                         if '*' in host:
                             host = host.split('*')[0]
                         if ':' in host:  # Handle multiple hosts (like rv-c-35:rv-c-57)
@@ -635,61 +680,21 @@ class LSFManager:
                         if '.' in host:  # Remove domain name
                             host = host.split('.')[0]
                             
-                        self.logger.debug(f"Cleaned host name: '{host}'")
-                        
-                        # Default values
-                        display_name = "VNC Session"
-                        num_cores = 2  # Default
-                        memory_gb = 16  # Default in GB
-                        
-                        # Extract display name from command
-                        name_match = re.search(r'-name\s+([^\s"]+|"([^"]+)")', command)
-                        if not name_match:
-                            name_match = re.search(r'-name\s+([^\s"]+|"([^"]+)")', detailed_output)
-                            
-                        if name_match:
-                            if name_match.group(2):  # If captured in quotes
-                                display_name = name_match.group(2)
-                            else:
-                                display_name = name_match.group(1)
-                            self.logger.debug(f"Found display name: {display_name}")
-                            
-                        # Extract cores and memory
-                        tasks_match = re.search(r'(\d+)\s+Task\(s\)', detailed_output)
-                        if tasks_match:
-                            num_cores = int(tasks_match.group(1))
-                            self.logger.debug(f"Found cores: {num_cores}")
-                            
-                        mem_match = re.search(r'rusage\[mem=(\d+(\.\d+)?)([KMG]?)\]', detailed_output)
-                        if mem_match:
-                            mem_value = float(mem_match.group(1))
-                            mem_unit = mem_match.group(3)
-                            
-                            # Convert to GB
-                            if not mem_unit:
-                                self.logger.debug("No unit specified in rusage context, assuming GB")
-                                mem_unit = 'G'
-                            
-                            if mem_unit == 'K':
-                                memory_gb = mem_value / (1024 * 1024)
-                            elif mem_unit == 'M':
-                                memory_gb = mem_value / 1024
-                            elif mem_unit == 'G':
-                                memory_gb = mem_value
-                            
-                            memory_gb = round(memory_gb, 2)
-                            self.logger.debug(f"Found memory: {memory_gb}GB")
-                            
-                    except Exception as e:
-                        self.logger.error(f"Error getting detailed job info: {str(e)}")
-                        host = first_host
-                        exec_host = first_host
+                    self.logger.debug(f"Cleaned host name: '{host}'")
                     
-                    # Get VNC connection details
-                    display = None
-                    port = None
+                    # Default display name
+                    display_name = "VNC Session"
                     
-                    if host and host != "N/A":
+                    # Extract display name from command
+                    name_match = re.search(r'-name\s+([^\s"]+|"([^"]+)")', command)
+                    if name_match:
+                        if name_match.group(2):  # If captured in quotes
+                            display_name = name_match.group(2)
+                        else:
+                            display_name = name_match.group(1)
+                        self.logger.debug(f"Found display name: {display_name}")
+                    
+                    if host and host != "N/A" and status == "RUN":
                         try:
                             self.logger.info(f"Attempting to query VNC information on host: {host} for user: {user}")
                             # Use SSH to run a command on the remote host to find the Xvnc process
@@ -711,46 +716,51 @@ class LSFManager:
                             if display_match:
                                 display_num = int(display_match.group(1))
                                 self.logger.info(f"Found display number from Xvnc pattern: {display_num}")
+                                
+                                # VNC uses port 5900+display number
+                                vnc_port = 5900 + display_num
+                                display = display_num
+                                port = vnc_port
                             else:
                                 # Fallback to scanning through all command line arguments
                                 args_match = re.search(r'Xvnc.*?:(\d+)', vnc_process_output)
                                 if args_match:
                                     display_num = int(args_match.group(1))
                                     self.logger.info(f"Found display number from args pattern: {display_num}")
-                                else:
-                                    # If we can't find the display number, use a fallback
-                                    display_num = (int(job_id) % 5) + 1  # Results in 1-5
-                                    self.logger.info(f"Using fallback display number: {display_num}")
+                                    
+                                    # VNC uses port 5900+display number
+                                    vnc_port = 5900 + display_num
+                                    display = display_num
+                                    port = vnc_port
                         except Exception as e:
                             self.logger.error(f"Error querying remote host for VNC process: {str(e)}")
                     
-                    # VNC uses port 5900+display number
-                    vnc_port = 5900 + display_num
-                    
                     # Create job entry with all required fields
                     job = {
-                            'job_id': job_id,
+                        'job_id': job_id,
                         'name': display_name,
-                            'status': status,
-                            'queue': queue,
+                        'status': status,
+                        'queue': queue,
                         'from_host': first_host,
                         'exec_host': exec_host,
                         'host': host,  # Use the cleaned host name for display
                         'user': user,
-                        'cores': num_cores,
+                        'cores': num_cores,      # Keep for backward compatibility
+                        'num_cores': num_cores,  # Use num_cores directly for frontend compatibility
                         'mem_gb': memory_gb,
                         'submit_time': '2025-04-25 00:00:00',  # Default value
                         'submit_time_raw': 'Unknown',  # Default value
                         'runtime': runtime_display,  # Explicitly include runtime
                         'runtime_display': runtime_display,  # Add runtime_display for consistency with client
-                        'run_time_seconds': run_time_seconds if 'run_time_seconds' in locals() else 0
+                        'run_time_seconds': run_time_seconds if 'run_time_seconds' in locals() else 0,
+                        'resource_req': combined_resreq  # Add the raw resource requirements string
                     }
                     
                     # Add connection details if available
                     if display is not None:
                         job['display'] = display
                     if port is not None:
-                        job['port'] = vnc_port
+                        job['port'] = port
                     
                     jobs.append(job)
                     self.logger.debug(f"Added job to list: {job}")
@@ -806,6 +816,8 @@ class LSFManager:
                     if len(fields) < 7:
                         continue
                         
+                    job_id = fields[0].strip()
+                    
                     # Extract submission time from the last two columns if there are at least 7 fields
                     submit_time = "2025-04-25 00:00:00"  # Default value
                     submit_time_raw = "Unknown"
@@ -890,6 +902,49 @@ class LSFManager:
                             # Keep the default value and print the error
                             self.logger.error(f"Error parsing submit time '{submit_time_raw}': {str(e)}")
                     
+                    # Get additional detailed information using bjobs -l
+                    # Default values
+                    num_cores = 2  # Default
+                    memory_gb = 16  # Default in GB
+                    combined_resreq = ""
+                    
+                    try:
+                        # Get detailed job info for host, cores, memory
+                        detailed_cmd = ['bjobs', '-l', job_id]
+                        detailed_output = self._run_command(detailed_cmd, authenticated_user)
+                        
+                        # Extract resource requirements from the detailed output
+                        resreq_match = re.search(r'Combined: ([^;]+)', detailed_output)
+                        if resreq_match:
+                            combined_resreq = resreq_match.group(1).strip()
+                            self.logger.debug(f"Found combined resreq: {combined_resreq}")
+                            
+                            # Extract cores from affinity[core(N)] pattern
+                            core_match = re.search(r'affinity\[core\((\d+)\)(?:\*(\d+))?\]', combined_resreq)
+                            if core_match:
+                                cores_per_node = int(core_match.group(1))
+                                nodes = int(core_match.group(2)) if core_match.group(2) else 1
+                                num_cores = cores_per_node * nodes
+                                self.logger.debug(f"Parsed cores from combined_resreq: {num_cores}")
+                            
+                            # Extract memory from rusage[mem=N] pattern
+                            mem_match = re.search(r'rusage\[mem=(\d+(\.\d+)?)([KMG]?)\]', combined_resreq)
+                            if mem_match:
+                                mem_value = float(mem_match.group(1))
+                                mem_unit = mem_match.group(3)
+                                
+                                self.logger.info(f"Found memory in connection details: mem={mem_value}{mem_unit}")
+                                
+                                # Special case for your LSF configuration: values without units are already in GB
+                                memory_gb = mem_value
+                                self.logger.info(f"Treating memory value {mem_value} as GB")
+                            else:
+                                self.logger.debug(f"No memory information found in combined_resreq: {combined_resreq}")
+                        else:
+                            self.logger.debug(f"No memory information found in combined_resreq: {combined_resreq}")
+                    except Exception as e:
+                        self.logger.error(f"Error getting detailed job info: {str(e)}")
+                    
                     # Create basic job info
                     job = {
                         'job_id': fields[0].strip(),
@@ -902,7 +957,11 @@ class LSFManager:
                         'runtime': 'N/A',  # Default runtime
                         'runtime_display': 'N/A',  # Add runtime_display for consistency with client
                         'submit_time': submit_time,
-                        'submit_time_raw': submit_time_raw
+                        'submit_time_raw': submit_time_raw,
+                        'num_cores': num_cores,  # Use num_cores directly for frontend compatibility
+                        'cores': num_cores,      # Keep cores for backward compatibility
+                        'mem_gb': memory_gb,
+                        'resource_req': combined_resreq  # Add the raw resource requirements string
                     }
                     
                     # Add to jobs list
@@ -926,61 +985,146 @@ class LSFManager:
             Dictionary with connection details or None if not found
         """
         try:
-            # First get basic job info to extract the host
-            basic_output = self._run_command(['bjobs', '-w', job_id], authenticated_user)
-            basic_lines = basic_output.strip().split('\n')
+            # First get basic job info with combined resource requirements
+            basic_output = self._run_command(['bjobs', '-o', "stat:6 user:8 exec_host:15 combined_resreq:30 delimiter=';'", '-noheader', job_id], authenticated_user)
             
-            # Initialize host
+            # Initialize values
             host = None
-            output = ""  # Initialize output to avoid reference error
+            user = None
+            display_num = None
+            status = "UNKNOWN"
+            combined_resreq = ""
             
-            # Extract host from the basic output first (most reliable)
-            if len(basic_lines) > 1:  # Header + job line
-                job_line = basic_lines[1]
-                self.logger.debug(f"Basic job info: {job_line}")
-                fields = job_line.split()
+            # Try to parse the basic output with delimiter
+            try:
+                # Should return a single line with the job info
+                basic_line = basic_output.strip()
+                self.logger.debug(f"Basic job info with delimiter: {basic_line}")
                 
-                if len(fields) >= 6 and 'RUN' in job_line:
-                    # Format: JOBID USER STATUS QUEUE FROM_HOST EXEC_HOST JOB_NAME SUBMIT_TIME
-                    exec_host = fields[5]  # EXEC_HOST is the 6th field (index 5)
-                    if exec_host and exec_host != '-':
-                        if ":" in exec_host:
-                            # For multi-host jobs, take the first host
-                            host = exec_host.split(':')[0]
+                if ';' in basic_line:
+                    # Split by the delimiter
+                    fields = basic_line.split(';')
+                    if len(fields) >= 4:
+                        status = fields[0].strip()
+                        user = fields[1].strip()
+                        exec_host = fields[2].strip()
+                        combined_resreq = fields[3].strip()
+                        
+                        if exec_host and exec_host != '-':
+                            if ":" in exec_host:
+                                # For multi-host jobs, take the first host
+                                host = exec_host.split(':')[0]
+                            else:
+                                host = exec_host
+                            self.logger.debug(f"Found host from basic job info with delimiter: {host}")
+                            
+                        # Extract resource information from the combined_resreq
+                        if combined_resreq:
+                            self.logger.debug(f"Resource requirements: {combined_resreq}")
+                            
+                            # Extract cores from affinity[core(N)] pattern
+                            core_match = re.search(r'affinity\[core\((\d+)\)(?:\*(\d+))?\]', combined_resreq)
+                            if core_match:
+                                cores_per_node = int(core_match.group(1))
+                                nodes = int(core_match.group(2)) if core_match.group(2) else 1
+                                num_cores = cores_per_node * nodes
+                                self.logger.debug(f"Job using {num_cores} cores")
+                            
+                            # Extract memory from rusage[mem=N] pattern
+                            mem_match = re.search(r'rusage\[mem=(\d+(\.\d+)?)([KMG]?)\]', combined_resreq)
+                            if mem_match:
+                                mem_value = float(mem_match.group(1))
+                                mem_unit = mem_match.group(3)
+                                
+                                self.logger.info(f"Found memory in connection details: mem={mem_value}{mem_unit}")
+                                
+                                # Special case for your LSF configuration: values without units are already in GB
+                                memory_gb = mem_value
+                                self.logger.info(f"Treating memory value {mem_value} as GB")
+                            else:
+                                self.logger.debug(f"No memory information found in combined_resreq: {combined_resreq}")
                         else:
-                            host = exec_host
-                        self.logger.debug(f"Found host from basic job info: {host}")
+                            self.logger.debug(f"No memory information found in combined_resreq: {combined_resreq}")
+            except Exception as e:
+                self.logger.error(f"Error parsing basic job info with delimiter: {str(e)}")
             
-            # If we didn't get the host from basic output, get detailed info
+            # If we didn't get the host from basic output with delimiter, fall back to standard format
             if not host:
-                # Get detailed job info
-                output = self._run_command(['bjobs', '-l', job_id], authenticated_user)
-                
-                # Try to extract host information from detailed output
-                host_match = re.search(r'Started on <([^>]+)>', output)
-                if host_match:
-                    host = host_match.group(1)
-                    self.logger.debug(f"Found host from 'Started on' pattern: {host}")
-                
-                # Look for EXEC_HOST pattern as fallback
-                if not host:
-                    exec_host_match = re.search(r'EXEC_HOST\s*:\s*(\S+)', output, re.IGNORECASE)
-                    if exec_host_match:
-                        host_info = exec_host_match.group(1)
-                        if ":" in host_info:
-                            host = host_info.split(':')[0]
-                        else:
-                            host = host_info
-                        self.logger.debug(f"Found host from EXEC_HOST pattern: {host}")
+                try:
+                    # Get basic job info in standard format as backup
+                    standard_output = self._run_command(['bjobs', '-w', job_id], authenticated_user)
+                    standard_lines = standard_output.strip().split('\n')
+                    
+                    # Extract host from the standard output
+                    if len(standard_lines) > 1:  # Header + job line
+                        job_line = standard_lines[1]
+                        self.logger.debug(f"Basic job info (standard): {job_line}")
+                        fields = job_line.split()
+                        
+                        if len(fields) >= 6:
+                            # Format: JOBID USER STATUS QUEUE FROM_HOST EXEC_HOST JOB_NAME SUBMIT_TIME
+                            status = fields[2]  # STATUS is the 3rd field
+                            user = fields[1]  # USER is the 2nd field
+                            exec_host = fields[5]  # EXEC_HOST is the 6th field
+                            
+                            if exec_host and exec_host != '-':
+                                if ":" in exec_host:
+                                    # For multi-host jobs, take the first host
+                                    host = exec_host.split(':')[0]
+                                else:
+                                    host = exec_host
+                                self.logger.debug(f"Found host from standard job info: {host}")
+                except Exception as e:
+                    self.logger.error(f"Error getting standard job info: {str(e)}")
+            
+            # If we still don't have a host, get detailed info
+            if not host:
+                try:
+                    # Get detailed job info
+                    output = self._run_command(['bjobs', '-l', job_id], authenticated_user)
+                    
+                    # Try to extract host information from detailed output
+                    host_match = re.search(r'Started on <([^>]+)>', output)
+                    if host_match:
+                        host = host_match.group(1)
+                        self.logger.debug(f"Found host from 'Started on' pattern: {host}")
+                    
+                    # Look for EXEC_HOST pattern as fallback
+                    if not host:
+                        exec_host_match = re.search(r'EXEC_HOST\s*:\s*(\S+)', output, re.IGNORECASE)
+                        if exec_host_match:
+                            host_info = exec_host_match.group(1)
+                            if ":" in host_info:
+                                host = host_info.split(':')[0]
+                            else:
+                                host = host_info
+                            self.logger.debug(f"Found host from EXEC_HOST pattern: {host}")
+                            
+                    # Get the user running the job if we don't have it yet
+                    if not user:
+                        user_match = re.search(r'User <([^>]+)>', output)
+                        if user_match:
+                            user = user_match.group(1)
+                            self.logger.debug(f"Found user from detailed output: {user}")
+                            
+                    # Get resource requirements if we don't have them yet
+                    if not combined_resreq:
+                        resreq_match = re.search(r'Combined: ([^;]+)', output)
+                        if resreq_match:
+                            combined_resreq = resreq_match.group(1).strip()
+                            self.logger.debug(f"Found resource requirements from detailed output: {combined_resreq}")
+                except Exception as e:
+                    self.logger.error(f"Error getting detailed job info: {str(e)}")
             
             # If we still don't have a host, print error and exit
             if not host:
                 self.logger.error(f"Could not determine execution host for job {job_id}")
                 return None
-            
-            # Get the user running the job
-            user_match = re.search(r'User <([^>]+)>', output)
-            user = user_match.group(1) if user_match else os.environ.get('USER', '')
+                
+            # If we don't have a user, use the current user as fallback
+            if not user:
+                user = os.environ.get('USER', '')
+                self.logger.debug(f"Using current user as fallback: {user}")
             
             # Query the remote host for VNC process information
             try:
@@ -994,50 +1138,68 @@ class LSFManager:
                     self.logger.error(f"Host name is invalid after cleaning: '{host}'")
                     raise ValueError(f"Invalid hostname: {host}")
                 
-                self.logger.info(f"Attempting to query VNC information on host: {host} for user: {user}")
-                
-                # Use SSH to run a command on the remote host to find the Xvnc process
-                ssh_cmd = ['ssh', 
-                          '-o', 'StrictHostKeyChecking=no', 
-                          '-o', 'UserKnownHostsFile=/dev/null',
-                          host, 
-                          f"ps -u {user} -o pid,command | grep Xvnc"]
-                self.logger.debug(f"Running SSH command: {' '.join(ssh_cmd)}")
-                
-                # Run ssh command with sudo if authenticated user is provided
-                vnc_process_output = self._run_command(ssh_cmd, authenticated_user)
-                self.logger.debug(f"SSH command output: {vnc_process_output}")
-                
-                # Look for the display number in the Xvnc process command line
-                # Format will be something like: Xvnc :1 
-                display_match = re.search(r'Xvnc\s+:(\d+)', vnc_process_output)
-                
-                if display_match:
-                    display_num = int(display_match.group(1))
-                    self.logger.info(f"Found display number from Xvnc pattern: {display_num}")
+                # Skip querying for VNC process if the job isn't running
+                if status != "RUN":
+                    self.logger.info(f"Job {job_id} is in {status} state, not querying for VNC process")
+                    display_num = None
                 else:
-                    # Fallback to scanning through all command line arguments
-                    args_match = re.search(r'Xvnc.*?:(\d+)', vnc_process_output)
-                    if args_match:
-                        display_num = int(args_match.group(1))
-                        self.logger.info(f"Found display number from args pattern: {display_num}")
+                    self.logger.info(f"Attempting to query VNC information on host: {host} for user: {user}")
+                    
+                    # Use SSH to run a command on the remote host to find the Xvnc process
+                    ssh_cmd = ['ssh', 
+                              '-o', 'StrictHostKeyChecking=no', 
+                              '-o', 'UserKnownHostsFile=/dev/null',
+                              host, 
+                              f"ps -u {user} -o pid,command | grep Xvnc"]
+                    self.logger.debug(f"Running SSH command: {' '.join(ssh_cmd)}")
+                    
+                    # Run ssh command with sudo if authenticated user is provided
+                    vnc_process_output = self._run_command(ssh_cmd, authenticated_user)
+                    self.logger.debug(f"SSH command output: {vnc_process_output}")
+                    
+                    # Look for the display number in the Xvnc process command line
+                    # Format will be something like: Xvnc :1 
+                    display_match = re.search(r'Xvnc\s+:(\d+)', vnc_process_output)
+                    
+                    if display_match:
+                        display_num = int(display_match.group(1))
+                        self.logger.info(f"Found display number from Xvnc pattern: {display_num}")
                     else:
-                        # If we can't find the display number, use a fallback
-                        display_num = (int(job_id) % 5) + 1  # Results in 1-5
-                        self.logger.info(f"Using fallback display number: {display_num}")
+                        # Fallback to scanning through all command line arguments
+                        args_match = re.search(r'Xvnc.*?:(\d+)', vnc_process_output)
+                        if args_match:
+                            display_num = int(args_match.group(1))
+                            self.logger.info(f"Found display number from args pattern: {display_num}")
+                        else:
+                            # If we can't find the display number, use a fallback
+                            display_num = (int(job_id) % 5) + 1  # Results in 1-5
+                            self.logger.info(f"Using fallback display number: {display_num}")
             except Exception as e:
                 # If we can't query the remote host, use the fallback method
                 self.logger.error(f"Error querying remote host for VNC process: {str(e)}")
+                # Use fallback display number
+                display_num = (int(job_id) % 5) + 1  # Results in 1-5
+                self.logger.info(f"Using fallback display number after error: {display_num}")
             
             # VNC uses port 5900+display number
-            vnc_port = 5900 + display_num
+            vnc_port = 5900 + display_num if display_num is not None else None
             
-            return {
+            # Create the result dictionary
+            result = {
+                'job_id': job_id,
+                'status': status,
                 'host': host,
-                'display': display_num,
-                'port': vnc_port,
-                'connection_string': f"{host}:{display_num}"
+                'user': user,
+                'resource_req': combined_resreq
             }
+            
+            # Add display and port only if we have a display number
+            if display_num is not None:
+                result['display'] = display_num
+                result['port'] = vnc_port
+                result['connection_string'] = f"{host}:{display_num}"
+            
+            return result
         except (RuntimeError, ValueError) as e:
             self.logger.error(f"Error getting connection details for job {job_id}: {str(e)}")
             return None 
