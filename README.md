@@ -119,6 +119,14 @@ To launch the graphical user interface, navigate your webpage to the url
 http://aus-misc:9143/
 ```
 
+#### Screenshots
+- VNC Manager tab showing a running VNC with connection details  
+![Screenshot of the VNC Manager tab showing a running VNC with connection details](./img/main.png)
+- Create VNC tab showing various VNC and LSF options  
+![Screenshot of the Create VNC tab showing various VNC and LSF options](./img/create_vnc.png)
+- User Settings modal showing various options  
+![Screenshot of the USer Settings modal showing various options.](./img/user_settings.png)
+
 ### Command Line Interface
 The application also provides a command-line interface for managing VNC sessions:
 
