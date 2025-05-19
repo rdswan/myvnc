@@ -15,6 +15,7 @@ from datetime import datetime
 import json
 from pathlib import Path
 import signal
+import random
 
 from myvnc.utils.config_manager import ConfigManager
 from myvnc.utils.log_manager import get_logger
@@ -322,61 +323,49 @@ class LSFManager:
             authenticated_user: Optional authenticated username to run command as
             
         Returns:
-            Job ID string
+            Job ID if successful
+            
+        Raises:
+            Exception if submission fails
         """
-        
         try:
-            # Get the display name from vnc_config if provided
-            display_name = vnc_config.get('name', '')
-            resolution = vnc_config.get('resolution', '1920x1080')
-            color_depth = vnc_config.get('color_depth', 24)
+            # Get current user for fallback if no authenticated user
+            user = authenticated_user if authenticated_user else os.environ.get('USER', '')
             
-            # Use the job_name from LSF config (or default value if not set)
-            job_name = lsf_config.get('job_name', 'myvnc_vncserver')
+            # Get the full path to bsub
+            bsub_path = self.lsf_cmd_paths.get('bsub', 'bsub')
             
-            # Get memory and cores
-            memory_gb = lsf_config.get('memory_gb', 16)
-            num_cores = lsf_config.get('num_cores', 2)
+            # Extract parameters from config
+            job_name = 'myvnc_vncserver'  # Fixed name for all VNC jobs
+            num_cores = int(lsf_config.get('num_cores', 2))
+            memory_gb = float(lsf_config.get('memory_gb', 2.0))
             
-            # Handle memory format: convert to a string with G suffix if it doesn't already have one
-            if isinstance(memory_gb, str):
-                # Check if memory already has a unit suffix
-                if memory_gb.upper().endswith('G') or memory_gb.upper().endswith('GB'):
-                    # If it already has GB suffix, extract the numeric part
-                    mem_value = re.match(r'(\d+(?:\.\d+)?)', memory_gb)
-                    if mem_value:
-                        memory_value = mem_value.group(1)
-                    else:
-                        memory_value = "16"  # Default if parsing fails
+            # Get display name and resolution from vnc_config
+            display_name = vnc_config.get('name', 'MyVNC Session')
+            resolution = vnc_config.get('resolution', '1024x768')
+            color_depth = int(vnc_config.get('color_depth', 24))
+            
+            # Get LSF group (queue) to use
+            queue = lsf_config.get('queue', 'interactive')
+            
+            # Format resource request string
+            resource_req = f"rusage[mem={memory_gb}]"
+            
+            # Add OS selection if specified
+            os_select = lsf_config.get('os_select', '')
+            
+            # Add processor architecture selection if specified
+            arch_select = lsf_config.get('arch_select', '')
+            if arch_select and arch_select != "any":
+                self.logger.info(f"Adding architecture selection '{arch_select}' to resource requirements")
+                if resource_req:
+                    resource_req = f"select[{arch_select}] {resource_req}"
                 else:
-                    # No unit suffix, use as is
-                    memory_value = memory_gb
+                    resource_req = f"select[{arch_select}]"
             else:
-                # It's a number, convert to string
-                memory_value = str(memory_gb)
-            
-            # Format the resource requirement string with span[hosts=1] for memory
-            resource_req = f"span[hosts=1] rusage[mem={memory_value}G]"
-            
-            # Check if OS selection is specified
-            os_name = lsf_config.get('os', 'Any')
-            self.logger.info(f"OS selection from form: {os_name}")
-            
-            # Load LSF config to get OS select value
-            config_manager = ConfigManager()
-            lsf_config_file = config_manager.lsf_config
-            os_options = lsf_config_file.get('os_options', [])
-            self.logger.debug(f"Available OS options: {os_options}")
-            
-            # Find the select value for the specified OS
-            os_select = ""
-            for os_option in os_options:
-                if os_option.get('name') == os_name and os_option.get('select'):
-                    os_select = os_option.get('select')
-                    self.logger.info(f"Found select value for OS '{os_name}': {os_select}")
-                    break
-            
-            # Modify resource requirements if we need to include OS selection
+                self.logger.info(f"Not adding architecture selection - arch_select is '{arch_select}'")
+                
+            # Modify resource string based on OS selection
             if os_select and os_select != "any":
                 self.logger.info(f"Adding OS selection '{os_select}' to resource requirements")
                 resource_req = f"select[{os_select}] {resource_req}"
@@ -406,8 +395,14 @@ class LSFManager:
             
             # Add the VNC server command
             vncserver_path = vnc_config.get('vncserver_path', '/usr/bin/vncserver')
+            
+            # Randomly pick a display number between 500 and 999
+            display_num = random.randint(500, 999)
+            self.logger.info(f"Assigning random display number: {display_num}")
+            
             vncserver_cmd = [
                 vncserver_path,
+                f":{display_num}",
                 '-geometry', resolution,
                 '-depth', str(color_depth),
             ]
@@ -434,6 +429,9 @@ class LSFManager:
                 env['WINDOW_MANAGER'] = window_manager
                 # Make sure environment is propagated through bsub
                 bsub_cmd.extend(['-env', f'WINDOW_MANAGER={window_manager}'])
+            
+            # Add fallbacktofreeport switch to ensure the server falls back to a free port if the specified one is in use
+            vncserver_cmd.append('-fallbacktofreeport')
                 
             # Add vncserver command to bsub command
             bsub_cmd.extend(vncserver_cmd)
@@ -577,166 +575,103 @@ class LSFManager:
                     self.logger.warning(f"LSF version doesn't support delimiter: {error_str}")
                     return self._get_active_vnc_jobs_standard(authenticated_user)
                 else:
-                    self.logger.error(f"Error in bjobs command: {error_str}")
-                    return jobs
-            
-            # Process the output
-            lines = output_str.splitlines() if output_str else []
-            self.logger.debug(f"bjobs command output: {len(lines)} line(s)")
-            
-            if not lines or (len(lines) == 1 and not lines[0].strip()):
-                self.logger.info(f"No jobs found in output.")
-                return jobs
-            
-            # Process each job line
-            for line in lines:
-                self.logger.debug(f"Processing job line: {line}")
+                    # For other errors, just fail
+                    self.logger.error(f"Error executing command: {error_str}")
+                    return []
                 
-                # Split the line by the delimiter
-                fields = line.split(';')
-                if len(fields) < 9:  # Need at least jobid, status, user, queue, first_host, run_time, slots, max_req_proc, combined_resreq
-                    self.logger.warning(f"Incomplete fields in line, expected at least 9, got {len(fields)}")
-                    continue
-                    
-                # Extract job information from fields
+            # Parse the output
+            output_lines = output_str.strip().split('\n')
+            for line in output_lines:
                 try:
-                    job_id = fields[0].strip()
-                    status = fields[1].strip()
-                    user = fields[2].strip()
-                    queue = fields[3].strip()
-                    first_host = fields[4].strip()
-                    run_time_raw = fields[5].strip()
-                    slots = fields[6].strip()  # Current allocation
-                    max_req_proc = fields[7].strip()  # Maximum requested processors
-                    combined_resreq = fields[8].strip()
-                    command = ';'.join(fields[9:]).strip() if len(fields) > 9 else ""
+                    # Skip empty lines
+                    if not line.strip():
+                        continue
                     
-                    # Log exact values for debugging
-                    self.logger.debug(f"Job {job_id} raw field values - slots: '{slots}', max_req_proc: '{max_req_proc}'")
+                    # Split by delimiter
+                    parts = line.split(';')
                     
-                    # Format runtime from the run_time_raw field
-                    runtime_display = "N/A"
+                    # Older LSF versions might not honor the delimiter
+                    # Validate the output has at least a few fields
+                    if len(parts) < 5:
+                        self.logger.warning(f"Output format seems incorrect, falling back to standard format")
+                        return self._get_active_vnc_jobs_standard(authenticated_user)
+                    
+                    # Extract fields
+                    job_id = parts[0]
+                    status = parts[1]
+                    job_user = parts[2] 
+                    queue = parts[3]
+                    first_host = parts[4]
+                    run_time = parts[5] if len(parts) > 5 else "0:0"
+                    slots = parts[6] if len(parts) > 6 else None
+                    max_req_proc = parts[7] if len(parts) > 7 else None
+                    combined_resreq = parts[8] if len(parts) > 8 else ""
+                    command = parts[9] if len(parts) > 9 else ""
+                    
+                    self.logger.debug(f"Job {job_id}: status={status}, user={job_user}, host={first_host}")
+                    
+                    # Format run time
+                    run_time_parts = run_time.split(':')
                     run_time_seconds = 0
                     try:
-                        # Extract runtime value from various formats:
-                        # "2580 second(s)" or "43 minute(s) 30 second(s)" or "2:30"
+                        hours = int(run_time_parts[0])
+                        minutes = int(run_time_parts[1])
+                        run_time_seconds = hours * 3600 + minutes * 60
                         
-                        # Try to match HH:MM or H:MM format first
-                        time_match = re.search(r'(\d+):(\d+)', run_time_raw)
-                        if time_match:
-                            hours = int(time_match.group(1))
-                            minutes = int(time_match.group(2))
-                            run_time_seconds = hours * 3600 + minutes * 60
-                            self.logger.debug(f"Parsed HH:MM format: {hours}h {minutes}m = {run_time_seconds}s")
+                        # Format for display
+                        if hours > 24:
+                            days = hours // 24
+                            hours = hours % 24
+                            runtime_display = f"{days}d {hours}h {minutes}m"
                         else:
-                            # Try to match "X minute(s) Y second(s)" format
-                            minutes_match = re.search(r'(\d+)\s+minute\(s\)', run_time_raw)
-                            seconds_match = re.search(r'(\d+)\s+second\(s\)', run_time_raw)
-                            
-                            minutes = int(minutes_match.group(1)) if minutes_match else 0
-                            seconds = int(seconds_match.group(1)) if seconds_match else 0
-                            
-                            if minutes > 0 or seconds > 0:
-                                run_time_seconds = minutes * 60 + seconds
-                                self.logger.debug(f"Parsed minutes/seconds format: {minutes}m {seconds}s = {run_time_seconds}s")
-                            else:
-                                # Just look for any number as a last resort (assuming seconds)
-                                seconds_match = re.search(r'(\d+)', run_time_raw)
-                                if seconds_match:
-                                    run_time_seconds = int(seconds_match.group(1))
-                                    self.logger.debug(f"Parsed seconds format: {run_time_seconds}s")
-                        
-                        # Now format the runtime display string based on the calculated seconds
-                        if run_time_seconds > 0:
-                            days = run_time_seconds // 86400  # 86400 seconds in a day
-                            hours = (run_time_seconds % 86400) // 3600  # 3600 seconds in an hour
-                            minutes = (run_time_seconds % 3600) // 60  # 60 seconds in a minute
-                            seconds = run_time_seconds % 60
-                            
-                            # Format runtime string
-                            if days > 0:
-                                runtime_display = f"{days}d {hours}h {minutes}m"
-                            elif hours > 0:
-                                runtime_display = f"{hours}h {minutes}m"
-                            elif minutes > 0:
-                                runtime_display = f"{minutes}m {seconds}s"
-                            else:
-                                runtime_display = f"{seconds}s"
-                                
-                            self.logger.debug(f"Parsed runtime: {runtime_display} from {run_time_seconds} seconds (raw: {run_time_raw})")
-                        else:
-                            if status == "PEND" or status == "PSUSP":
-                                # For pending jobs, display 0m instead of N/A
-                                runtime_display = "0m"
-                            else:
-                                self.logger.debug(f"No valid runtime found in '{run_time_raw}', using default")
-                    except (ValueError, TypeError, IndexError) as e:
-                        self.logger.warning(f"Error parsing runtime '{run_time_raw}': {e}")
-                        # Default for pending jobs should be 0m
-                        if status == "PEND" or status == "PSUSP":
-                            runtime_display = "0m"
+                            runtime_display = f"{hours}h {minutes}m"
+                    except:
+                        runtime_display = run_time
                     
-                    # Parse the combined_resreq to extract cores and memory
-                    # Check if combined_resreq is missing or just a dash
-                    if not combined_resreq or combined_resreq == '-':
-                        self.logger.info(f"Job {job_id} has no resource requirements yet (value: '{combined_resreq}')")
-                        # Use "Unknown" for pending jobs with no resource requirements
+                    # Extract resource information from the combined_resreq
+                    # Initialize defaults
+                    num_cores = 1
+                    memory_gb = 2
+                    resources_unknown = False
+                    
+                    # For pending jobs, we won't have precise resource info
+                    if status == "PEND":
                         resources_unknown = True
                         num_cores = None
                         memory_gb = None
                     else:
-                        # We have resource requirements, parse them
-                        resources_unknown = False
-                        # Default values
-                        num_cores = 2  # Default
-                        memory_gb = 16  # Default in GB
-                        
-                        # Try to get cores directly
-                        num_cores = None
-                        
-                        # First try max_req_proc if it's a valid value (not a dash or empty)
-                        if max_req_proc and max_req_proc != '-':
-                            try:
-                                num_cores = int(max_req_proc)
-                                self.logger.debug(f"Using max_req_proc value for cores: {num_cores}")
-                            except (ValueError, TypeError):
-                                self.logger.warning(f"Could not parse max_req_proc value '{max_req_proc}' as integer")
-                        # If max_req_proc is not valid, try slots
-                        elif slots and slots != '-':
+                        # First try to extract from slots or max_req_proc field
+                        if slots and slots not in ('-', ''):
                             try:
                                 num_cores = int(slots)
-                                self.logger.debug(f"Using slots value for cores: {num_cores}")
-                            except (ValueError, TypeError):
-                                self.logger.warning(f"Could not parse slots value '{slots}' as integer")
-                        
-                        # Fall back to regex parsing only if we couldn't get a value from fields
-                        if num_cores is None:
-                            # Look for span[hosts=1] pattern which indicates using the new format
-                            if 'span[hosts=1]' in combined_resreq:
-                                # For the new format, the cores are specified with -n parameter
-                                # but we can't directly see that in combined_resreq
-                                # Just leave at default
-                                self.logger.debug(f"Found span[hosts=1] pattern indicating new resource format")
-                            else:
-                                # Try the old affinity[core(N)] pattern as fallback
-                                core_match = re.search(r'affinity\[core\((\d+)\)(?:\*(\d+))?\]', combined_resreq)
-                                if core_match:
-                                    cores_per_node = int(core_match.group(1))
-                                    nodes = int(core_match.group(2)) if core_match.group(2) else 1
-                                    num_cores = cores_per_node * nodes
-                                    self.logger.debug(f"Parsed cores from affinity pattern: {num_cores}")
-                        
-                        # Extract memory from rusage[mem=N] pattern
-                        mem_match = re.search(r'rusage\[mem=(\d+(\.\d+)?)([KMG]?)\]', combined_resreq)
-                        if mem_match:
-                            mem_value = float(mem_match.group(1))
-                            mem_unit = mem_match.group(3)
-                            
-                            self.logger.info(f"Found memory in connection details: mem={mem_value}{mem_unit}")
-                            
-                            # Special case for your LSF configuration: values without units are already in GB
-                            memory_gb = mem_value
-                            self.logger.info(f"Treating memory value {mem_value} as GB")
+                            except:
+                                self.logger.warning(f"Could not convert slots '{slots}' to integer")
+                        elif max_req_proc and max_req_proc not in ('-', ''):
+                            try:
+                                num_cores = int(max_req_proc)
+                            except:
+                                self.logger.warning(f"Could not convert max_req_proc '{max_req_proc}' to integer")
+                                
+                        # Extract memory requirements if available
+                        if combined_resreq:
+                            # Use a regex to find memory spec
+                            mem_match = re.search(r'rusage\[mem=(\d+(?:\.\d+)?)(\w*)\]', combined_resreq)
+                            if mem_match:
+                                try:
+                                    mem_value = float(mem_match.group(1))
+                                    mem_unit = mem_match.group(2).upper()
+                                    
+                                    # Convert to GB based on unit
+                                    if mem_unit == 'K' or mem_unit == 'KB':
+                                        memory_gb = mem_value / (1024 * 1024)
+                                    elif mem_unit == 'M' or mem_unit == 'MB':
+                                        memory_gb = mem_value / 1024
+                                    elif mem_unit == 'T' or mem_unit == 'TB':
+                                        memory_gb = mem_value * 1024
+                                    else:  # Default unit is GB
+                                        memory_gb = mem_value
+                                except:
+                                    self.logger.warning(f"Error converting memory value: {mem_match.group(0)}")
                     
                     # Get VNC connection details
                     display = None
@@ -767,7 +702,19 @@ class LSFManager:
                             display_name = name_match.group(1)
                         self.logger.debug(f"Found display name: {display_name}")
                     
-                    if host and host != "N/A" and status == "RUN":
+                    # Try to extract the display number from the command
+                    display_match = re.search(r':(\d+)', command)
+                    if display_match:
+                        display_num = int(display_match.group(1))
+                        self.logger.info(f"Found display number from command: {display_num}")
+                        
+                        # VNC uses port 5900+display number
+                        vnc_port = 5900 + display_num
+                        display = display_num
+                        port = vnc_port
+                    
+                    # Only SSH to the remote host to determine the display if we couldn't get it from the command
+                    if (host and host != "N/A" and status == "RUN" and display is None):
                         try:
                             self.logger.info(f"Attempting to query VNC information on host: {host} for user: {user}")
                             # Use SSH to run a command on the remote host to find the Xvnc process
@@ -817,7 +764,7 @@ class LSFManager:
                         'from_host': first_host,
                         'exec_host': exec_host,
                         'host': host,  # Use the cleaned host name for display
-                        'user': user,
+                        'user': job_user,
                         'runtime': runtime_display,  # Explicitly include runtime
                         'runtime_display': runtime_display,  # Add runtime_display for consistency with client
                         'run_time_seconds': run_time_seconds if 'run_time_seconds' in locals() else 0,
@@ -826,19 +773,16 @@ class LSFManager:
                     
                     # Add resource information based on what we found
                     if resources_unknown:
-                        # For pending jobs with unknown resources, use null values
                         job['num_cores'] = None
                         job['cores'] = None
                         job['mem_gb'] = None
                         job['memory_gb'] = None
                         job['resources_unknown'] = True
                     else:
-                        # We have resource info, use what we parsed
                         job['num_cores'] = num_cores
                         job['cores'] = num_cores      # Keep for backward compatibility
                         job['mem_gb'] = memory_gb
                         job['memory_gb'] = memory_gb  # Add for consistency with frontend
-                        job['resources_unknown'] = False
                     
                     # Log the final core count and memory values
                     self.logger.debug(f"Job {job_id} final values - cores: {num_cores}, memory_gb: {memory_gb}")
@@ -1239,6 +1183,38 @@ class LSFManager:
                             self.logger.debug(f"Found display number from VNC output info: {display_num}")
                 except Exception as e:
                     self.logger.warning(f"Error extracting display number from output info: {str(e)}")
+            
+            # If display number is still not found and job is running, try SSH to the host
+            if not display_num and status == "RUN" and host:
+                try:
+                    self.logger.info(f"Display number not found in command, attempting to query via SSH on host: {host} for user: {user}")
+                    # Use SSH to run a command on the remote host to find the Xvnc process
+                    ssh_cmd = ['ssh', 
+                              '-o', 'StrictHostKeyChecking=no', 
+                              '-o', 'UserKnownHostsFile=/dev/null',
+                              host, 
+                              f"ps -u {user} -o pid,command | grep Xvnc"]
+                    self.logger.debug(f"Running SSH command: {' '.join(ssh_cmd)}")
+                    
+                    # Run ssh command with sudo if authenticated user is provided
+                    vnc_process_output = self._run_command(ssh_cmd, authenticated_user)
+                    self.logger.debug(f"SSH command output: {vnc_process_output}")
+                    
+                    # Look for the display number in the Xvnc process command line
+                    # Format will be something like: Xvnc :1 
+                    display_match = re.search(r'Xvnc\s+:(\d+)', vnc_process_output)
+                    
+                    if display_match:
+                        display_num = display_match.group(1)
+                        self.logger.info(f"Found display number from Xvnc pattern via SSH: {display_num}")
+                    else:
+                        # Fallback to scanning through all command line arguments
+                        args_match = re.search(r'Xvnc.*?:(\d+)', vnc_process_output)
+                        if args_match:
+                            display_num = args_match.group(1)
+                            self.logger.info(f"Found display number from args pattern via SSH: {display_num}")
+                except Exception as e:
+                    self.logger.error(f"Error querying remote host for VNC process: {str(e)}")
             
             # Last resort - use default display number
             if not display_num:

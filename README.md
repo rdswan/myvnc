@@ -24,6 +24,11 @@ It is fully Open Source via the Apache License 2.0
   - Handles process management safely with proper cleanup
 - Fully configurable SSL support. Disabled by default, enabled via configuration
 - Fully configurable Authentication support. Disabled by default, LDAP or Entra enabled via configuration
+- Manual port assignment for efficient VNC server connection
+  - Automatically assigns a random display number (between 500-999) during VNC server creation
+  - Includes fallbacktofreeport option to ensure successful VNC server startup
+  - Optimizes connection process by detecting display numbers from the bjobs command output
+  - Reduces SSH calls by extracting display numbers directly from commands when possible
 
 ## Getting Started
 
