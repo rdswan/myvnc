@@ -1,0 +1,29 @@
+version: '3'
+
+services:
+  myvnc:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: myvnc
+    ports:
+      - "9123:9123"  # Web server port
+      # Range for VNC display ports (5900+displaynumber)
+      #- "6400-6499:6400-6499"  # VNC ports (for displays 500-599)
+    volumes:
+      # Persist data and logs
+      - myvnc_data:/localdev/myvnc/data
+      - myvnc_logs:/localdev/myvnc/logs
+      # Optional: Mount configuration to make it configurable without rebuilding
+      - ./config:/app/config
+    environment:
+      - MYVNC_HOSTNAME=${MYVNC_HOSTNAME:-myvnc.local}  # Can be overridden with .env file
+      - LSF_ENV_FILE=${LSF_ENV_FILE:-/etc/profile.d/lsf.sh}
+    restart: unless-stopped
+    privileged: true  # Needed for VNC server to work correctly
+    # Use host network (alternative to port mapping for VNC direct connections)
+    # network_mode: "host"
+
+volumes:
+  myvnc_data:
+  myvnc_logs: 
