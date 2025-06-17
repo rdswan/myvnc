@@ -2,13 +2,22 @@
 let vncConfig = {};
 let lsfConfig = {};
 
+// Server config cache (to reuse between checks)
+let serverConfig = {};
+
+// Track whether current user is privileged manager
+let isManagerUser = false;
+
 // DOM Elements
 let tabs = document.querySelectorAll('.tab-button');
 let tabContents = document.querySelectorAll('.tab-content');
 let refreshButton = document.getElementById('refresh-button');
+let managerRefreshButton = document.getElementById('manager-refresh-button');
 let createVNCForm = document.getElementById('create-vnc-form');
 let vncTableBody = document.getElementById('vnc-table-body');
+let managerTableBody = document.getElementById('manager-table-body');
 let noVNCMessage = document.getElementById('no-vnc-message');
+let managerNoVNCMessage = document.getElementById('manager-no-vnc-message');
 const messageBox = document.getElementById('message-box');
 const messageText = document.getElementById('message-text');
 const messageClose = document.getElementById('message-close');
@@ -21,9 +30,12 @@ document.addEventListener('DOMContentLoaded', function() {
     tabs = document.querySelectorAll('.tab-button');
     tabContents = document.querySelectorAll('.tab-content');
     refreshButton = document.getElementById('refresh-button');
+    managerRefreshButton = document.getElementById('manager-refresh-button');
     createVNCForm = document.getElementById('create-vnc-form');
     vncTableBody = document.getElementById('vnc-table-body');
+    managerTableBody = document.getElementById('manager-table-body');
     noVNCMessage = document.getElementById('no-vnc-message');
+    managerNoVNCMessage = document.getElementById('manager-no-vnc-message');
     
     // Immediately hide the debug tab by default (fail-safe approach)
     const debugTab = document.getElementById('debug-tab');
@@ -72,6 +84,24 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
     
+    // Manager refresh button handler
+    if (managerRefreshButton) {
+        managerRefreshButton.addEventListener('click', () => {
+            managerRefreshButton.classList.add('rotating');
+            managerRefreshButton.classList.add('refreshing');
+            const originalText = '<i class="fas fa-sync-alt"></i> Refresh';
+            managerRefreshButton.innerHTML = '<i class="fas fa-sync-alt"></i> Refreshing...';
+
+            refreshManagerList().finally(() => {
+                setTimeout(() => {
+                    managerRefreshButton.classList.remove('rotating');
+                    managerRefreshButton.classList.remove('refreshing');
+                    managerRefreshButton.innerHTML = originalText;
+                }, 500);
+            });
+        });
+    }
+    
     // Memory slider event listener
     const memorySlider = document.getElementById('lsf-memory');
     const memoryValue = document.getElementById('memory-value');
@@ -104,6 +134,10 @@ document.addEventListener('DOMContentLoaded', function() {
     if (debugTab) {
         debugTab.addEventListener('click', loadDebugInfo);
     }
+    
+    // Enable sortable tables
+    enableTableSorting('vnc-table');
+    enableTableSorting('manager-table');
 });
 
 // Initialize Application
@@ -171,9 +205,14 @@ async function initializeApplication() {
             await refreshVNCList();
         }
         
-        // Register interval to periodically refresh VNC list
+        // Register interval to periodically refresh lists
         console.log('Setting up periodic refresh interval');
-        setInterval(refreshVNCList, 30000);
+        setInterval(() => {
+            refreshVNCList();
+            if (isManagerUser) {
+                refreshManagerList();
+            }
+        }, 30000);
         
         console.log('==== APPLICATION INITIALIZATION COMPLETE ====');
     } catch (error) {
@@ -217,6 +256,8 @@ async function checkDebugModeFromServerConfig() {
         
         const config = JSON.parse(responseText);
         console.log('Server debug mode from config API:', config.debug);
+        // Cache for later use
+        serverConfig = config;
         
         // Return boolean debug value
         return !!config.debug;
@@ -607,42 +648,31 @@ function setDropdownValue(selectElement, value) {
 
 // Tab functionality
 function changeTab(tabId) {
-    // Deactivate all tabs
-    tabs.forEach(tab => tab.classList.remove('active'));
-    tabContents.forEach(content => content.classList.remove('active'));
-    
-    // Activate selected tab
-    document.querySelector(`[data-tab="${tabId}"]`).classList.add('active');
-    document.getElementById(tabId).classList.add('active');
-    
-    // Add animation class to fade in content
-    const activeContent = document.getElementById(tabId);
-    activeContent.classList.add('fade-in');
-    setTimeout(() => activeContent.classList.remove('fade-in'), 300);
-    
-    // Handle tab-specific actions
-    if (tabId === 'vnc-creator') {
-        console.log('Switching to Create VNC tab, reloading VNC config with user preferences');
-        loadVNCConfig(); // Use our rewritten function that directly gets user settings
-        
-        // Print current form settings after a delay to allow dropdowns to update
-        setTimeout(printFormSettings, 500);
+    // Hide all tab contents
+    tabContents.forEach(content => {
+        content.style.display = 'none';
+    });
+
+    // Remove active class from all tabs
+    tabs.forEach(tab => {
+        tab.classList.remove('active');
+    });
+
+    // Show selected tab content
+    document.getElementById(tabId).style.display = 'block';
+
+    // Add active class to the selected tab
+    const selectedTab = document.querySelector(`.tab-button[data-tab="${tabId}"]`);
+    if (selectedTab) {
+        selectedTab.classList.add('active');
+    }
+
+    // Trigger appropriate refresh when switching tabs
+    if (tabId === 'manager-mode') {
+        refreshManagerList();
     } else if (tabId === 'vnc-manager') {
-        // Show loading state immediately
-        vncTableBody.innerHTML = `
-            <tr class="loading-row">
-                <td colspan="10" class="loading-cell">
-                    <div class="loading-spinner">
-                        <i class="fas fa-spinner fa-spin"></i> Loading VNC sessions...
-                    </div>
-                </td>
-            </tr>
-        `;
-        
-        // Refresh VNC list when switching to manager tab
         refreshVNCList();
     } else if (tabId === 'debug-panel') {
-        // Load debug info when switching to debug tab
         loadDebugInfo();
     }
 }
@@ -729,7 +759,7 @@ async function apiRequest(endpoint, method = 'GET', data = null) {
     } catch (error) {
         console.error(`API Error for ${endpoint}:`, error);
         // Don't show API errors for list requests or user settings, as they might be expected
-        if (!endpoint.includes('vnc/list') && !endpoint.includes('user/settings')) {
+        if (!endpoint.includes('vnc/list') && !endpoint.includes('vnc/list_all') && !endpoint.includes('user/settings')) {
             showMessage(error.message || 'API request failed. Please try again later.', 'error');
         }
         throw error;
@@ -991,6 +1021,9 @@ async function refreshVNCList(withRetries = false) {
             // Add to table
             vncTableBody.appendChild(row);
         });
+        
+        // Ensure sorting functionality attached (re-attaching safe)
+        enableTableSorting('vnc-table');
         
         // Add event listeners to buttons
         document.querySelectorAll('.kill-button').forEach(button => {
@@ -2024,4 +2057,207 @@ function refreshAndUpdateDebugSection(sectionId, apiEndpoint) {
             console.error(`Error fetching ${apiEndpoint}:`, error);
             sectionElement.innerHTML = `<p class="error-message">Error loading data: ${error.message}</p>`;
         });
+}
+
+// Listen for user authenticated event to determine manager privilege
+document.addEventListener('userAuthenticated', async (e) => {
+    try {
+        const username = e.detail?.username || null;
+        await determineManagerPrivilege(username);
+    } catch (err) {
+        console.error('Error determining manager privilege:', err);
+    }
+});
+
+// Determine if current user is in managers list and show/hide the Manager Mode tab accordingly
+async function determineManagerPrivilege(username) {
+    try {
+        // Use cached config if we already fetched it
+        if (!serverConfig || Object.keys(serverConfig).length === 0) {
+            serverConfig = await apiRequest('server/config');
+        }
+
+        const managers = serverConfig.managers || [];
+        isManagerUser = username && managers.includes(username);
+
+        const managerTab = document.getElementById('manager-mode-tab');
+        const managerContent = document.getElementById('manager-mode');
+
+        if (isManagerUser) {
+            if (managerTab) managerTab.style.display = 'inline-block';
+            if (managerContent) managerContent.style.display = 'none'; // Remain hidden until clicked
+        } else {
+            if (managerTab) managerTab.style.display = 'none';
+            if (managerContent) managerContent.style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error fetching server config for manager privilege:', error);
+    }
+}
+
+// Refresh Manager Mode VNC list (shows all users)
+async function refreshManagerList() {
+    if (!isManagerUser) {
+        return; // Do nothing if not privileged
+    }
+
+    // Similar logic to refreshVNCList but using different DOM references and endpoint
+    const directCall = !managerRefreshButton || !managerRefreshButton.classList.contains('refreshing');
+    let originalText = null;
+
+    if (directCall && managerRefreshButton) {
+        originalText = managerRefreshButton.innerHTML;
+        managerRefreshButton.classList.add('rotating');
+        managerRefreshButton.classList.add('refreshing');
+        managerRefreshButton.innerHTML = '<i class="fas fa-sync-alt"></i> Refreshing...';
+    }
+
+    try {
+        const jobs = await apiRequest('vnc/list_all');
+        // Sort jobs alphabetically by user for default display
+        jobs.sort((a, b) => {
+            const userA = (a.user || '').toLowerCase();
+            const userB = (b.user || '').toLowerCase();
+            if (userA < userB) return -1;
+            if (userA > userB) return 1;
+            return 0;
+        });
+
+        managerTableBody.innerHTML = '';
+
+        if (jobs.length === 0) {
+            managerNoVNCMessage.style.display = 'block';
+            document.querySelector('#manager-mode .table-container').style.display = 'none';
+            return;
+        }
+
+        managerNoVNCMessage.style.display = 'none';
+        document.querySelector('#manager-mode .table-container').style.display = 'block';
+
+        jobs.forEach(job => {
+            const row = document.createElement('tr');
+            let statusClass = 'status-pending';
+            if (job.status === 'DONE') statusClass = 'status-done';
+            if (job.status === 'RUN') statusClass = 'status-running';
+            if (job.status === 'EXIT') statusClass = 'status-error';
+
+            const connectionInfo = job.port ? `${job.host}:${job.port}` : (job.host || 'N/A');
+
+            row.innerHTML = `
+                <td>${job.job_id}</td>
+                <td>${job.name === "VNC Session" ? "" : job.name}</td>
+                <td>${job.user}</td>
+                <td><span class="status-badge ${statusClass}">${job.status}</span></td>
+                <td>${job.queue}</td>
+                <td>${job.resources_unknown ? 'Unknown' : `${job.num_cores || '-'} cores, ${job.memory_gb || '-'} GB`}</td>
+                <td title="VNC Connection: ${connectionInfo}">${job.host || 'N/A'}</td>
+                <td>:${job.display || 'N/A'}</td>
+                <td>${job.runtime_display || 'N/A'}</td>
+                <td class="actions-cell">
+                    <button class="button secondary connect-button" data-job-id="${job.job_id}" title="Connect to VNC (${connectionInfo})">
+                        <i class="fas fa-plug"></i> Connect
+                    </button>
+                    <button class="button danger kill-button" data-job-id="${job.job_id}" title="Kill VNC Session">
+                        <i class="fas fa-times"></i> Kill
+                    </button>
+                </td>
+            `;
+
+            managerTableBody.appendChild(row);
+        });
+
+        // Ensure sorting functionality attached (re-attaching safe)
+        enableTableSorting('manager-table');
+
+        // Attach event listeners
+        document.querySelectorAll('#manager-mode .kill-button').forEach(button => {
+            button.addEventListener('click', () => {
+                const jobId = button.getAttribute('data-job-id');
+                killVNCSession(jobId);
+            });
+        });
+
+        document.querySelectorAll('#manager-mode .connect-button').forEach(button => {
+            button.addEventListener('click', () => {
+                const jobId = button.getAttribute('data-job-id');
+                const job = jobs.find(j => j.job_id === jobId);
+                if (job) {
+                    connectToVNC(job);
+                }
+            });
+        });
+    } catch (error) {
+        console.error('Failed to refresh Manager Mode VNC list:', error);
+        managerNoVNCMessage.style.display = 'block';
+        document.querySelector('#manager-mode .table-container').style.display = 'none';
+    } finally {
+        if (directCall && managerRefreshButton) {
+            setTimeout(() => {
+                managerRefreshButton.classList.remove('rotating');
+                managerRefreshButton.classList.remove('refreshing');
+                managerRefreshButton.innerHTML = originalText || '<i class="fas fa-sync-alt"></i> Refresh';
+            }, 500);
+        }
+    }
+}
+
+// Enable sortable columns by clicking table headers
+function enableTableSorting(tableId) {
+    const table = document.getElementById(tableId);
+    if (!table) return;
+
+    const thElements = table.querySelectorAll('thead th');
+    thElements.forEach((th, index) => {
+        // Preserve original label
+        if (!th.dataset.label) {
+            th.dataset.label = th.textContent.trim();
+        }
+
+        // Skip if listener already attached
+        if (th.dataset.sortableAttached === 'true') return;
+
+        th.dataset.sortableAttached = 'true';
+        th.style.cursor = 'pointer';
+
+        th.addEventListener('click', () => {
+            const order = th.dataset.order === 'asc' ? 'desc' : 'asc';
+
+            // Reset order for all headers
+            thElements.forEach(other => {
+                other.dataset.order = '';
+                other.innerHTML = other.dataset.label;
+            });
+
+            // Set current header order and arrow
+            th.dataset.order = order;
+            const arrow = order === 'asc' ? ' ▲' : ' ▼';
+            th.innerHTML = `${th.dataset.label}${arrow}`;
+
+            // Sort rows
+            const tbody = table.tBodies[0];
+            const rowsArray = Array.from(tbody.querySelectorAll('tr'));
+
+            rowsArray.sort((rowA, rowB) => {
+                const cellA = rowA.children[index].textContent.trim();
+                const cellB = rowB.children[index].textContent.trim();
+
+                // Numeric comparison if both are numbers
+                const numA = parseFloat(cellA.replace(/[^0-9.-]/g, ''));
+                const numB = parseFloat(cellB.replace(/[^0-9.-]/g, ''));
+                const bothNumeric = !isNaN(numA) && !isNaN(numB);
+
+                let comparison;
+                if (bothNumeric) {
+                    comparison = numA - numB;
+                } else {
+                    comparison = cellA.localeCompare(cellB);
+                }
+
+                return order === 'asc' ? comparison : -comparison;
+            });
+
+            // Append sorted rows back to tbody
+            rowsArray.forEach(row => tbody.appendChild(row));
+        });
+    });
 }

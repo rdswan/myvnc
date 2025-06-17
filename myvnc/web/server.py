@@ -329,6 +329,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.handle_session()
         elif path == "/api/vnc/sessions" or path == "/api/vnc/list":
             self.handle_vnc_sessions()
+        elif path == "/api/vnc/list_all" or path == "/api/vnc/manager":
+            self.handle_vnc_manager_mode()
         elif path == "/api/lsf/config" or path == "/api/config/lsf":
             self.handle_lsf_config()
         elif path == "/api/config/vnc":
@@ -1803,6 +1805,74 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             return session.get('username')
         
         return None
+
+    def _process_vnc_jobs(self, jobs, authenticated_user):
+        """Internal helper to process job dictionaries to the format expected by UI."""
+        user_jobs = []
+        for job in jobs:
+            try:
+                if 'job_id' in job:
+                    job_id = job['job_id']
+
+                    # Map cores/memory for consistency
+                    if 'cores' in job and 'num_cores' not in job:
+                        job['num_cores'] = job['cores']
+                    if 'mem_gb' in job and 'memory_gb' not in job:
+                        job['memory_gb'] = job['mem_gb']
+
+                    # Add defaults if unknown
+                    if 'resources_unknown' not in job or job['resources_unknown'] is not True:
+                        job.setdefault('num_cores', 2)
+                        job.setdefault('memory_gb', 16)
+
+                    # Ensure runtime_display
+                    if 'runtime' in job and 'runtime_display' not in job:
+                        job['runtime_display'] = job['runtime']
+
+                    # Ensure name
+                    job.setdefault('name', 'VNC Session')
+
+                    # Ensure host field
+                    if 'exec_host' in job and job.get('exec_host') and job.get('exec_host') != 'N/A':
+                        job['host'] = job['exec_host']
+
+                    # Get connection details if missing
+                    if ('display' not in job or 'port' not in job) and job.get('host') and job.get('host') != 'N/A':
+                        conn_details = self.lsf_manager.get_vnc_connection_details(job_id, authenticated_user)
+                        if conn_details:
+                            job.setdefault('port', conn_details.get('port'))
+                            job.setdefault('display', conn_details.get('display'))
+
+                    user_jobs.append(job)
+            except Exception as e:
+                self.logger.error(f"Error processing job {job.get('job_id', 'unknown')}: {str(e)}")
+
+        return user_jobs
+
+    def handle_vnc_manager_mode(self):
+        """Handle Manager Mode VNC session listing - lists all users' VNC jobs if requester is in managers list."""
+        try:
+            authenticated_user = self.get_authenticated_user() if self.is_auth_enabled() else None
+
+            # Verify permission
+            managers = self.server_config.get('managers', [])
+            if authenticated_user not in managers:
+                self.logger.warning(f"Unauthorized access to manager mode by user {authenticated_user}")
+                self.send_json_response({"error": "Forbidden"}, status=403)
+                return
+
+            self.logger.info(f"Manager mode request by {authenticated_user}")
+
+            # Get all jobs (no user filter) but run under the requesting user's credentials
+            jobs = self.lsf_manager.get_active_vnc_jobs(authenticated_user=authenticated_user, all_users=True)
+
+            processed_jobs = self._process_vnc_jobs(jobs, authenticated_user)
+
+            self.send_json_response(processed_jobs)
+        except Exception as e:
+            self.logger.error(f"Error handling manager mode VNC sessions: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            self.send_json_response({"error": str(e)}, status=500)
 
 def source_lsf_environment():
     """Source the LSF environment file"""

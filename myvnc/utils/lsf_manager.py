@@ -508,12 +508,13 @@ class LSFManager:
             self.logger.error(f"Kill failed: Failed to kill job {job_id}: {str(e)}")
             return False
     
-    def get_active_vnc_jobs(self, authenticated_user: str = None) -> List[Dict]:
+    def get_active_vnc_jobs(self, authenticated_user: str = None, all_users: bool = False) -> List[Dict]:
         """
         Get active VNC jobs for the current user with job name matching the config
         
         Args:
             authenticated_user: Optional authenticated username to run command as
+            all_users: Whether to include jobs from all users
             
         Returns:
             List of jobs as dictionaries
@@ -521,8 +522,11 @@ class LSFManager:
         jobs = []
         
         try:
-            # Get current user for fallback if no authenticated user
-            user = authenticated_user if authenticated_user else os.environ.get('USER', '')
+            # Determine which user argument to pass to bjobs
+            if all_users:
+                user = 'all'
+            else:
+                user = authenticated_user if authenticated_user else os.environ.get('USER', '')
             
             # Get the full path to bjobs
             bjobs_path = self.lsf_cmd_paths.get('bjobs', 'bjobs')
@@ -532,9 +536,13 @@ class LSFManager:
                 'bjobs',
                 '-o', "jobid stat user queue first_host run_time slots max_req_proc combined_resreq command delimiter=';'",
                 '-noheader',
-                '-u', user,
-                '-J', 'myvnc_vncserver'
             ]
+            
+            # Always include user filter ("all" requests all jobs)
+            cmd.extend(['-u', user])
+            
+            # Limit job name to our VNC jobs
+            cmd.extend(['-J', 'myvnc_vncserver'])
             
             # For logging purposes, store the original command string
             base_cmd = ' '.join(cmd)
@@ -573,7 +581,7 @@ class LSFManager:
                     # Older LSF versions don't support the delimiter parameter
                     # Fall back to standard bjobs command
                     self.logger.warning(f"LSF version doesn't support delimiter: {error_str}")
-                    return self._get_active_vnc_jobs_standard(authenticated_user)
+                    return self._get_active_vnc_jobs_standard(authenticated_user, all_users=all_users)
                 else:
                     # For other errors, just fail
                     self.logger.error(f"Error executing command: {error_str}")
@@ -594,7 +602,7 @@ class LSFManager:
                     # Validate the output has at least a few fields
                     if len(parts) < 5:
                         self.logger.warning(f"Output format seems incorrect, falling back to standard format")
-                        return self._get_active_vnc_jobs_standard(authenticated_user)
+                        return self._get_active_vnc_jobs_standard(authenticated_user, all_users=all_users)
                     
                     # Extract fields
                     job_id = parts[0]
@@ -803,12 +811,13 @@ class LSFManager:
         
         return jobs
     
-    def _get_active_vnc_jobs_standard(self, authenticated_user: str = None) -> List[Dict]:
+    def _get_active_vnc_jobs_standard(self, authenticated_user: str = None, all_users: bool = False) -> List[Dict]:
         """
         Fallback method using standard bjobs command (no delimiter)
         
         Args:
             authenticated_user: Optional authenticated username to run command as
+            all_users: Whether to include jobs from all users
             
         Returns:
             List of jobs as dictionaries
@@ -816,12 +825,16 @@ class LSFManager:
         jobs = []
         
         try:
-            # Get user to query (authenticated user or current user)
-            user = authenticated_user if authenticated_user else os.environ.get('USER', '')
+            if all_users:
+                user = 'all'
+            else:
+                user = authenticated_user if authenticated_user else os.environ.get('USER', '')
             
-            # Use simple bjobs command to get job list - _run_command will handle using sudo and the full path
-            # Use -o format instead of -w to get resource requirements in one call
-            cmd = ['bjobs', '-u', user, '-J', 'myvnc_vncserver', '-o', "jobid stat user queue from_host exec_host job_name submit_time slots max_req_proc combined_resreq"]
+            # Build the command dynamically depending on whether we filter by user
+            cmd = ['bjobs', '-u', user]
+
+            cmd.extend(['-J', 'myvnc_vncserver', '-o', "jobid stat user queue from_host exec_host job_name submit_time slots max_req_proc combined_resreq"])
+            
             self.logger.info(f"Executing command: {' '.join(cmd)}")
             
             output = self._run_command(cmd, authenticated_user)

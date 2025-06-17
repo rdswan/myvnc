@@ -234,6 +234,10 @@
             <button class="tab-button active" data-tab="vnc-manager">
                 <i class="fas fa-list"></i> VNC Manager
             </button>
+            <!-- Manager Mode tab - hidden by default, shown only for privileged users -->
+            <button class="tab-button" data-tab="manager-mode" id="manager-mode-tab" style="display:none;">
+                <i class="fas fa-user-shield"></i> Manager Mode
+            </button>
             <button class="tab-button" data-tab="vnc-creator">
                 <i class="fas fa-plus-circle"></i> Create VNC
             </button>
@@ -286,6 +290,51 @@
                     <button class="button primary" onclick="changeTab('vnc-creator')">
                         <i class="fas fa-plus"></i> Create New Session
                     </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Manager Mode content (duplicate of VNC Manager but lists all users) -->
+        <div id="manager-mode" class="tab-content" style="display: none;">
+            <div class="control-panel">
+                <button id="manager-refresh-button" class="button primary">
+                    <i class="fas fa-sync-alt"></i> Refresh
+                </button>
+            </div>
+            
+            <div class="table-container">
+                <table id="manager-table">
+                    <thead>
+                        <tr>
+                            <th>Job ID</th>
+                            <th>Name</th>
+                            <th>User</th>
+                            <th>Status</th>
+                            <th>Queue</th>
+                            <th>Resources</th>
+                            <th>Host</th>
+                            <th>Display</th>
+                            <th>Runtime</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="manager-table-body">
+                        <tr class="loading-row">
+                            <td colspan="10" class="loading-cell">
+                                <div class="loading-spinner">
+                                    <i class="fas fa-spinner fa-spin"></i> Loading VNC sessions...
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <div id="manager-no-vnc-message" class="message-container">
+                <div class="empty-state">
+                    <i class="fas fa-desktop empty-icon"></i>
+                    <p>No active VNC sessions found.</p>
+                    <p class="note">If you believe this is an error, please check if LSF is properly configured and available.</p>
                 </div>
             </div>
         </div>
