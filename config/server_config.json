@@ -13,5 +13,6 @@
     "ssl_cert": "",
     "ssl_key": "",
     "ssl_ca_chain": "",
-    "ssl_notes": "To enable HTTPS, set ssl_cert and ssl_key to valid file paths. Optionally set ssl_ca_chain for intermediate certificates."
+    "ssl_notes": "To enable HTTPS, set ssl_cert and ssl_key to valid file paths. Optionally set ssl_ca_chain for intermediate certificates.",
+    "managers": ["shuffman", "jbell", "bswan"]
 }
