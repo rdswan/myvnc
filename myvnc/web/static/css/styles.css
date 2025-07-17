@@ -55,7 +55,7 @@ body {
 }
 
 .header-content {
-  max-width: 1200px;
+  max-width: 1800px;
   margin: 0 auto;
   padding: 1rem;
   display: flex;
@@ -93,7 +93,7 @@ header h1 {
 
 /* Main content container - adjust to account for fixed header and footer */
 .tab-container {
-  max-width: 1200px;
+  max-width: 1800px;
   margin: 80px auto 70px; /* Top margin to make room for fixed header, bottom for footer */
   background-color: white;
   border-radius: var(--border-radius);

@@ -1012,6 +1012,9 @@ async function refreshVNCList(withRetries = false) {
                     <button class="button secondary connect-button" data-job-id="${job.job_id}" title="Connect to VNC (${connectionInfo})">
                         <i class="fas fa-plug"></i> Connect
                     </button>
+                    <button class="button secondary vnc-viewer-button" data-job-id="${job.job_id}" title="VNC Viewer Instructions">
+                        <i class="fas fa-desktop"></i> Connect w/ vncviewer
+                    </button>
                     <button class="button danger kill-button" data-job-id="${job.job_id}" title="Kill VNC Session">
                         <i class="fas fa-times"></i> Kill
                     </button>
@@ -1040,6 +1043,17 @@ async function refreshVNCList(withRetries = false) {
                 const job = jobs.find(j => j.job_id === jobId);
                 if (job) {
                     connectToVNC(job);
+                }
+            });
+        });
+
+        document.querySelectorAll('.vnc-viewer-button').forEach(button => {
+            button.addEventListener('click', () => {
+                const jobId = button.getAttribute('data-job-id');
+                // Find job info
+                const job = jobs.find(j => j.job_id === jobId);
+                if (job) {
+                    showVNCViewerInstructions(job);
                 }
             });
         });
@@ -1537,6 +1551,8 @@ document.addEventListener('DOMContentLoaded', () => {
             display: flex;
             flex-direction: column;
             gap: 0.5rem;
+            min-width: 220px;
+            overflow: visible;
         }
         
         @keyframes fadeIn {
@@ -1649,6 +1665,273 @@ document.addEventListener('DOMContentLoaded', () => {
         
         #debug-panel .form-title {
             margin-bottom: 1.5rem;
+        }
+        
+        /* Persistent Dialog Styles */
+        .persistent-dialog-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1001;
+            animation: fadeIn 0.2s ease;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        .persistent-dialog-content {
+            background-color: white;
+            border-radius: 8px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 85vh;
+            overflow-y: auto;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            text-rendering: optimizeLegibility;
+        }
+        
+        .dialog-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.5rem;
+            border-bottom: 1px solid #e0e0e0;
+            background-color: #f8f9fa;
+            border-radius: 8px 8px 0 0;
+        }
+        
+        .dialog-title {
+            margin: 0;
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #333;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        .dialog-close {
+            background: none;
+            border: none;
+            font-size: 1.25rem;
+            cursor: pointer;
+            color: #666;
+            padding: 0.5rem;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+        
+        .dialog-close:hover {
+            background-color: #f0f0f0;
+            color: #333;
+        }
+        
+        .dialog-body {
+            padding: 1.5rem;
+        }
+        
+        .vnc-instructions {
+            font-size: 14px;
+            line-height: 1.6;
+            color: #333;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        .instruction-intro {
+            margin-bottom: 1.5rem;
+            font-size: 15px;
+            color: #555;
+        }
+        
+        .connection-detail-highlight {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        
+        .detail-label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: #333;
+        }
+        
+        .detail-value-container {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .server-address {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 16px;
+            padding: 0.5rem;
+            background-color: #fff;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            color: #333;
+            font-weight: 500;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        .instruction-sections {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+        
+        .instruction-section h4 {
+            margin: 0 0 1rem 0;
+            font-size: 16px;
+            font-weight: 600;
+            color: #333;
+            border-bottom: 1px solid #e0e0e0;
+            padding-bottom: 0.5rem;
+        }
+        
+        .instruction-list {
+            margin: 0;
+            padding-left: 1.5rem;
+        }
+        
+        .instruction-list li {
+            margin-bottom: 0.75rem;
+            line-height: 1.5;
+        }
+        
+        .instruction-list li:last-child {
+            margin-bottom: 0;
+        }
+        
+        .connection-details {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        
+        .detail-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .detail-row .detail-label {
+            font-weight: 600;
+            min-width: 120px;
+            margin-bottom: 0;
+        }
+        
+        .detail-row code {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 14px;
+            background-color: #f8f9fa;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            color: #333;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        .command-container {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            background-color: #f8f9fa;
+            padding: 1rem;
+            border-radius: 4px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .command-text {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 14px;
+            color: #333;
+            background: none;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        
+        .instruction-note {
+            background-color: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 1rem;
+            margin-top: 1.5rem;
+            border-radius: 0 4px 4px 0;
+        }
+        
+        .instruction-note p {
+            margin: 0;
+            color: #1565c0;
+            font-size: 14px;
+        }
+        
+        /* Improve button text rendering */
+        .button {
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            text-rendering: optimizeLegibility;
+            font-size: 13px;
+            padding: 0.5rem 0.75rem;
+            min-height: 36px;
+            white-space: nowrap;
+        }
+        
+        .vnc-viewer-button {
+            font-size: 13px;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            padding: 0.5rem 0.75rem;
+            min-height: 36px;
+            white-space: nowrap;
+        }
+        
+        /* Make table use full width without horizontal scroll */
+        .table-container {
+            width: 100%;
+            overflow-x: visible;
+        }
+        
+        table {
+            width: 100%;
+            table-layout: fixed;
+        }
+        
+        /* Percentage-based column widths for full width usage */
+        table th:nth-child(1) { width: 10%; }  /* Job ID - increased */
+        table th:nth-child(2) { width: 12%; }  /* Name */
+        table th:nth-child(3) { width: 8%; }   /* User */
+        table th:nth-child(4) { width: 8%; }   /* Status */
+        table th:nth-child(5) { width: 10%; }  /* Queue */
+        table th:nth-child(6) { width: 12%; }  /* Resources */
+        table th:nth-child(7) { width: 10%; }  /* Host */
+        table th:nth-child(8) { width: 8%; }   /* Display */
+        table th:nth-child(9) { width: 12%; }  /* Runtime - increased */
+        table th:nth-child(10) { width: 20%; } /* Actions - reduced but still ample */
+        
+        /* Add proper cell padding to prevent overlap */
+        table th, table td {
+            padding: 0.75rem 0.5rem;
+            text-align: center;
+            vertical-align: middle;
+            white-space: normal;
+            overflow: visible;
+            word-wrap: break-word;
+            line-height: 1.4;
         }
     `;
     
@@ -2157,6 +2440,9 @@ async function refreshManagerList() {
                     <button class="button secondary connect-button" data-job-id="${job.job_id}" title="Connect to VNC (${connectionInfo})">
                         <i class="fas fa-plug"></i> Connect
                     </button>
+                    <button class="button secondary vnc-viewer-button" data-job-id="${job.job_id}" title="VNC Viewer Instructions">
+                        <i class="fas fa-desktop"></i> Connect w/ vncviewer
+                    </button>
                     <button class="button danger kill-button" data-job-id="${job.job_id}" title="Kill VNC Session">
                         <i class="fas fa-times"></i> Kill
                     </button>
@@ -2183,6 +2469,16 @@ async function refreshManagerList() {
                 const job = jobs.find(j => j.job_id === jobId);
                 if (job) {
                     connectToVNC(job);
+                }
+            });
+        });
+
+        document.querySelectorAll('#manager-mode .vnc-viewer-button').forEach(button => {
+            button.addEventListener('click', () => {
+                const jobId = button.getAttribute('data-job-id');
+                const job = jobs.find(j => j.job_id === jobId);
+                if (job) {
+                    showVNCViewerInstructions(job);
                 }
             });
         });
@@ -2260,4 +2556,139 @@ function enableTableSorting(tableId) {
             rowsArray.forEach(row => tbody.appendChild(row));
         });
     });
+}
+
+// Show VNC Viewer connection instructions
+function showVNCViewerInstructions(job) {
+    // Check if we have both host and display information
+    if (!job.host || !job.display) {
+        showMessage(`Connection details unavailable for ${job.name || 'VNC session'}. Host or display number missing.`, 'error');
+        return;
+    }
+    
+    const hostname = job.host;
+    const displayNum = job.display;
+    const vncPort = 5900 + parseInt(displayNum);
+    const hostPortString = `${hostname}:${vncPort}`;
+    
+    // Create persistent dialog
+    showPersistentDialog('VNC Viewer Connection Instructions', `
+        <div class="vnc-instructions">
+            <p class="instruction-intro">To connect to this VNC session using a VNC Viewer application:</p>
+            
+            <div class="connection-detail-highlight">
+                <label class="detail-label">Server Address:</label>
+                <div class="detail-value-container">
+                    <code class="server-address">${hostPortString}</code>
+                    <button class="button mini copy-button" onclick="copyToClipboard('${hostPortString}')">
+                        <i class="fas fa-copy"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="instruction-sections">
+                <div class="instruction-section">
+                    <h4>Step-by-Step Instructions:</h4>
+                    <ol class="instruction-list">
+                        <li><strong>Open your VNC Viewer application</strong> (RealVNC, TightVNC, TigerVNC, etc.)</li>
+                        <li><strong>Locate the "VNC Server" or "Server" text field</strong></li>
+                        <li><strong>Enter the server address:</strong> <code>${hostPortString}</code>
+                            <button class="button mini copy-button" onclick="copyToClipboard('${hostPortString}')">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                        </li>
+                        <li><strong>Click "Connect"</strong></li>
+                        <li><strong>Enter your password</strong> when prompted (if required)</li>
+                    </ol>
+                </div>
+                
+                <div class="instruction-section">
+                    <h4>Alternative Connection Details:</h4>
+                    <div class="connection-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Hostname:</span>
+                            <code>${hostname}</code>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Port:</span>
+                            <code>${vncPort}</code>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Display Number:</span>
+                            <code>:${displayNum}</code>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="instruction-section">
+                    <h4>Command Line (TigerVNC):</h4>
+                    <div class="command-container">
+                        <code class="command-text">vncviewer ${hostname}:${vncPort}</code>
+                        <button class="button mini copy-button" onclick="copyToClipboard('vncviewer ${hostname}:${vncPort}')">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="instruction-note">
+                <p><strong>Note:</strong> The server address format <code>${hostPortString}</code> uses the actual TCP port number (5900 + display number).</p>
+            </div>
+        </div>
+    `);
+}
+
+// Show persistent dialog (doesn't auto-hide)
+function showPersistentDialog(title, content) {
+    // Remove any existing dialog
+    const existingDialog = document.getElementById('persistent-dialog');
+    if (existingDialog) {
+        existingDialog.remove();
+    }
+    
+    // Create dialog overlay
+    const dialog = document.createElement('div');
+    dialog.id = 'persistent-dialog';
+    dialog.className = 'persistent-dialog-overlay';
+    
+    dialog.innerHTML = `
+        <div class="persistent-dialog-content">
+            <div class="dialog-header">
+                <h3 class="dialog-title">${title}</h3>
+                <button class="dialog-close" onclick="closePersistentDialog()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="dialog-body">
+                ${content}
+            </div>
+        </div>
+    `;
+    
+    // Add to document
+    document.body.appendChild(dialog);
+    
+    // Add click outside to close
+    dialog.addEventListener('click', (e) => {
+        if (e.target === dialog) {
+            closePersistentDialog();
+        }
+    });
+    
+    // Add escape key to close
+    const escapeHandler = (e) => {
+        if (e.key === 'Escape') {
+            closePersistentDialog();
+            document.removeEventListener('keydown', escapeHandler);
+        }
+    };
+    document.addEventListener('keydown', escapeHandler);
+}
+
+// Close persistent dialog
+function closePersistentDialog() {
+    const dialog = document.getElementById('persistent-dialog');
+    if (dialog) {
+        dialog.remove();
+    }
 }
