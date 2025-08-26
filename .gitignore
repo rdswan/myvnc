@@ -1,6 +1,8 @@
 config/auth/**
 config/ssl/**
 
+setuid_runner
+
 *.py[cod]
 *$py.class
 
