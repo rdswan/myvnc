@@ -31,7 +31,7 @@
 
 /* List of allowed LSF commands - security whitelist */
 static const char* allowed_commands[] = {
-    "bjobs", "bsub", "bkill", "bqueues", "bhosts", "lsload", "lshosts", "busers"
+    "bjobs", "bsub", "bkill"
 };
 static const int num_allowed_commands = sizeof(allowed_commands) / sizeof(allowed_commands[0]);
 
