@@ -19,6 +19,8 @@ $(TARGET): $(SOURCE)
 	@echo "  sudo chown root:root $(TARGET)"
 	@echo "  sudo chmod 4755 $(TARGET)"
 	@echo ""
+	@echo "Then move it to a secure location and define it's location in config/server_config.json"
+	@echo ""
 	@echo "SECURITY WARNING: This will create a setuid root binary."
 	@echo "Make sure you understand the security implications."
 

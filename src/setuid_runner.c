@@ -26,12 +26,46 @@
 #define MAX_ARGS 256
 #define MAX_USERNAME_LEN 32
 #define MAX_PATH_LEN 4096
+#define MAX_ENV_VARS 100
+#define MAX_ENV_VAR_LEN 1024
 
 /* List of allowed LSF commands - security whitelist */
 static const char* allowed_commands[] = {
-    "bjobs", "bsub", "bkill"
+    "bjobs", "bsub", "bkill", "bqueues", "bhosts", "lsload", "lshosts", "busers"
 };
 static const int num_allowed_commands = sizeof(allowed_commands) / sizeof(allowed_commands[0]);
+
+/* List of LSF environment variables to preserve */
+static const char* lsf_env_vars[] = {
+    "LSF_BINDIR", "LSF_LIBDIR", "LSF_SERVERDIR", "LSF_ENVDIR", 
+    "LSF_CONFDIR", "LSF_INCLUDEDIR", "LSF_MISC", "LSF_TOP",
+    "LSF_VERSION", "LSF_LIM_PORT", "LSF_RES_PORT", "LSF_MBD_PORT",
+    "LSF_SBD_PORT", "LSF_AUTH", "LSF_USE_HOSTEQUIV", "LSF_ROOT_REX",
+    "LSF_REXD_CONNECT_TIMEOUT", "LSF_DEBUG_LIM", "LSF_DEBUG_RES",
+    "LSF_DEBUG_SBD", "LSF_TIME_FORMAT", "LSF_TMPDIR", "LSF_LOGDIR",
+    "LSF_LOG_MASK", "LSF_DISABLE_LSRUN", "LSF_RSH", "LSF_RCP",
+    "LSF_GETPWNAM_RETRY", "LSF_GETPWNAM_TIMEOUT", "LSF_UNIT_FOR_LIMITS",
+    "LSF_HPC_EXTENSIONS", "LSF_STRIP_DOMAIN", "LSF_MASTER_LIST",
+    "LSF_SERVER_HOSTS", "LSB_CONFDIR", "LSB_SHAREDIR", "LSB_DEFAULTPROJECT",
+    "LSB_DEFAULTQUEUE", "LSB_HOSTS", "LSB_MCPU_HOSTS", "LSB_SHAREDIR",
+    "LSB_SUBK_SHOW_EXEC_HOST", "LSB_NTASKS", "LSB_NTASKS_PARALLEL",
+    "LSB_QUEUE", "LSB_BATCH", "LSB_JOBID", "LSB_JOBINDEX", "LSB_HOSTS",
+    "LSB_MCPU_HOSTS", "LSB_DJOB_HOSTFILE", "LSB_DJOB_RANKFILE",
+    "LSB_DJOB_NUMPROC", "LSB_EFFECTIVE_RSRCREQ", "LSB_SUB_HOST",
+    "LSB_EXEC_CLUSTER", "LSB_SUB_CLUSTER", "LSB_INTERACTIVE",
+    "LSB_JOBFILENAME", "LSB_OUTPUTFILE", "LSB_ERRORFILE", "LSB_INPUTFILE",
+    "LSB_CHKFILENAME", "LSB_RESTART", "LSB_RESTART_CMD", "LSB_CHKPNT_METHOD",
+    "LSB_CHKPNT_DIR", "LSB_CHKPNT_PERIOD", "LSB_JOBPGIDS", "LSB_JOBPIDS",
+    "LSB_BIND_JOB", "LSB_BIND_CPU_LIST", "LSB_BIND_MEM_LIST",
+    "LSB_AFFINITY_HOSTFILE", "LSB_PJL_TASK_GEOMETRY"
+};
+static const int num_lsf_env_vars = sizeof(lsf_env_vars) / sizeof(lsf_env_vars[0]);
+
+/* Structure to hold environment variable */
+struct env_var {
+    char name[MAX_ENV_VAR_LEN];
+    char value[MAX_ENV_VAR_LEN];
+};
 
 /* Function to validate username - basic null check only */
 int is_valid_username(const char* username) {
@@ -58,9 +92,39 @@ int is_allowed_command(const char* command) {
     return 0;
 }
 
+/* Function to preserve LSF environment variables */
+int preserve_lsf_environment(struct env_var* preserved_vars, int* num_preserved) {
+    *num_preserved = 0;
+    
+    /* Preserve LSF environment variables */
+    for (int i = 0; i < num_lsf_env_vars && *num_preserved < MAX_ENV_VARS; i++) {
+        const char* value = getenv(lsf_env_vars[i]);
+        if (value) {
+            strncpy(preserved_vars[*num_preserved].name, lsf_env_vars[i], MAX_ENV_VAR_LEN - 1);
+            strncpy(preserved_vars[*num_preserved].value, value, MAX_ENV_VAR_LEN - 1);
+            preserved_vars[*num_preserved].name[MAX_ENV_VAR_LEN - 1] = '\0';
+            preserved_vars[*num_preserved].value[MAX_ENV_VAR_LEN - 1] = '\0';
+            (*num_preserved)++;
+        }
+    }
+    
+    /* Also preserve PATH */
+    const char* path_value = getenv("PATH");
+    if (path_value && *num_preserved < MAX_ENV_VARS) {
+        strncpy(preserved_vars[*num_preserved].name, "PATH", MAX_ENV_VAR_LEN - 1);
+        strncpy(preserved_vars[*num_preserved].value, path_value, MAX_ENV_VAR_LEN - 1);
+        preserved_vars[*num_preserved].name[MAX_ENV_VAR_LEN - 1] = '\0';
+        preserved_vars[*num_preserved].value[MAX_ENV_VAR_LEN - 1] = '\0';
+        (*num_preserved)++;
+    }
+    
+    return 0;
+}
+
 /* Function to safely set environment for the target user */
-int setup_user_environment(const char* username, struct passwd* pwd) {
-    /* Clear environment and set basic variables */
+int setup_user_environment(const char* username, struct passwd* pwd, 
+                          struct env_var* preserved_vars, int num_preserved) {
+    /* Clear environment */
     if (clearenv() != 0) {
         fprintf(stderr, "Failed to clear environment\n");
         return -1;
@@ -75,15 +139,16 @@ int setup_user_environment(const char* username, struct passwd* pwd) {
         return -1;
     }
     
-    /* Preserve PATH for LSF commands */
-    const char* original_path = getenv("PATH");
-    if (original_path) {
-        if (setenv("PATH", original_path, 1) != 0) {
-            fprintf(stderr, "Failed to set PATH\n");
+    /* Restore preserved environment variables */
+    for (int i = 0; i < num_preserved; i++) {
+        if (setenv(preserved_vars[i].name, preserved_vars[i].value, 1) != 0) {
+            fprintf(stderr, "Failed to restore environment variable %s\n", preserved_vars[i].name);
             return -1;
         }
-    } else {
-        /* Set a default PATH that includes common LSF locations */
+    }
+    
+    /* If PATH wasn't preserved, set a default */
+    if (getenv("PATH") == NULL) {
         if (setenv("PATH", "/usr/local/lsf/bin:/usr/bin:/bin:/usr/local/bin", 1) != 0) {
             fprintf(stderr, "Failed to set default PATH\n");
             return -1;
@@ -97,6 +162,8 @@ int main(int argc, char* argv[]) {
     struct passwd* pwd;
     pid_t pid;
     int status;
+    struct env_var preserved_vars[MAX_ENV_VARS];
+    int num_preserved = 0;
     
     /* Validate arguments */
     if (argc < 3) {
@@ -116,6 +183,12 @@ int main(int argc, char* argv[]) {
     /* Validate command is in allowed list */
     if (!is_allowed_command(command)) {
         fprintf(stderr, "Command not allowed: %s\n", command);
+        return 1;
+    }
+    
+    /* Preserve LSF environment variables before clearing */
+    if (preserve_lsf_environment(preserved_vars, &num_preserved) != 0) {
+        fprintf(stderr, "Failed to preserve environment variables\n");
         return 1;
     }
     
@@ -160,8 +233,8 @@ int main(int argc, char* argv[]) {
             exit(1);
         }
         
-        /* Setup environment */
-        if (setup_user_environment(username, pwd) != 0) {
+        /* Setup environment with preserved LSF variables */
+        if (setup_user_environment(username, pwd, preserved_vars, num_preserved) != 0) {
             exit(1);
         }
         

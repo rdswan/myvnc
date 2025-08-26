@@ -18,6 +18,7 @@ import signal
 import random
 
 from myvnc.utils.config_manager import ConfigManager
+from myvnc.utils.config_loader import load_server_config
 from myvnc.utils.log_manager import get_logger
 
 class LSFManager:
@@ -54,8 +55,19 @@ class LSFManager:
         self.environment = os.environ.copy()
         self.logger = get_logger()
         
+        # Load server configuration to get setuid_runner path
+        server_config = load_server_config()
+        default_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'setuid_runner')
+        self.setuid_binary = server_config.get('setuid_runner', default_path)
+        
+        if 'setuid_runner' in server_config:
+            self.logger.info(f"Using setuid_runner from config: {self.setuid_binary}")
+        else:
+            self.logger.info(f"Using default setuid_runner path: {self.setuid_binary}")
+        
         try:
             self._check_lsf_available()
+            self._check_setuid_binary()
         except Exception as e:
             print(f"Warning: LSF initialization error: {str(e)}", file=sys.stderr)
             # Don't raise here, let individual methods handle errors
@@ -232,6 +244,30 @@ class LSFManager:
         else:
             self.logger.info(f"All LSF commands found successfully: {', '.join(lsf_commands)}")
     
+    def _check_setuid_binary(self):
+        """
+        Check if the setuid binary exists and has proper permissions
+        
+        Raises:
+            RuntimeError: If the setuid binary is not properly configured
+        """
+        if not os.path.exists(self.setuid_binary):
+            raise RuntimeError(f"Setuid binary not found at {self.setuid_binary}. Please compile it using 'make' and set permissions with 'sudo make install'.")
+        
+        # Check if the binary is executable
+        if not os.access(self.setuid_binary, os.X_OK):
+            raise RuntimeError(f"Setuid binary at {self.setuid_binary} is not executable.")
+        
+        # Check if the binary has setuid bit set (this check may fail for non-root users)
+        try:
+            stat_info = os.stat(self.setuid_binary)
+            if not (stat_info.st_mode & 0o4000):  # Check for setuid bit
+                self.logger.warning(f"Setuid binary at {self.setuid_binary} may not have setuid bit set. Run 'sudo make install' to fix.")
+        except Exception as e:
+            self.logger.warning(f"Could not check setuid permissions: {e}")
+        
+        self.logger.info(f"Setuid binary found at: {self.setuid_binary}")
+    
     def _run_command(self, cmd: List[str], authenticated_user: str = None) -> str:
         """
         Run a command and return its output
@@ -255,9 +291,9 @@ class LSFManager:
             # Replace the command with its full path
             modified_cmd[0] = self.lsf_cmd_paths[lsf_command]
             
-            # Prepend sudo command to run as the authenticated user, but only if we have one
+            # Use setuid binary to run as the authenticated user, but only if we have one
             if authenticated_user:
-                modified_cmd = ['sudo', '-u', authenticated_user, '-E'] + modified_cmd
+                modified_cmd = [self.setuid_binary, authenticated_user] + modified_cmd
         
         # For logging and debugging
         cmd_str = ' '.join(str(arg) for arg in cmd)
