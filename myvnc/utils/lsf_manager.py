@@ -305,9 +305,6 @@ class LSFManager:
         if authenticated_user:
             self.logger.debug(f"DEBUG: Running as authenticated user: {authenticated_user}")
         
-        # Log the command being executed - using original command for INFO logs
-        self.logger.info(f"Executing command: {cmd_str}")
-        
         try:
             # Compatible with Python 3.6 - removed text=True
             result = subprocess.run(modified_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -594,9 +591,6 @@ class LSFManager:
                 'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
             self.command_history.append(cmd_entry)
-            
-            # Log the command for debugging
-            self.logger.info(f"Executing command: {base_cmd}")
             
             try:
                 # Use _run_command which will handle sudo and full paths
