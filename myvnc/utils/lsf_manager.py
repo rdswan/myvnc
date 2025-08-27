@@ -384,8 +384,8 @@ class LSFManager:
             # Get LSF group (queue) to use
             queue = lsf_config.get('queue', 'interactive')
             
-            # Format resource request string
-            resource_req = f"rusage[mem={memory_gb}]"
+            # Format resource request string with span[hosts=1] and rusage[mem=XG]
+            resource_req = f"span[hosts=1] rusage[mem={memory_gb}G]"
             
             # Add OS selection if specified
             os_select = lsf_config.get('os_select', '')
@@ -410,12 +410,14 @@ class LSFManager:
                 
             self.logger.info(f"Final resource requirements string: '{resource_req}'")
             
-            # Build LSF command with -n for cores and -R for resource requirements
+            # Build LSF command with -n for cores, -R for resource requirements, and -M for memory limit
+            # Use GB units for -M parameter to match the mem= specification
             bsub_cmd = [
                 'bsub',
                 '-q', lsf_config.get('queue', 'interactive'),
                 '-n', str(num_cores),
                 '-R', resource_req,
+                '-M', f'{memory_gb}G',
                 '-J', job_name
             ]
             
