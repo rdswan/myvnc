@@ -154,17 +154,42 @@ def is_server_running(pid=None):
     try:
         process = psutil.Process(pid)
         cmdline = ' '.join(process.cmdline())
-        # Check if it's our Python server process
-        return "python" in cmdline and "main.py" in cmdline
+        cwd = process.cwd()
+        
+        # Check if it's our MyVNC server process by looking for:
+        # 1. Python process running main.py
+        # 2. Current working directory contains 'myvnc' 
+        # 3. Process is owned by current user
+        current_user = os.environ.get('USER', '')
+        process_owner = process.username()
+        
+        is_python_main = "python" in cmdline and "main.py" in cmdline
+        is_myvnc_dir = "myvnc" in cwd.lower()
+        is_same_user = process_owner == current_user
+        
+        return is_python_main and is_myvnc_dir and is_same_user
     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
         return False
 
 def find_server_process():
     """Find the server process if it's running but we don't have a PID file"""
-    for proc in psutil.process_iter(['pid', 'cmdline']):
+    current_user = os.environ.get('USER', '')
+    
+    for proc in psutil.process_iter(['pid', 'cmdline', 'username', 'cwd']):
         try:
             cmdline = ' '.join(proc.info['cmdline'] or [])
-            if "python" in cmdline and "main.py" in cmdline:
+            username = proc.info.get('username', '')
+            cwd = proc.info.get('cwd', '')
+            
+            # Check if it's our MyVNC server process by looking for:
+            # 1. Python process running main.py
+            # 2. Current working directory contains 'myvnc' 
+            # 3. Process is owned by current user
+            is_python_main = "python" in cmdline and "main.py" in cmdline
+            is_myvnc_dir = "myvnc" in cwd.lower() if cwd else False
+            is_same_user = username == current_user
+            
+            if is_python_main and is_myvnc_dir and is_same_user:
                 return proc.info['pid']
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
@@ -436,21 +461,24 @@ def stop_server():
     # Check if we have a PID file
     pid = read_pid_file()
     
-    # If not, try to find the server process
+    # Validate the PID from the file first
+    if pid is not None:
+        if not is_server_running(pid):
+            logger.warning(f"PID file contains stale/invalid PID {pid}, cleaning up")
+            if os.path.exists(get_pid_file()):
+                os.remove(get_pid_file())
+            pid = None
+    
+    # If no valid PID, try to find the server process
     if pid is None:
         pid = find_server_process()
         if pid:
+            logger.info(f"Found running MyVNC server process with PID {pid}")
             write_pid_file(pid)
     
     # If we still don't have a PID, the server is not running
     if pid is None:
-        logger.info(f"Server is not running")
-        return
-    
-    # Check if the process is actually running
-    if not is_server_running(pid):
-        logger.info(f"Server is not running (PID {pid} not found)")
-        os.remove(get_pid_file())
+        logger.info(f"No MyVNC server is currently running")
         return
     
     # Send a SIGTERM signal to gracefully stop the server
@@ -459,6 +487,29 @@ def stop_server():
     logger.info(f"Stopping server with PID {pid}")
     
     try:
+        # Check if we can actually kill this process (ownership check)
+        try:
+            # Try to get process info to check ownership
+            process = psutil.Process(pid)
+            process_owner = process.username()
+            current_user = os.environ.get('USER', '')
+            
+            if process_owner != current_user:
+                logger.error(f"Cannot stop server: Process {pid} is owned by '{process_owner}', but you are '{current_user}'")
+                logger.error(f"This usually happens when the server was started by a different user or in a different environment")
+                logger.error(f"You may need to:")
+                logger.error(f"  1. Stop the server from the same environment where it was started")
+                logger.error(f"  2. Or manually clean up the PID file: rm {get_pid_file()}")
+                return
+                
+        except psutil.NoSuchProcess:
+            logger.warning(f"Process {pid} no longer exists, cleaning up PID file")
+            if os.path.exists(get_pid_file()):
+                os.remove(get_pid_file())
+            return
+        except psutil.AccessDenied:
+            logger.warning(f"Cannot access process {pid} information, attempting to kill anyway")
+        
         os.kill(pid, signal.SIGTERM)
         
         # Wait for the process to exit
@@ -485,6 +536,15 @@ def stop_server():
         logger.warning(f"Process {pid} not found, removing PID file")
         if os.path.exists(get_pid_file()):
             os.remove(get_pid_file())
+    except PermissionError as e:
+        logger.error(f"Permission denied: Cannot stop process {pid}")
+        logger.error(f"This usually means the process is owned by a different user")
+        logger.error(f"Error details: {e}")
+        logger.error(f"You may need to:")
+        logger.error(f"  1. Stop the server from the same environment where it was started")
+        logger.error(f"  2. Or manually clean up the PID file: rm {get_pid_file()}")
+        logger.error(f"  3. Or use sudo if appropriate: sudo kill {pid}")
+        return
 
 def restart_server():
     """Restart the server"""
