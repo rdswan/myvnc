@@ -7,7 +7,14 @@ setup(
     version="0.1.0",
     packages=find_packages(),
     install_requires=[
-        # No GUI dependencies or LSF API required
+        "python-ldap>=3.4.0",
+        "jinja2>=3.0.0", 
+        "pytz>=2022.1",
+        "msal>=1.20.0",
+        "Authlib>=1.2.0",
+        "requests>=2.28.1",
+        "itsdangerous>=2.1.2",
+        "psutil>=5.8.0",
     ],
     entry_points={
         'console_scripts': [
