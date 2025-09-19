@@ -37,7 +37,39 @@ deactivate () {
 # unset irrelevant variables
 deactivate nondestructive
 
-VIRTUAL_ENV="/proj_risc/user_dev/bswan/tools_src/myvnc/.venv_py3"
+# Determine VIRTUAL_ENV dynamically based on this script's location
+# This script is at <venv>/bin/activate, so VIRTUAL_ENV is the parent directory
+if [ -n "${BASH_SOURCE:-}" ]; then
+    # Use BASH_SOURCE to get the script path
+    VIRTUAL_ENV="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+else
+    # Fallback for non-bash shells or when BASH_SOURCE is not available
+    # Look for .venv_py3 directory that contains this activate script
+    if [ -f ".venv_py3/bin/activate" ]; then
+        VIRTUAL_ENV="$(pwd)/.venv_py3"
+    elif [ -f "tools_src/myvnc/.venv_py3/bin/activate" ]; then
+        VIRTUAL_ENV="$(pwd)/tools_src/myvnc/.venv_py3"
+    elif [ -f "../.venv_py3/bin/activate" ]; then
+        VIRTUAL_ENV="$(cd .. && pwd)/.venv_py3"
+    else
+        # Search up the directory tree
+        _current="$(pwd)"
+        _found=""
+        while [ "$_current" != "/" ] && [ -z "$_found" ]; do
+            if [ -f "$_current/.venv_py3/bin/activate" ]; then
+                _found="$_current/.venv_py3"
+                break
+            fi
+            _current="$(dirname "$_current")"
+        done
+        if [ -n "$_found" ]; then
+            VIRTUAL_ENV="$_found"
+        else
+            # Last resort
+            VIRTUAL_ENV="$(pwd)/.venv_py3"
+        fi
+    fi
+fi
 export VIRTUAL_ENV
 
 _OLD_VIRTUAL_PATH="$PATH"
