@@ -28,6 +28,9 @@ import logging
 import ssl
 import importlib
 
+# Import custom exceptions
+from myvnc.utils.lsf_manager import LSFError
+
 # Add parent directory to path so we can import our modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -1350,7 +1353,17 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 "job_id": job_id,
                 "status": "pending"
             })
+        except LSFError as e:
+            # LSF errors have clean error messages that should be shown to the user
+            error_msg = str(e)
+            self.logger.error(f"LSF error creating VNC session: {error_msg}")
+            # Don't print stack trace for LSF errors as they are expected user errors
+            self.send_json_response({
+                "success": False,
+                "message": error_msg
+            }, 500)
         except Exception as e:
+            # For other unexpected errors, show generic message and log details
             error_msg = f"Error creating VNC session: {str(e)}"
             self.logger.error(error_msg)
             traceback.print_exc()

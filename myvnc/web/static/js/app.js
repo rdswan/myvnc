@@ -1310,16 +1310,16 @@ async function createVNCSession(event) {
         console.log('Sending request to /api/vnc/create');
         const response = await fetch('/api/vnc/create', options);
         
-        // Check response status
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error('Server returned error:', errorText);
-            throw new Error(`Server returned ${response.status}: ${response.statusText}`);
-        }
-        
-        // Parse response
+        // Parse response (works for both success and error cases)
         const result = await response.json();
         console.log('Creation response:', result);
+        
+        // Check if the operation was successful
+        if (!response.ok || !result.success) {
+            const errorMessage = result.message || `Server returned ${response.status}: ${response.statusText}`;
+            console.error('Server returned error:', errorMessage);
+            throw new Error(errorMessage);
+        }
         
         // Show success message
         showMessage(`VNC session created successfully. Job ID: ${result.job_id}`, 'success');

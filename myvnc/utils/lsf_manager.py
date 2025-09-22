@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # SPDX-FileCopyrightText: © 2025 Tenstorrent AI ULC
 # SPDX-License-Identifier: Apache-2.0
 """
@@ -20,6 +21,15 @@ import random
 from myvnc.utils.config_manager import ConfigManager
 from myvnc.utils.config_loader import load_server_config
 from myvnc.utils.log_manager import get_logger
+
+
+class LSFError(Exception):
+    """Custom exception for LSF-related errors that preserves the original error message"""
+    def __init__(self, message, stderr=None, stdout=None):
+        super(LSFError, self).__init__(message)
+        self.stderr = stderr
+        self.stdout = stdout
+        self.original_message = message
 
 class LSFManager:
     """Manages interactions with the LSF job scheduler via command line"""
@@ -345,7 +355,7 @@ class LSFManager:
                 'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             })
             
-            raise RuntimeError(f"Command failed: {stderr}")
+            raise LSFError(stderr.strip(), stderr=stderr, stdout=stdout)
     
     def submit_vnc_job(self, vnc_config: Dict, lsf_config: Dict, authenticated_user: str = None) -> str:
         """Submit a VNC job using bsub
@@ -499,9 +509,19 @@ class LSFManager:
                 
                 return job_id
                 
+            except LSFError as e:
+                # LSF errors already have the clean error message
+                self.logger.error(f"Job submission failed: {str(e)}")
+                
+                # Update command history with failure
+                cmd_entry['stderr'] += f"\nException: {str(e)}"
+                
+                # Re-raise the LSFError to preserve the original message
+                raise e
             except Exception as e:
-                error_msg = f"Command failed: {str(e)}"
-                self.logger.error(f"Job submission failed: {error_msg}")
+                # For other exceptions, wrap them appropriately
+                error_msg = f"Job submission error: {str(e)}"
+                self.logger.error(error_msg)
                 
                 # Update command history with failure
                 cmd_entry['stderr'] += f"\nException: {str(e)}"
