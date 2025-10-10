@@ -1,0 +1,111 @@
+Bootstrap: docker
+From: rockylinux:9
+
+%help
+    RedHat 9.6 compatible container for VNC sessions
+    This container includes TigerVNC server and multiple desktop environments
+    NFS mounts are available via bind mounts from the host
+
+%labels
+    Author bswan
+    Version 1.0
+    OS Rocky Linux 9 (RHEL 9.6 compatible)
+
+%post
+    # Update system
+    dnf -y update
+    
+    # Install EPEL repository for additional packages
+    dnf -y install epel-release
+    
+    # Install VNC server
+    dnf -y install tigervnc tigervnc-server tigervnc-server-minimal
+    
+    # Install X server and basic X libraries
+    dnf -y install xorg-x11-server-Xorg xorg-x11-xauth xorg-x11-xinit
+    dnf -y install xorg-x11-server-utils xorg-x11-utils
+    dnf -y install xterm
+    
+    # Install desktop environments
+    # GNOME
+    dnf -y groupinstall "Server with GUI" || dnf -y install gnome-shell gnome-session gnome-terminal nautilus
+    
+    # XFCE (lightweight alternative)
+    #dnf -y groupinstall "Xfce" || dnf -y install xfce4-session xfce4-panel xfce4-terminal xfdesktop
+    dnf -y group install "Xfce"
+    dnf -y remove xfce4-screensaver xfce4-power-manager xfce4-pulseaudio-plugin NetworkManager-libnm
+    
+    # MATE (another lightweight option)
+    #dnf -y install mate-desktop mate-session-manager mate-panel mate-terminal || true
+    
+    # Install window managers
+    dnf -y install openbox fluxbox i3 || true
+    
+    # Install fonts
+    dnf -y install dejavu-sans-fonts dejavu-sans-mono-fonts dejavu-serif-fonts
+    dnf -y install liberation-fonts liberation-mono-fonts liberation-sans-fonts liberation-serif-fonts
+    dnf -y install google-noto-sans-fonts google-noto-serif-fonts
+    
+    # Install common development tools and utilities
+    dnf -y install git vim emacs nano
+    dnf -y install gcc gcc-c++ make cmake autoconf automake libtool
+    dnf -y install python3 python3-pip python3-devel
+    dnf -y install wget tar gzip bzip2 xz unzip which file tree htop less
+    # Install curl (replacing curl-minimal if needed)
+    dnf -y install curl --allowerasing
+    
+    # Install NFS client utilities
+    dnf -y install nfs-utils autofs
+    
+    # Install additional useful tools
+    dnf -y install firefox gedit
+    
+    # Create common directories
+    mkdir -p /home
+    mkdir -p /tmp
+    mkdir -p /var/tmp
+    mkdir -p /opt
+    mkdir -p /usr/local
+
+    ## make sure there is a python binary
+    ln -sf /usr/bin/python3 /usr/bin/python
+    
+    # Clean up
+    dnf clean all
+    
+    # Set up VNC directory structure
+    mkdir -p /tmp/.X11-unix
+    chmod 1777 /tmp/.X11-unix
+
+    ## if anything exists, we need to delete it
+    rm -rf /tmp/.X*-lock /tmp/.X11-unix/*
+
+    ##
+    chown root /tmp/.ICE-unix
+    chgrp root /tmp/.ICE-unix
+
+%environment
+    # Set locale
+    export LC_ALL=C
+    export LANG=C
+
+    export TERM=xterm-256color
+    
+    # Set PATH
+    export PATH=/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin
+
+    ## Set LD_LIBRARY_PATH
+    export SINGULARITY_LD_LIBRARY_PATH=/usr/local/lib
+    
+    # VNC settings
+    export XDG_RUNTIME_DIR=/tmp/runtime-$USER
+    export DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-$USER
+
+%runscript
+    # Default runscript - execute whatever command is passed
+    exec "$@"
+
+%startscript
+    # This runs when using 'singularity instance start'
+    exec "$@"
+
