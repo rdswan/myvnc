@@ -554,6 +554,11 @@ class LSFManager:
                 container_cmd.extend(['--bind', '/run/user:/run/user'])
                 self.logger.info("Adding bind mount for /run/user (required for XDG/DBUS)")
                 
+                # Add SSS (System Security Services) authentication bind mounts
+                # This allows the container to use the host's authentication system
+                container_cmd.extend(['--bind', '/var/lib/sss/pipes:/var/lib/sss/pipes,/etc/nsswitch.conf:/etc/nsswitch.conf'])
+                self.logger.info("Adding bind mount for SSS authentication (pipes and nsswitch.conf)")
+                
                 # Dynamically detect all NFS and WekaFS mount points
                 # This ensures the container has access to the same mounts as the host
                 try:
