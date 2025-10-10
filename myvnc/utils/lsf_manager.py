@@ -549,6 +549,11 @@ class LSFManager:
                                f"memory-reservation={memory_gb}G, memory={memory_gb + 2}G, "
                                f"memory-swap={memory_gb * 2}G")
                 
+                # Add /run/user bind mount for XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS
+                # This is required for desktop environments to access user runtime directories
+                container_cmd.extend(['--bind', '/run/user:/run/user'])
+                self.logger.info("Adding bind mount for /run/user (required for XDG/DBUS)")
+                
                 # Dynamically detect all NFS and WekaFS mount points
                 # This ensures the container has access to the same mounts as the host
                 try:

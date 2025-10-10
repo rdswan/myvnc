@@ -825,9 +825,11 @@ async function loadLSFConfig() {
             
             // Only update if we have memory options
             if (memoryOptions.length > 0) {
-                // Update slider attributes
-                memorySlider.min = memoryOptions[0];
-                memorySlider.max = memoryOptions[memoryOptions.length - 1];
+                // Use indices (0, 1, 2, 3...) instead of actual GB values for the slider
+                // This ensures even spacing regardless of the actual memory values
+                memorySlider.min = 0;
+                memorySlider.max = memoryOptions.length - 1;
+                memorySlider.step = 1;
                 
                 // Get default memory in GB from config
                 const defaultMemoryGB = lsfConfig.defaults.memory_gb;
@@ -843,8 +845,9 @@ async function loadLSFConfig() {
                     }
                 }
                 
-                // Find the closest memory option to default
+                // Find the closest memory option to default and get its index
                 let closestOption = memoryOptions[0];
+                let closestIndex = 0;
                 let minDiff = Math.abs(defaultMemoryGB - memoryOptions[0]);
                 
                 for (let i = 1; i < memoryOptions.length; i++) {
@@ -852,16 +855,13 @@ async function loadLSFConfig() {
                     if (diff < minDiff) {
                         minDiff = diff;
                         closestOption = memoryOptions[i];
+                        closestIndex = i;
                     }
                 }
                 
-                // Set the slider to the closest option
-                memorySlider.value = closestOption;
+                // Set the slider to the index (not the GB value)
+                memorySlider.value = closestIndex;
                 memoryValue.textContent = closestOption;
-                
-                // Ensure the step attribute is properly set
-                const step = memoryOptions.length > 1 ? memoryOptions[1] - memoryOptions[0] : 1;
-                memorySlider.step = step;
                 
                 console.log("Memory slider initialization:", {
                     min: memorySlider.min,
@@ -869,6 +869,7 @@ async function loadLSFConfig() {
                     value: memorySlider.value,
                     step: memorySlider.step,
                     defaultMemoryGB,
+                    closestIndex,
                     closestOption,
                     memoryOptions
                 });
@@ -896,15 +897,15 @@ async function loadLSFConfig() {
 function handleMemorySliderInput() {
     try {
         const options = JSON.parse(this.dataset.memoryOptions);
-        const currentValue = parseInt(this.value);
+        const currentIndex = parseInt(this.value);
         const memoryValue = document.getElementById('memory-value');
         
-        // Find the closest memory option
-        let closestOption = findClosestMemoryOption(options, currentValue);
-        
-        // Update display value with the closest option
-        if (memoryValue) {
-            memoryValue.textContent = closestOption;
+        // Get the memory value from the options array using the index
+        if (currentIndex >= 0 && currentIndex < options.length) {
+            const memoryGB = options[currentIndex];
+            if (memoryValue) {
+                memoryValue.textContent = memoryGB;
+            }
         }
     } catch (e) {
         console.error('Error handling memory slider input:', e);
@@ -915,16 +916,15 @@ function handleMemorySliderInput() {
 function handleMemorySliderChange() {
     try {
         const options = JSON.parse(this.dataset.memoryOptions);
-        const currentValue = parseInt(this.value);
+        const currentIndex = parseInt(this.value);
         const memoryValue = document.getElementById('memory-value');
         
-        // Find the closest memory option
-        let closestOption = findClosestMemoryOption(options, currentValue);
-        
-        // Update the actual slider value to snap to the valid option
-        this.value = closestOption;
-        if (memoryValue) {
-            memoryValue.textContent = closestOption;
+        // Get the memory value from the options array using the index
+        if (currentIndex >= 0 && currentIndex < options.length) {
+            const memoryGB = options[currentIndex];
+            if (memoryValue) {
+                memoryValue.textContent = memoryGB;
+            }
         }
     } catch (e) {
         console.error('Error handling memory slider change:', e);
@@ -1273,25 +1273,41 @@ async function createVNCSession(event) {
         }
         
         // Add memory if available
-        if (memorySlider && memorySlider.value) {
-            // Get the current value
-            const currentValue = parseInt(memorySlider.value);
+        // Use the displayed value from memory-value span instead of slider's raw value
+        // This avoids issues with slider initialization and ensures we use the correct snapped value
+        const memoryValueSpan = document.getElementById('memory-value');
+        if (memoryValueSpan && memoryValueSpan.textContent) {
+            // Parse the displayed value directly
+            const displayedValue = parseInt(memoryValueSpan.textContent);
+            if (!isNaN(displayedValue)) {
+                data.memory_gb = displayedValue.toString();
+                console.log('Using displayed memory value:', displayedValue);
+            }
+        } else if (memorySlider && memorySlider.value !== undefined && memorySlider.value !== '') {
+            // Fallback to slider value if display value not available
+            // Slider now uses indices, so convert index to GB value
+            const currentIndex = parseInt(memorySlider.value);
             
-            // If we have memory options stored, ensure we use a valid option
+            // If we have memory options stored, look up the value by index
             if (memorySlider.dataset.memoryOptions) {
                 try {
                     const options = JSON.parse(memorySlider.dataset.memoryOptions);
                     
-                    // Find the closest memory option
-                    let closestOption = findClosestMemoryOption(options, currentValue);
-                    data.memory_gb = closestOption.toString();
+                    // Use the index to look up the actual GB value
+                    if (currentIndex >= 0 && currentIndex < options.length) {
+                        data.memory_gb = options[currentIndex].toString();
+                        console.log('Using memory value from index:', currentIndex, '=', options[currentIndex], 'GB');
+                    } else {
+                        console.warn('Invalid slider index:', currentIndex);
+                        data.memory_gb = options[0].toString(); // Default to first option
+                    }
                 } catch (e) {
-                    console.warn('Error finding closest memory option:', e);
-                    data.memory_gb = currentValue.toString();
+                    console.warn('Error getting memory option from index:', e);
+                    data.memory_gb = '16'; // Safe default
                 }
             } else {
                 // Fallback if no memory options are available
-                data.memory_gb = currentValue.toString();
+                data.memory_gb = '16'; // Safe default
             }
         }
         
