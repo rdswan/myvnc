@@ -29,17 +29,8 @@ From: rockylinux:9
     ## lets get perl
     dnf -y install perl-CPAN
     
-    # Install desktop environments
-    # GNOME
-    dnf -y groupinstall "Server with GUI" || dnf -y install gnome-shell gnome-session gnome-terminal nautilus
-    
-    # XFCE (lightweight alternative)
-    #dnf -y groupinstall "Xfce" || dnf -y install xfce4-session xfce4-panel xfce4-terminal xfdesktop
+    # XFCE - we only want to support this windowmanager and nothing else
     dnf -y group install "Xfce"
-    dnf -y remove xfce4-screensaver xfce4-power-manager xfce4-pulseaudio-plugin NetworkManager-libnm
-    
-    # MATE (another lightweight option)
-    #dnf -y install mate-desktop mate-session-manager mate-panel mate-terminal || true
     
     # Install window managers
     dnf -y install openbox fluxbox i3 || true
@@ -53,15 +44,26 @@ From: rockylinux:9
     dnf -y install git vim emacs nano
     dnf -y install gcc gcc-c++ make cmake autoconf automake libtool
     dnf -y install python3 python3-pip python3-devel
-    dnf -y install wget tar gzip bzip2 xz unzip which file tree htop less
+    dnf -y install wget tar gzip bzip2 xz zstd unzip which file tree htop less
+    dnf -y install tmux
+
     # Install curl (replacing curl-minimal if needed)
     dnf -y install curl --allowerasing
-    
+
     # Install NFS client utilities
     dnf -y install nfs-utils autofs
+
+    ## Install SSSD requirements
+    dnf -y install sssd
+
+    ## install utilities needed for LSF
+    dnf -y install libnsl libnsl2
     
     # Install additional useful tools
-    dnf -y install firefox gedit
+    dnf -y install firefox gedit meld rsync
+
+    ## Uninstall problematic tools
+    dnf -y remove xfce4-screensaver xfce4-power-manager xfce4-pulseaudio-plugin NetworkManager-libnm
     
     # Create common directories
     mkdir -p /home
@@ -70,8 +72,8 @@ From: rockylinux:9
     mkdir -p /opt
     mkdir -p /usr/local
 
-    ## install specific perl packages
-    cpan -i Forks::Super
+    ## disable some annoying/problematic stuff
+    chmod 000 /usr/bin/pipewire
 
     ## make sure there is a python binary
     ln -sf /usr/bin/python3 /usr/bin/python
