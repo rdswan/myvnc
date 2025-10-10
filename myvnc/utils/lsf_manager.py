@@ -465,6 +465,35 @@ class LSFManager:
             if display_name and display_name.strip():
                 vncserver_cmd.extend(['-name', display_name])
             
+            # Calculate environment variables needed for VNC session
+            # These are used for both LSF and singularity container
+            window_manager = vnc_config.get('window_manager', 'gnome')
+            user_uid = None
+            xdg_runtime_dir = None
+            dbus_session_bus_address = None
+            
+            # Get the UID for the authenticated user to set XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS
+            if authenticated_user:
+                try:
+                    # Get UID for the authenticated user
+                    uid_result = subprocess.run(['id', '-u', authenticated_user], 
+                                               check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    user_uid = uid_result.stdout.decode('utf-8').strip()
+                    
+                    # Calculate XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS
+                    xdg_runtime_dir = f"/run/user/{user_uid}"
+                    dbus_session_bus_address = f"unix:path={xdg_runtime_dir}/bus"
+                    
+                    self.logger.info(f"Calculated environment for user {authenticated_user} (UID={user_uid})")
+                    self.logger.debug(f"XDG_RUNTIME_DIR={xdg_runtime_dir}")
+                    self.logger.debug(f"DBUS_SESSION_BUS_ADDRESS={dbus_session_bus_address}")
+                except subprocess.CalledProcessError as e:
+                    self.logger.error(f"Failed to get UID for user {authenticated_user}: {e.stderr.decode('utf-8')}")
+                    self.logger.warning("Continuing without XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS")
+                except Exception as e:
+                    self.logger.error(f"Error getting UID for user {authenticated_user}: {str(e)}")
+                    self.logger.warning("Continuing without XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS")
+            
             # Add xstartup parameter if configured
             # Check if custom xstartup is enabled and path is provided
             use_custom_xstartup = vnc_config.get('use_custom_xstartup', False)
@@ -474,14 +503,16 @@ class LSFManager:
                 self.logger.info(f"Using custom xstartup script: {xstartup_path}")
                 vncserver_cmd.extend(['-xstartup', xstartup_path])
                 
-                # Set window manager as an environment variable for the xstartup script
-                window_manager = vnc_config.get('window_manager', 'gnome')
-                # Get the current environment
-                env = os.environ.copy()
-                # Add the WINDOW_MANAGER environment variable
-                env['WINDOW_MANAGER'] = window_manager
-                # Make sure environment is propagated through bsub
-                bsub_cmd.extend(['-env', f'WINDOW_MANAGER={window_manager}'])
+                # Build environment variables string for LSF -env flag
+                env_vars = [f'WINDOW_MANAGER={window_manager}']
+                if xdg_runtime_dir:
+                    env_vars.append(f'XDG_RUNTIME_DIR={xdg_runtime_dir}')
+                if dbus_session_bus_address:
+                    env_vars.append(f'DBUS_SESSION_BUS_ADDRESS={dbus_session_bus_address}')
+                
+                env_string = ','.join(env_vars)
+                bsub_cmd.extend(['-env', env_string])
+                self.logger.info(f"Setting LSF environment variables: {env_string}")
             
             # Add fallbacktofreeport switch to ensure the server falls back to a free port if the specified one is in use
             vncserver_cmd.append('-fallbacktofreeport')
@@ -494,12 +525,29 @@ class LSFManager:
                 # Use --cleanenv to prevent inheriting host environment variables
                 container_cmd = ['singularity', 'exec', '--cleanenv']
                 
-                # Pass WINDOW_MANAGER environment variable to singularity
+                # Pass environment variables to singularity
                 # This is needed because --cleanenv wipes all environment variables
                 if use_custom_xstartup and xstartup_path:
-                    window_manager = vnc_config.get('window_manager', 'gnome')
                     container_cmd.extend(['--env', f'WINDOW_MANAGER={window_manager}'])
                     self.logger.info(f"Passing WINDOW_MANAGER={window_manager} to container")
+                    
+                    # Also pass XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS if available
+                    if xdg_runtime_dir:
+                        container_cmd.extend(['--env', f'XDG_RUNTIME_DIR={xdg_runtime_dir}'])
+                        self.logger.info(f"Passing XDG_RUNTIME_DIR={xdg_runtime_dir} to container")
+                    if dbus_session_bus_address:
+                        container_cmd.extend(['--env', f'DBUS_SESSION_BUS_ADDRESS={dbus_session_bus_address}'])
+                        self.logger.info(f"Passing DBUS_SESSION_BUS_ADDRESS={dbus_session_bus_address} to container")
+                
+                # Add cgroup resource limits to match LSF reservation
+                # This ensures the container respects the resource allocation
+                container_cmd.extend(['--cpus', str(num_cores)])
+                container_cmd.extend(['--memory-reservation', f'{memory_gb}G'])
+                container_cmd.extend(['--memory', f'{memory_gb + 2}G'])
+                container_cmd.extend(['--memory-swap', f'{memory_gb * 2}G'])
+                self.logger.info(f"Setting container cgroup limits: cpus={num_cores}, "
+                               f"memory-reservation={memory_gb}G, memory={memory_gb + 2}G, "
+                               f"memory-swap={memory_gb * 2}G")
                 
                 # Dynamically detect all NFS and WekaFS mount points
                 # This ensures the container has access to the same mounts as the host

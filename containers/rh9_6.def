@@ -25,6 +25,9 @@ From: rockylinux:9
     dnf -y install xorg-x11-server-Xorg xorg-x11-xauth xorg-x11-xinit
     dnf -y install xorg-x11-server-utils xorg-x11-utils
     dnf -y install xterm
+
+    ## lets get perl
+    dnf -y install perl-CPAN
     
     # Install desktop environments
     # GNOME
@@ -67,6 +70,9 @@ From: rockylinux:9
     mkdir -p /opt
     mkdir -p /usr/local
 
+    ## install specific perl packages
+    cpan -i Forks::Super
+
     ## make sure there is a python binary
     ln -sf /usr/bin/python3 /usr/bin/python
     
@@ -98,8 +104,11 @@ From: rockylinux:9
     export SINGULARITY_LD_LIBRARY_PATH=/usr/local/lib
     
     # VNC settings
-    export XDG_RUNTIME_DIR=/tmp/runtime-$USER
-    export DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-$USER
+    #export XDG_RUNTIME_DIR=/tmp/runtime-$USER
+    #export DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-$USER
+    ## actually this is what is needed for cgroup support
+    export XDG_RUNTIME_DIR="/run/user/$UID"
+    export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
 
 %runscript
     # Default runscript - execute whatever command is passed
