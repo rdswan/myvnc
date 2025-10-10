@@ -14,6 +14,10 @@ elif [ -f "$HOME/.bash_profile" ]; then
     source "$HOME/.bash_profile"
 fi
 
+## Need to unset these if theyre defined so that we can start a new session up
+unset SESSION_MANAGER
+unset DBUS_SESSION_BUS_ADDRESS
+
 # Uncomment to enable debug output
 # set -x
 exec >> "$HOME/.vnc/xstartup.log" 2>&1

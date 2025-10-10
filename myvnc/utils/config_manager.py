@@ -189,6 +189,26 @@ class ConfigManager:
     def get_core_options(self):
         """Get the list of available core options"""
         return self.lsf_config["core_options"]
+    
+    def get_os_options(self):
+        """Get the list of available OS options"""
+        return self.lsf_config.get("os_options", [])
+    
+    def get_os_config_by_name(self, os_name):
+        """
+        Get the OS configuration (select and container) by OS name
+        
+        Args:
+            os_name: Name of the OS
+            
+        Returns:
+            Dictionary with 'select' and optionally 'container' keys, or None if not found
+        """
+        os_options = self.get_os_options()
+        for os_option in os_options:
+            if os_option.get("name") == os_name:
+                return os_option
+        return None
         
     def get_vnc_config(self):
         """Get the full VNC configuration"""

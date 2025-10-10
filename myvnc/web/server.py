@@ -1326,10 +1326,20 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 "queue": data.get("queue", lsf_defaults.get("queue")),
                 "num_cores": int(data.get("num_cores", lsf_defaults.get("num_cores"))),
                 "memory_gb": int(data.get("memory_gb", lsf_defaults.get("memory_gb"))),
-                "job_name": lsf_defaults.get("job_name", "myvnc_vncserver"),
-                # Add OS selection if provided
-                "os": data.get("os", lsf_defaults.get("os", "Any"))
+                "job_name": lsf_defaults.get("job_name", "myvnc_vncserver")
             }
+            
+            # Convert OS name to os_select and get container path if applicable
+            os_name = data.get("os", lsf_defaults.get("os", "Any"))
+            os_config = self.config_manager.get_os_config_by_name(os_name)
+            if os_config:
+                lsf_settings["os_select"] = os_config.get("select", "any")
+                if "container" in os_config:
+                    lsf_settings["container"] = os_config.get("container")
+                    self.logger.info(f"Using container for OS '{os_name}': {os_config.get('container')}")
+            else:
+                self.logger.warning(f"OS '{os_name}' not found in configuration, using default")
+                lsf_settings["os_select"] = "any"
             
             # Log the settings that will be used
             self.logger.info(f"Using VNC settings: {json.dumps(vnc_settings)}")

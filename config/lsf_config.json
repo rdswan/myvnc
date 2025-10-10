@@ -47,6 +47,11 @@
             "select": "rh810"
         },
         {
+            "name": "RedHat 9.6",
+            "select": "rh96",
+            "container": "containers/rh9_6.sif"
+        },
+        {
             "name": "CentOS 7",
             "select": "c7"
         },

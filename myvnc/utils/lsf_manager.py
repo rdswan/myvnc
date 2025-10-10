@@ -394,7 +394,12 @@ class LSFManager:
             # Format resource request string with span[hosts=1] and rusage[mem=XG]
             resource_req = f"span[hosts=1] rusage[mem={memory_gb}G]"
             
-            # Add OS selection if specified
+            # Check if a container is specified - if so, we don't need OS selection
+            # because the container provides the OS environment
+            container_path = lsf_config.get('container', '')
+            using_container = container_path and container_path.strip()
+            
+            # Add OS selection if specified (but NOT when using a container)
             os_select = lsf_config.get('os_select', '')
             
             # Add processor architecture selection if specified
@@ -409,7 +414,10 @@ class LSFManager:
                 self.logger.info(f"Not adding architecture selection - arch_select is '{arch_select}'")
                 
             # Modify resource string based on OS selection
-            if os_select and os_select != "any":
+            # Skip OS selection if using a container (container provides the OS)
+            if using_container:
+                self.logger.info(f"Using container - skipping OS selection constraint (container provides OS environment)")
+            elif os_select and os_select != "any":
                 self.logger.info(f"Adding OS selection '{os_select}' to resource requirements")
                 resource_req = f"select[{os_select}] {resource_req}"
             else:
@@ -477,9 +485,67 @@ class LSFManager:
             
             # Add fallbacktofreeport switch to ensure the server falls back to a free port if the specified one is in use
             vncserver_cmd.append('-fallbacktofreeport')
+            
+            # Check if a container is specified for this OS (already retrieved earlier)
+            if using_container:
+                self.logger.info(f"Wrapping vncserver command with singularity container: {container_path}")
+                # Wrap the vncserver command with singularity exec
+                # Build the singularity command with bind mounts for NFS directories
+                # Use --cleanenv to prevent inheriting host environment variables
+                container_cmd = ['singularity', 'exec', '--cleanenv']
                 
-            # Add vncserver command to bsub command
-            bsub_cmd.extend(vncserver_cmd)
+                # Pass WINDOW_MANAGER environment variable to singularity
+                # This is needed because --cleanenv wipes all environment variables
+                if use_custom_xstartup and xstartup_path:
+                    window_manager = vnc_config.get('window_manager', 'gnome')
+                    container_cmd.extend(['--env', f'WINDOW_MANAGER={window_manager}'])
+                    self.logger.info(f"Passing WINDOW_MANAGER={window_manager} to container")
+                
+                # Dynamically detect all NFS and WekaFS mount points
+                # This ensures the container has access to the same mounts as the host
+                try:
+                    # Use df command to find all NFS and WekaFS mounts (excluding truenas)
+                    detect_cmd = "df -T /* | egrep 'wekafs|nfs' | grep -v truenas | awk '{print $NF}'"
+                    self.logger.debug(f"Detecting NFS/WekaFS mounts with: {detect_cmd}")
+                    
+                    result = subprocess.run(detect_cmd, shell=True, check=True, 
+                                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    nfs_mounts_output = result.stdout.decode('utf-8').strip()
+                    
+                    if nfs_mounts_output:
+                        nfs_mounts = nfs_mounts_output.split('\n')
+                        self.logger.info(f"Detected {len(nfs_mounts)} NFS/WekaFS mount points")
+                        
+                        for mount in nfs_mounts:
+                            mount = mount.strip()
+                            if mount and os.path.exists(mount):
+                                container_cmd.extend(['--bind', f'{mount}:{mount}'])
+                                self.logger.debug(f"Adding bind mount for: {mount}")
+                    else:
+                        self.logger.warning("No NFS/WekaFS mounts detected")
+                        
+                except subprocess.CalledProcessError as e:
+                    self.logger.error(f"Failed to detect NFS mounts: {e.stderr.decode('utf-8')}")
+                    self.logger.warning("Continuing without NFS bind mounts")
+                except Exception as e:
+                    self.logger.error(f"Error detecting NFS mounts: {str(e)}")
+                    self.logger.warning("Continuing without NFS bind mounts")
+                
+                # Add the container path
+                container_cmd.append(container_path)
+                
+                # Wrap the vncserver command in bash with sleep infinity
+                # This keeps the container alive after vncserver starts
+                # vncserver daemonizes immediately, so without sleep the container would exit
+                vncserver_cmd_str = ' '.join(str(arg) for arg in vncserver_cmd)
+                container_cmd.extend(['/usr/bin/bash', '-c', f'{vncserver_cmd_str} && sleep infinity'])
+                
+                self.logger.info(f"Container command will keep alive with 'sleep infinity'")
+                
+                bsub_cmd.extend(container_cmd)
+            else:
+                # No container, just add the vncserver command directly
+                bsub_cmd.extend(vncserver_cmd)
             
             # Convert command list to string for logging
             cmd_str = ' '.join(str(arg) for arg in bsub_cmd)
