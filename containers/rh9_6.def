@@ -54,7 +54,7 @@ From: rockylinux:9
     dnf -y install nfs-utils autofs
 
     ## Install SSSD requirements
-    dnf -y install sssd
+    dnf -y install sssd sssd-tools
 
     ## install utilities needed for LSF
     dnf -y install libnsl libnsl2
@@ -91,6 +91,9 @@ From: rockylinux:9
     ##
     chown root /tmp/.ICE-unix
     chgrp root /tmp/.ICE-unix
+
+%files
+    /etc/sssd /etc/sssd
 
 %environment
     # Set locale
