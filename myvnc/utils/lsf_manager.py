@@ -446,6 +446,12 @@ class LSFManager:
             if host_filter and host_filter.strip():
                 bsub_cmd.extend(['-m', host_filter])
             
+            # Add LSF output log file path (for both containerized and bare metal submissions)
+            # %J will be replaced by the LSF job ID
+            log_file_path = '$HOME/.vnc/myvnc.%J.lsf.log'
+            bsub_cmd.extend(['-oo', log_file_path])
+            self.logger.info(f"Setting LSF output log file: {log_file_path}")
+            
             # Add the VNC server command
             vncserver_path = vnc_config.get('vncserver_path', '/usr/bin/vncserver')
             
@@ -513,6 +519,13 @@ class LSFManager:
                 env_string = ','.join(env_vars)
                 bsub_cmd.extend(['-env', env_string])
                 self.logger.info(f"Setting LSF environment variables: {env_string}")
+            
+            # Add loginctl enable-linger command when using a container
+            # This ensures /run/user/$UID exists on the destination machine even though LSF doesn't actually login
+            if using_container and authenticated_user:
+                loginctl_cmd = f'/usr/bin/loginctl enable-linger {authenticated_user}'
+                bsub_cmd.extend(['-E', loginctl_cmd])
+                self.logger.info(f"Adding pre-execution command to enable user lingering: {loginctl_cmd}")
             
             # Add fallbacktofreeport switch to ensure the server falls back to a free port if the specified one is in use
             vncserver_cmd.append('-fallbacktofreeport')
