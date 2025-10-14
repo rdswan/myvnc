@@ -157,13 +157,13 @@ def is_server_running(pid=None):
         cwd = process.cwd()
         
         # Check if it's our MyVNC server process by looking for:
-        # 1. Python process running main.py
+        # 1. Python process running main.py or run_server.py
         # 2. Current working directory contains 'myvnc' 
         # 3. Process is owned by current user
         current_user = os.environ.get('USER', '')
         process_owner = process.username()
         
-        is_python_main = "python" in cmdline and "main.py" in cmdline
+        is_python_main = "python" in cmdline and ("main.py" in cmdline or "run_server.py" in cmdline)
         is_myvnc_dir = "myvnc" in cwd.lower()
         is_same_user = process_owner == current_user
         
@@ -182,10 +182,10 @@ def find_server_process():
             cwd = proc.info.get('cwd', '')
             
             # Check if it's our MyVNC server process by looking for:
-            # 1. Python process running main.py
+            # 1. Python process running main.py or run_server.py
             # 2. Current working directory contains 'myvnc' 
             # 3. Process is owned by current user
-            is_python_main = "python" in cmdline and "main.py" in cmdline
+            is_python_main = "python" in cmdline and ("main.py" in cmdline or "run_server.py" in cmdline)
             is_myvnc_dir = "myvnc" in cwd.lower() if cwd else False
             is_same_user = username == current_user
             
