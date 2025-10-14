@@ -772,9 +772,31 @@ async function loadLSFConfig() {
         lsfConfig = await apiRequest('config/lsf');
         console.log("LSF config received:", lsfConfig);
         
+        // Try to load user LSF settings
+        let userLsfSettings = null;
+        try {
+            const userSettingsResponse = await fetch('/api/user/settings');
+            if (userSettingsResponse.ok) {
+                const userSettingsData = await userSettingsResponse.json();
+                if (userSettingsData.success && userSettingsData.settings && userSettingsData.settings.lsf_settings) {
+                    userLsfSettings = userSettingsData.settings.lsf_settings;
+                    console.log('Found user LSF settings:', userLsfSettings);
+                }
+            }
+        } catch (e) {
+            console.warn('Error fetching user LSF settings:', e);
+        }
+        
+        // Use user settings if available, otherwise use defaults
+        const defaultQueue = userLsfSettings?.queue || lsfConfig.defaults.queue;
+        const defaultCores = userLsfSettings?.num_cores || lsfConfig.defaults.num_cores;
+        
+        console.log("Using queue default:", defaultQueue);
+        console.log("Using cores default:", defaultCores);
+        
         // Populate select fields
-        populateSelect('lsf-queue', lsfConfig.queues, lsfConfig.defaults.queue);
-        populateSelect('lsf-cores', lsfConfig.core_options, lsfConfig.defaults.num_cores);
+        populateSelect('lsf-queue', lsfConfig.queues, defaultQueue);
+        populateSelect('lsf-cores', lsfConfig.core_options, defaultCores);
         
         // Populate OS options if available
         if (lsfConfig.os_options && Array.isArray(lsfConfig.os_options)) {
@@ -783,8 +805,8 @@ async function loadLSFConfig() {
                 // Clear existing options
                 osElement.innerHTML = '';
                 
-                // Get default OS from config
-                const defaultOs = lsfConfig.defaults.os || "Any";
+                // Get default OS from user settings or config
+                const defaultOs = userLsfSettings?.os || lsfConfig.defaults.os || "Any";
                 let foundDefault = false;
                 
                 // Add each OS option
@@ -795,6 +817,7 @@ async function loadLSFConfig() {
                     
                     if (os.name === defaultOs) {
                         optionElement.selected = true;
+                        optionElement.defaultSelected = true; // Set default for form.reset()
                         foundDefault = true;
                     }
                     
@@ -807,6 +830,7 @@ async function loadLSFConfig() {
                     optionElement.value = defaultOs;
                     optionElement.textContent = defaultOs + ' (Default)';
                     optionElement.selected = true;
+                    optionElement.defaultSelected = true; // Set default for form.reset()
                     osElement.appendChild(optionElement);
                 }
             }
@@ -831,8 +855,8 @@ async function loadLSFConfig() {
                 memorySlider.max = memoryOptions.length - 1;
                 memorySlider.step = 1;
                 
-                // Get default memory in GB from config
-                const defaultMemoryGB = lsfConfig.defaults.memory_gb;
+                // Get default memory in GB from user settings or config
+                const defaultMemoryGB = userLsfSettings?.memory_gb || lsfConfig.defaults.memory_gb;
                 console.log("Default memory from config:", defaultMemoryGB);
                 
                 // Get slider labels for min and max display
@@ -1340,8 +1364,17 @@ async function createVNCSession(event) {
         // Show success message
         showMessage(`VNC session created successfully. Job ID: ${result.job_id}`, 'success');
         
+        // Log cores value before reset
+        const coresBeforeReset = document.getElementById('lsf-cores');
+        console.log('Cores value BEFORE form.reset():', coresBeforeReset ? coresBeforeReset.value : 'not found');
+        console.log('Cores options BEFORE form.reset():', coresBeforeReset ? Array.from(coresBeforeReset.options).map(o => `${o.value} (selected=${o.selected}, defaultSelected=${o.defaultSelected})`) : 'not found');
+        
         // Reset form
         createVNCForm.reset();
+        
+        // Log cores value after reset
+        console.log('Cores value AFTER form.reset():', coresBeforeReset ? coresBeforeReset.value : 'not found');
+        console.log('Cores options AFTER form.reset():', coresBeforeReset ? Array.from(coresBeforeReset.options).map(o => `${o.value} (selected=${o.selected}, defaultSelected=${o.defaultSelected})`) : 'not found');
         
         // Switch to manager tab and refresh
         changeTab('vnc-manager');
@@ -1437,18 +1470,21 @@ function populateSelect(elementId, options, defaultValue) {
             
             if (option.value === defaultValue) {
                 optionElement.selected = true;
+                optionElement.defaultSelected = true; // Set default for form.reset()
                 foundDefault = true;
-                console.log(`Found matching option for default value "${defaultValue}" in ${elementId}`);
+                console.log(`Found matching option for default value "${defaultValue}" in ${elementId} (object type)`);
             }
         } else {
-            // Simple string option
+            // Simple string or number option
             optionElement.value = option;
             optionElement.textContent = option;
             
-            if (option === defaultValue) {
+            // Use loose equality (==) to match numbers and strings
+            if (option == defaultValue) {
                 optionElement.selected = true;
+                optionElement.defaultSelected = true; // Set default for form.reset()
                 foundDefault = true;
-                console.log(`Found matching option for default value "${defaultValue}" in ${elementId}`);
+                console.log(`Found matching option for default value "${defaultValue}" in ${elementId} (simple type, option=${option}, type=${typeof option})`);
             }
         }
         
@@ -1464,6 +1500,7 @@ function populateSelect(elementId, options, defaultValue) {
         optionElement.value = defaultValue;
         optionElement.textContent = defaultValue + ' (Custom)';
         optionElement.selected = true;
+        optionElement.defaultSelected = true; // Set default for form.reset()
         select.appendChild(optionElement);
         console.log(`Added custom option for default value "${defaultValue}" to ${elementId}`);
     }
