@@ -562,45 +562,27 @@ class LSFManager:
                                f"memory-reservation={memory_gb}G, memory={memory_gb + 2}G, "
                                f"memory-swap={memory_gb * 2}G")
                 
-                # Add /run/user bind mount for XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS
-                # This is required for desktop environments to access user runtime directories
-                container_cmd.extend(['--bind', '/run/user:/run/user'])
-                self.logger.info("Adding bind mount for /run/user (required for XDG/DBUS)")
-                
-                # Add SSS (System Security Services) authentication bind mounts
-                # This allows the container to use the host's authentication system
-                container_cmd.extend(['--bind', '/var/lib/sss/pipes:/var/lib/sss/pipes,/etc/nsswitch.conf:/etc/nsswitch.conf'])
-                self.logger.info("Adding bind mount for SSS authentication (pipes and nsswitch.conf)")
-                
-                # Dynamically detect all NFS and WekaFS mount points
-                # This ensures the container has access to the same mounts as the host
-                try:
-                    # Use df command to find all NFS and WekaFS mounts (excluding truenas)
-                    detect_cmd = "df -T /* | egrep 'wekafs|nfs' | grep -v truenas | awk '{print $NF}'"
-                    self.logger.debug(f"Detecting NFS/WekaFS mounts with: {detect_cmd}")
+                # Get bind paths from configuration
+                bindpaths_name = lsf_config.get('bindpaths', '')
+                if bindpaths_name:
+                    self.logger.info(f"Using configured bindpaths set: {bindpaths_name}")
+                    bindpaths = self.config_manager.get_bindpaths_by_name(bindpaths_name)
                     
-                    result = subprocess.run(detect_cmd, shell=True, check=True, 
-                                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                    nfs_mounts_output = result.stdout.decode('utf-8').strip()
-                    
-                    if nfs_mounts_output:
-                        nfs_mounts = nfs_mounts_output.split('\n')
-                        self.logger.info(f"Detected {len(nfs_mounts)} NFS/WekaFS mount points")
-                        
-                        for mount in nfs_mounts:
-                            mount = mount.strip()
-                            if mount and os.path.exists(mount):
-                                container_cmd.extend(['--bind', f'{mount}:{mount}'])
-                                self.logger.debug(f"Adding bind mount for: {mount}")
+                    if bindpaths:
+                        self.logger.info(f"Found {len(bindpaths)} paths in bindpaths set '{bindpaths_name}'")
+                        for path in bindpaths:
+                            path = path.strip()
+                            if path and os.path.exists(path):
+                                container_cmd.extend(['--bind', f'{path}:{path}'])
+                                self.logger.debug(f"Adding bind mount for: {path}")
+                            else:
+                                self.logger.warning(f"Skipping non-existent bind path: {path}")
                     else:
-                        self.logger.warning("No NFS/WekaFS mounts detected")
-                        
-                except subprocess.CalledProcessError as e:
-                    self.logger.error(f"Failed to detect NFS mounts: {e.stderr.decode('utf-8')}")
-                    self.logger.warning("Continuing without NFS bind mounts")
-                except Exception as e:
-                    self.logger.error(f"Error detecting NFS mounts: {str(e)}")
-                    self.logger.warning("Continuing without NFS bind mounts")
+                        self.logger.error(f"Bindpaths set '{bindpaths_name}' not found in configuration")
+                        self.logger.warning("No bind mounts will be added - container may not have access to shared filesystems")
+                else:
+                    self.logger.warning("No bindpaths specified in configuration")
+                    self.logger.warning("No bind mounts will be added - container may not have access to shared filesystems")
                 
                 # Add the container path
                 container_cmd.append(container_path)

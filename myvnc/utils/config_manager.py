@@ -209,6 +209,22 @@ class ConfigManager:
             if os_option.get("name") == os_name:
                 return os_option
         return None
+    
+    def get_bindpaths_by_name(self, bindpaths_name):
+        """
+        Get the bindpaths configuration by name
+        
+        Args:
+            bindpaths_name: Name of the bindpaths set (e.g., 'standard', 'minimal')
+            
+        Returns:
+            List of paths to bind, or None if not found
+        """
+        bindpaths_configs = self.lsf_config.get("bindpaths", [])
+        for bindpaths_config in bindpaths_configs:
+            if bindpaths_config.get("name") == bindpaths_name:
+                return bindpaths_config.get("paths", [])
+        return None
         
     def get_vnc_config(self):
         """Get the full VNC configuration"""

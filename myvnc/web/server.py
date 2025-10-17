@@ -1337,6 +1337,9 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 if "container" in os_config:
                     lsf_settings["container"] = os_config.get("container")
                     self.logger.info(f"Using container for OS '{os_name}': {os_config.get('container')}")
+                if "bindpaths" in os_config:
+                    lsf_settings["bindpaths"] = os_config.get("bindpaths")
+                    self.logger.info(f"Using bindpaths for OS '{os_name}': {os_config.get('bindpaths')}")
             else:
                 self.logger.warning(f"OS '{os_name}' not found in configuration, using default")
                 lsf_settings["os_select"] = "any"
