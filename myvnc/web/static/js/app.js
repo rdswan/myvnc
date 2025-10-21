@@ -1081,6 +1081,7 @@ async function refreshVNCList(withRetries = false) {
                 </td>
                 <td>${job.queue}</td>
                 <td>${job.resources_unknown ? 'Unknown' : `${job.num_cores || '-'} cores, ${job.memory_gb || '-'} GB`}</td>
+                <td>${job.os || 'N/A'}</td>
                 <td title="VNC Connection: ${connectionInfo}">${job.host || 'N/A'}</td>
                 <td>${job.port || 'N/A'}</td>
                 <td>${formattedRuntime}</td>
@@ -2017,16 +2018,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         /* Percentage-based column widths for full width usage */
-        table th:nth-child(1) { width: 10%; }  /* Job ID - increased */
-        table th:nth-child(2) { width: 12%; }  /* Name */
-        table th:nth-child(3) { width: 8%; }   /* User */
-        table th:nth-child(4) { width: 8%; }   /* Status */
-        table th:nth-child(5) { width: 10%; }  /* Queue */
-        table th:nth-child(6) { width: 12%; }  /* Resources */
-        table th:nth-child(7) { width: 10%; }  /* Host */
-        table th:nth-child(8) { width: 8%; }   /* Display */
-        table th:nth-child(9) { width: 12%; }  /* Runtime - increased */
-        table th:nth-child(10) { width: 20%; } /* Actions - reduced but still ample */
+        table th:nth-child(1) { width: 9%; }   /* Job ID */
+        table th:nth-child(2) { width: 11%; }  /* Name */
+        table th:nth-child(3) { width: 7%; }   /* User */
+        table th:nth-child(4) { width: 7%; }   /* Status */
+        table th:nth-child(5) { width: 9%; }   /* Queue */
+        table th:nth-child(6) { width: 11%; }  /* Resources */
+        table th:nth-child(7) { width: 9%; }   /* OS */
+        table th:nth-child(8) { width: 9%; }   /* Host */
+        table th:nth-child(9) { width: 7%; }   /* Display */
+        table th:nth-child(10) { width: 10%; } /* Runtime */
+        table th:nth-child(11) { width: 18%; } /* Actions */
         
         /* Add proper cell padding to prevent overlap */
         table th, table td {
@@ -2541,6 +2543,7 @@ async function refreshManagerList() {
                 <td><span class="status-badge ${statusClass}">${job.status}</span></td>
                 <td>${job.queue}</td>
                 <td>${job.resources_unknown ? 'Unknown' : `${job.num_cores || '-'} cores, ${job.memory_gb || '-'} GB`}</td>
+                <td>${job.os || 'N/A'}</td>
                 <td title="VNC Connection: ${connectionInfo}">${job.host || 'N/A'}</td>
                 <td>${job.port || 'N/A'}</td>
                 <td>${formattedRuntime}</td>

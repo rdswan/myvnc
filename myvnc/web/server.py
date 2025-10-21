@@ -888,11 +888,15 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                                     
                         # Log final resources for debugging
                         self.logger.debug(f"Job {job_id} final resources - num_cores: {job.get('num_cores', 'None')}, memory_gb: {job.get('memory_gb', 'None')}")
+                        self.logger.debug(f"Job {job_id} OS field: {job.get('os', 'NOT SET')}")
                         user_jobs.append(job)
                 except Exception as e:
                     self.logger.error(f"Error processing job {job.get('job_id', 'unknown')}: {str(e)}")
             
             self.logger.info(f"Sending {len(user_jobs)} processed jobs to client")
+            # Log a sample job to see what's being sent
+            if user_jobs:
+                self.logger.debug(f"Sample job data: {user_jobs[0]}")
             self.send_json_response(user_jobs)
         except Exception as e:
             self.logger.error(f"Error handling VNC sessions request: {str(e)}")

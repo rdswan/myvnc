@@ -788,6 +788,7 @@ class LSFManager:
                     command = parts[9] if len(parts) > 9 else ""
                     
                     self.logger.debug(f"Job {job_id}: status={status}, user={job_user}, host={first_host}")
+                    self.logger.debug(f"Job {job_id}: combined_resreq='{combined_resreq}'")
                     
                     # Format run time
                     run_time_parts = run_time.split(':')
@@ -851,6 +852,77 @@ class LSFManager:
                                         memory_gb = mem_value
                                 except:
                                     self.logger.warning(f"Error converting memory value: {mem_match.group(0)}")
+                    
+                    # Extract OS information from combined_resreq or command
+                    os_name = 'N/A'
+                    
+                    # First check if a container is being used (look for .sif in command)
+                    container_used = False
+                    if command and '.sif' in command:
+                        self.logger.info(f"[OS_EXTRACT] Job {job_id}: Container detected in command")
+                        try:
+                            os_options = self.config_manager.lsf_config.get('os_options', [])
+                            
+                            # Try to match container path to OS options
+                            for os_option in os_options:
+                                container_path = os_option.get('container', '')
+                                if container_path and container_path in command:
+                                    # Format as "Name (Description)"
+                                    name = os_option.get('name', '')
+                                    description = os_option.get('description', '')
+                                    if description:
+                                        os_name = f"{name} ({description})"
+                                    else:
+                                        os_name = name
+                                    self.logger.info(f"[OS_EXTRACT] Matched container: {container_path} -> {os_name}")
+                                    container_used = True
+                                    break
+                            
+                            if not container_used:
+                                # Extract just the .sif filename for display
+                                sif_match = re.search(r'([^/\s]+\.sif)', command)
+                                if sif_match:
+                                    os_name = f"Container ({sif_match.group(1)})"
+                                    self.logger.info(f"[OS_EXTRACT] Unknown container: {os_name}")
+                                    container_used = True
+                        except Exception as e:
+                            self.logger.warning(f"[OS_EXTRACT] Error extracting container info: {str(e)}")
+                    
+                    # If no container, check the combined_resreq for OS selection
+                    if not container_used and combined_resreq:
+                        # Look for OS selection patterns in combined_resreq
+                        # The format can be: select[(rh810) && (type == any )] or select[rh810] etc.
+                        # We need to extract just the OS identifier (rh810, rh96, c7, etc.)
+                        self.logger.info(f"[OS_EXTRACT] Job {job_id}: combined_resreq='{combined_resreq}'")
+                        try:
+                            os_options = self.config_manager.lsf_config.get('os_options', [])
+                            self.logger.info(f"[OS_EXTRACT] Available OS options: {[opt.get('select') for opt in os_options]}")
+                            
+                            # Try to match each known OS select value in the combined_resreq
+                            for os_option in os_options:
+                                os_select = os_option.get('select', '')
+                                if not os_select or os_select == 'any':
+                                    continue
+                                
+                                # Simple substring match - check if os_select appears in combined_resreq
+                                if os_select in combined_resreq:
+                                    # Format as "Name (Description)"
+                                    name = os_option.get('name', os_select)
+                                    description = os_option.get('description', '')
+                                    if description:
+                                        os_name = f"{name} ({description})"
+                                    else:
+                                        os_name = name
+                                    self.logger.info(f"[OS_EXTRACT] Matched OS: {os_select} -> {os_name}")
+                                    break
+                            
+                            if os_name == 'N/A':
+                                self.logger.info(f"[OS_EXTRACT] No OS match found in combined_resreq: '{combined_resreq}'")
+                        except Exception as e:
+                            self.logger.warning(f"[OS_EXTRACT] Error mapping OS selection: {str(e)}")
+                            os_name = 'N/A'
+                    elif not container_used:
+                        self.logger.info(f"[OS_EXTRACT] Job {job_id}: combined_resreq is empty")
                     
                     # Get VNC connection details
                     display = None
@@ -947,7 +1019,8 @@ class LSFManager:
                         'runtime': runtime_display,  # Explicitly include runtime
                         'runtime_display': runtime_display,  # Add runtime_display for consistency with client
                         'run_time_seconds': run_time_seconds if 'run_time_seconds' in locals() else 0,
-                        'resource_req': combined_resreq  # Add the raw resource requirements string
+                        'resource_req': combined_resreq,  # Add the raw resource requirements string
+                        'os': os_name  # Add the OS name
                     }
                     
                     # Add resource information based on what we found
@@ -1133,7 +1206,8 @@ class LSFManager:
                                 'cores': None,
                                 'mem_gb': None,
                                 'memory_gb': None,
-                                'resources_unknown': True
+                                'resources_unknown': True,
+                                'os': 'N/A'  # Add OS field
                             }
                             jobs.append(job)
                             continue
@@ -1162,6 +1236,46 @@ class LSFManager:
                         else:
                             self.logger.debug(f"No memory information found in combined_resreq: {combined_resreq}")
                     
+                    # Extract OS information from combined_resreq or command
+                    os_name = 'N/A'
+                    
+                    # Get command if available (need to query bjobs for it)
+                    # For the standard method, we don't have command in the fields, so we'll just check combined_resreq
+                    # Container detection would need a separate bjobs query which we can add if needed
+                    
+                    if combined_resreq:
+                        # Look for OS selection patterns in combined_resreq
+                        self.logger.info(f"[OS_EXTRACT_STD] Job {fields[0].strip()}: combined_resreq='{combined_resreq}'")
+                        try:
+                            os_options = self.config_manager.lsf_config.get('os_options', [])
+                            self.logger.info(f"[OS_EXTRACT_STD] Available OS options: {[opt.get('select') for opt in os_options]}")
+                            
+                            # Try to match each known OS select value in the combined_resreq
+                            for os_option in os_options:
+                                os_select = os_option.get('select', '')
+                                if not os_select or os_select == 'any':
+                                    continue
+                                
+                                # Simple substring match - check if os_select appears in combined_resreq
+                                if os_select in combined_resreq:
+                                    # Format as "Name (Description)"
+                                    name = os_option.get('name', os_select)
+                                    description = os_option.get('description', '')
+                                    if description:
+                                        os_name = f"{name} ({description})"
+                                    else:
+                                        os_name = name
+                                    self.logger.info(f"[OS_EXTRACT_STD] Matched OS: {os_select} -> {os_name}")
+                                    break
+                            
+                            if os_name == 'N/A':
+                                self.logger.info(f"[OS_EXTRACT_STD] No OS match found in combined_resreq: '{combined_resreq}'")
+                        except Exception as e:
+                            self.logger.warning(f"[OS_EXTRACT_STD] Error mapping OS selection: {str(e)}")
+                            os_name = 'N/A'
+                    else:
+                        self.logger.info(f"[OS_EXTRACT_STD] Job {fields[0].strip()}: combined_resreq is empty")
+                    
                     # Create basic job info
                     job = {
                         'job_id': fields[0].strip(),
@@ -1175,7 +1289,8 @@ class LSFManager:
                         'runtime_display': 'N/A',  # Add runtime_display for consistency with client
                         'submit_time': submit_time,
                         'submit_time_raw': submit_time_raw,
-                        'resource_req': combined_resreq  # Add the raw resource requirements string
+                        'resource_req': combined_resreq,  # Add the raw resource requirements string
+                        'os': os_name  # Add the OS name
                     }
                     
                     # Add resource information based on what we found
