@@ -973,6 +973,55 @@ function findClosestMemoryOption(options, currentValue) {
     return closestOption;
 }
 
+// Format runtime from seconds to readable format (days, hours, minutes)
+function formatRuntime(runtime) {
+    // If runtime is N/A or undefined, return as is
+    if (!runtime || runtime === 'N/A' || runtime === '-') {
+        return 'N/A';
+    }
+    
+    // If it's already formatted with d/h/m, return as is
+    if (typeof runtime === 'string' && (runtime.match(/\d+d/) || runtime.match(/\d+h \d+m/))) {
+        return runtime;
+    }
+    
+    // Try to parse as seconds
+    let seconds = 0;
+    if (typeof runtime === 'number') {
+        seconds = runtime;
+    } else if (typeof runtime === 'string') {
+        // Handle "X second(s)" format
+        const secondsMatch = runtime.match(/(\d+)\s*second/i);
+        if (secondsMatch) {
+            seconds = parseInt(secondsMatch[1]);
+        } else {
+            // Try to parse as plain integer
+            seconds = parseInt(runtime);
+        }
+        
+        if (isNaN(seconds)) {
+            return runtime; // Return original if can't parse
+        }
+    }
+    
+    // Convert seconds to days, hours, minutes
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    
+    // Build formatted string
+    const parts = [];
+    if (days > 0) {
+        parts.push(`${days}d`);
+    }
+    if (hours > 0 || days > 0) {
+        parts.push(`${hours}h`);
+    }
+    parts.push(`${minutes}m`);
+    
+    return parts.join(' ');
+}
+
 // Refresh VNC List
 async function refreshVNCList(withRetries = false) {
     // Track if this function was directly called (not via click handler)
@@ -1018,6 +1067,9 @@ async function refreshVNCList(withRetries = false) {
                 `${job.host}:${job.port}` : 
                 (job.host || 'N/A');
             
+            // Format runtime for display
+            const formattedRuntime = formatRuntime(job.runtime_display || job.runtime || 'N/A');
+            
             // Create cells
             row.innerHTML = `
                 <td>${job.job_id}</td>
@@ -1030,8 +1082,8 @@ async function refreshVNCList(withRetries = false) {
                 <td>${job.queue}</td>
                 <td>${job.resources_unknown ? 'Unknown' : `${job.num_cores || '-'} cores, ${job.memory_gb || '-'} GB`}</td>
                 <td title="VNC Connection: ${connectionInfo}">${job.host || 'N/A'}</td>
-                <td>:${job.display || 'N/A'}</td>
-                <td>${job.runtime_display || 'N/A'}</td>
+                <td>${job.port || 'N/A'}</td>
+                <td>${formattedRuntime}</td>
                 <td class="actions-cell">
                     <button class="button secondary connect-button" data-job-id="${job.job_id}" title="Connect to VNC (${connectionInfo})">
                         <i class="fas fa-plug"></i> Connect
@@ -2478,6 +2530,9 @@ async function refreshManagerList() {
             if (job.status === 'EXIT') statusClass = 'status-error';
 
             const connectionInfo = job.port ? `${job.host}:${job.port}` : (job.host || 'N/A');
+            
+            // Format runtime for display
+            const formattedRuntime = formatRuntime(job.runtime_display || job.runtime || 'N/A');
 
             row.innerHTML = `
                 <td>${job.job_id}</td>
@@ -2487,8 +2542,8 @@ async function refreshManagerList() {
                 <td>${job.queue}</td>
                 <td>${job.resources_unknown ? 'Unknown' : `${job.num_cores || '-'} cores, ${job.memory_gb || '-'} GB`}</td>
                 <td title="VNC Connection: ${connectionInfo}">${job.host || 'N/A'}</td>
-                <td>:${job.display || 'N/A'}</td>
-                <td>${job.runtime_display || 'N/A'}</td>
+                <td>${job.port || 'N/A'}</td>
+                <td>${formattedRuntime}</td>
                 <td class="actions-cell">
                     <button class="button secondary connect-button" data-job-id="${job.job_id}" title="Connect to VNC (${connectionInfo})">
                         <i class="fas fa-plug"></i> Connect
