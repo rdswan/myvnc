@@ -1574,8 +1574,11 @@ function showMessage(message, type = 'info') {
     messageBox.className = `message-box ${type}`;
     messageBox.classList.remove('hidden');
     
-    // Auto-hide after 8 seconds for longer messages
-    setTimeout(hideMessage, 8000);
+    // Only auto-hide for non-error messages
+    // Error messages stay visible until manually closed
+    if (type !== 'error') {
+        setTimeout(hideMessage, 8000);
+    }
 }
 
 // Hide Message
@@ -2803,3 +2806,53 @@ function closePersistentDialog() {
         dialog.remove();
     }
 }
+
+// Test function to simulate missing home directory
+// Call from browser console: testNoHome()
+async function testNoHome() {
+    console.log('==== TESTING MISSING HOME DIRECTORY ====');
+    
+    try {
+        // Get current form values
+        const data = {
+            site: document.getElementById('vnc-site')?.value || 'default',
+            resolution: document.getElementById('vnc-resolution')?.value || '1024x768',
+            window_manager: document.getElementById('vnc-window-manager')?.value || 'xfce',
+            name: document.getElementById('vnc-name')?.value || 'Test Session',
+            num_cores: document.getElementById('lsf-cores')?.value || '2',
+            queue: document.getElementById('lsf-queue')?.value || 'interactive',
+            memory_gb: document.getElementById('lsf-memory')?.value || '2',
+            os: document.getElementById('lsf-os')?.value || 'Any',
+            nohome: true  // Testing parameter to fake missing home directory
+        };
+        
+        console.log('Sending test request with nohome=true:', data);
+        
+        const response = await fetch('/api/vnc/create', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        });
+        
+        const result = await response.json();
+        console.log('Test response:', result);
+        
+        if (!result.success) {
+            console.log('Expected error received:', result.message);
+            showMessage(`Test successful! Error message shown:\n\n${result.message}`, 'error');
+        } else {
+            console.warn('Unexpected: Request succeeded when it should have failed');
+            showMessage('Test failed: Request succeeded when it should have failed', 'warning');
+        }
+    } catch (error) {
+        console.error('Test error:', error);
+        showMessage(`Test error: ${error.message}`, 'error');
+    }
+    
+    console.log('==== TEST COMPLETE ====');
+}
+
+// Export the test function to the window object so it can be called from the console
+window.testNoHome = testNoHome;

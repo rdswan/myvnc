@@ -357,13 +357,15 @@ class LSFManager:
             
             raise LSFError(stderr.strip(), stderr=stderr, stdout=stdout)
     
-    def submit_vnc_job(self, vnc_config: Dict, lsf_config: Dict, authenticated_user: str = None) -> str:
+    def submit_vnc_job(self, vnc_config: Dict, lsf_config: Dict, authenticated_user: str = None, fake_no_home: bool = False, server_hostname: str = None) -> str:
         """Submit a VNC job using bsub
         
         Args:
             vnc_config: VNC configuration
             lsf_config: LSF configuration
             authenticated_user: Optional authenticated username to run command as
+            fake_no_home: Testing parameter to fake missing home directory
+            server_hostname: Server hostname for error messages
             
         Returns:
             Job ID if successful
@@ -374,6 +376,35 @@ class LSFManager:
         try:
             # Get current user for fallback if no authenticated user
             user = authenticated_user if authenticated_user else os.environ.get('USER', '')
+            
+            # Check if user's home directory exists (or fake it for testing)
+            user_home = os.path.expanduser(f'~{user}')
+            home_exists = os.path.exists(user_home)
+            
+            # Allow faking missing home directory for testing
+            if fake_no_home:
+                self.logger.warning(f"Testing mode: pretending home directory {user_home} does not exist")
+                home_exists = False
+            
+            if not home_exists:
+                # Use provided hostname or fallback to generic placeholder
+                hostname = server_hostname if server_hostname else "<hostname>"
+                error_msg = (
+                    f"<strong>Home Directory Not Found</strong><br><br>"
+                    f"Your home directory does not exist yet on the system.<br><br>"
+                    f"<strong>Why this happens:</strong><br>"
+                    f"New users need to SSH to the machine at least once to initialize their home directory.<br><br>"
+                    f"<strong>How to fix this:</strong><br>"
+                    f"1. Open a terminal or SSH client<br>"
+                    f"2. Run the following command:<br><br>"
+                    f"<code style='background-color: #f0f0f0; padding: 8px 12px; border-radius: 4px; display: inline-block; font-family: monospace; font-size: 14px;'>"
+                    f"ssh {user}@{hostname}"
+                    f"</code><br><br>"
+                    f"3. Once logged in, you can log out<br>"
+                    f"4. Return here and submit your VNC job again"
+                )
+                self.logger.error(error_msg)
+                raise LSFError(error_msg)
             
             # Get the full path to bsub
             bsub_path = self.lsf_cmd_paths.get('bsub', 'bsub')
@@ -448,7 +479,7 @@ class LSFManager:
             
             # Add LSF output log file path (for both containerized and bare metal submissions)
             # %J will be replaced by the LSF job ID
-            log_file_path = '$HOME/.vnc/myvnc.%J.lsf.log'
+            log_file_path = f'~{user}/.vnc/myvnc.%J.lsf.log'
             bsub_cmd.extend(['-oo', log_file_path])
             self.logger.info(f"Setting LSF output log file: {log_file_path}")
             

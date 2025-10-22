@@ -1360,8 +1360,16 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                     authenticated_user = session.get('username')
                     self.logger.debug(f"Using authenticated user for LSF commands: {authenticated_user}")
             
+            # Check for testing parameter to fake missing home directory
+            fake_no_home = data.get("nohome", False)
+            if fake_no_home:
+                self.logger.warning("Testing mode: faking missing home directory (nohome=true)")
+            
+            # Get the server hostname for error messages
+            server_hostname = self.server_config.get("host", "localhost")
+            
             # Submit VNC job with authenticated user
-            job_id = self.lsf_manager.submit_vnc_job(vnc_settings, lsf_settings, authenticated_user)
+            job_id = self.lsf_manager.submit_vnc_job(vnc_settings, lsf_settings, authenticated_user, fake_no_home=fake_no_home, server_hostname=server_hostname)
             
             # Return result - job_id is a string, not a dictionary
             self.send_json_response({
