@@ -477,11 +477,31 @@ class LSFManager:
             if host_filter and host_filter.strip():
                 bsub_cmd.extend(['-m', host_filter])
             
-            # Add LSF output log file path (for both containerized and bare metal submissions)
+            # Set the current working directory for the job to the user's home directory
+            bsub_cmd.extend(['-cwd', user_home])
+            self.logger.info(f"Setting LSF working directory: {user_home}")
+            
+            # Add LSF output and error log file paths (for both containerized and bare metal submissions)
             # %J will be replaced by the LSF job ID
-            log_file_path = f'~{user}/.vnc/myvnc.%J.lsf.log'
-            bsub_cmd.extend(['-oo', log_file_path])
-            self.logger.info(f"Setting LSF output log file: {log_file_path}")
+            # Use the real path instead of tilde notation so LSF can properly write the logs
+            vnc_log_dir = os.path.join(user_home, '.vnc')
+            
+            # Ensure the .vnc directory exists for log file creation
+            try:
+                os.makedirs(vnc_log_dir, mode=0o755, exist_ok=True)
+                self.logger.info(f"Ensured .vnc directory exists: {vnc_log_dir}")
+            except Exception as e:
+                self.logger.warning(f"Could not create .vnc directory {vnc_log_dir}: {e}")
+            
+            # Add double quotes around the paths to handle any special characters
+            stdout_log_path = f'"{user_home}/.vnc/myvnc.%J.lsf_stdout.log"'
+            stderr_log_path = f'"{user_home}/.vnc/myvnc.%J.lsf_stderr.log"'
+            
+            bsub_cmd.extend(['-oo', stdout_log_path])
+            bsub_cmd.extend(['-eo', stderr_log_path])
+            
+            self.logger.info(f"Setting LSF stdout log file: {stdout_log_path}")
+            self.logger.info(f"Setting LSF stderr log file: {stderr_log_path}")
             
             # Add the VNC server command
             vncserver_path = vnc_config.get('vncserver_path', '/usr/bin/vncserver')
