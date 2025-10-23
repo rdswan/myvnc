@@ -377,31 +377,51 @@ class LSFManager:
             # Get current user for fallback if no authenticated user
             user = authenticated_user if authenticated_user else os.environ.get('USER', '')
             
-            # Check if user's home directory exists (or fake it for testing)
+            # Check if user's VNC password file exists (need to use setuid_runner as server owner can't read user's home)
             user_home = os.path.expanduser(f'~{user}')
-            home_exists = os.path.exists(user_home)
+            vnc_passwd_file = f'/home/{user}/.vnc/passwd'
+            passwd_exists = False
             
-            # Allow faking missing home directory for testing
+            # Allow faking missing passwd file for testing
             if fake_no_home:
-                self.logger.warning(f"Testing mode: pretending home directory {user_home} does not exist")
-                home_exists = False
+                self.logger.warning(f"Testing mode: pretending VNC password file {vnc_passwd_file} does not exist")
+                passwd_exists = False
+            else:
+                # Use setuid_runner to check if the VNC password file exists
+                # We need to run as the authenticated user to access their home directory
+                try:
+                    # Run 'test -f <filepath>' which returns 0 if file exists, 1 otherwise
+                    self.logger.info(f"Checking for VNC password file: {vnc_passwd_file}")
+                    test_cmd = ['test', '-f', vnc_passwd_file]
+                    self._run_command(test_cmd, authenticated_user)
+                    # If we get here without exception, the file exists
+                    passwd_exists = True
+                    self.logger.info(f"VNC password file exists: {vnc_passwd_file}")
+                except Exception as e:
+                    # File doesn't exist or check failed
+                    self.logger.warning(f"VNC password file check failed: {str(e)}")
+                    passwd_exists = False
             
-            if not home_exists:
+            if not passwd_exists:
                 # Use provided hostname or fallback to generic placeholder
                 hostname = server_hostname if server_hostname else "<hostname>"
                 error_msg = (
-                    f"<strong>Home Directory Not Found</strong><br><br>"
-                    f"Your home directory does not exist yet on the system.<br><br>"
+                    f"<strong>VNC Password File Not Found</strong><br><br>"
+                    f"Your VNC password file does not exist yet on the system.<br><br>"
                     f"<strong>Why this happens:</strong><br>"
-                    f"New users need to SSH to the machine at least once to initialize their home directory.<br><br>"
+                    f"VNC requires a password file to be created before you can start a VNC session.<br><br>"
                     f"<strong>How to fix this:</strong><br>"
                     f"1. Open a terminal or SSH client<br>"
-                    f"2. Run the following command:<br><br>"
+                    f"2. SSH to the machine:<br><br>"
                     f"<code style='background-color: #f0f0f0; padding: 8px 12px; border-radius: 4px; display: inline-block; font-family: monospace; font-size: 14px;'>"
                     f"ssh {user}@{hostname}"
                     f"</code><br><br>"
-                    f"3. Once logged in, you can log out<br>"
-                    f"4. Return here and submit your VNC job again"
+                    f"3. Once logged in, run the following command to create your VNC password:<br><br>"
+                    f"<code style='background-color: #f0f0f0; padding: 8px 12px; border-radius: 4px; display: inline-block; font-family: monospace; font-size: 14px;'>"
+                    f"/usr/bin/vncpasswd"
+                    f"</code><br><br>"
+                    f"4. Follow the prompts to enter and confirm your VNC password<br>"
+                    f"5. Return here and submit your VNC job again"
                 )
                 self.logger.error(error_msg)
                 raise LSFError(error_msg)
@@ -521,6 +541,11 @@ class LSFManager:
             # Only add -name if display_name has content
             if display_name and display_name.strip():
                 vncserver_cmd.extend(['-name', display_name])
+            
+            # Add the PasswordFile parameter to avoid password prompts
+            # This references the VNC password file we already verified exists
+            vncserver_cmd.extend(['-PasswordFile', vnc_passwd_file])
+            self.logger.info(f"Using VNC password file: {vnc_passwd_file}")
             
             # Calculate environment variables needed for VNC session
             # These are used for both LSF and singularity container

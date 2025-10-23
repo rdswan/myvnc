@@ -335,12 +335,12 @@ h3 {
   position: fixed;
   top: 1.5rem;
   right: 1.5rem;
-  max-width: 350px;
+  max-width: 500px;
   background-color: white;
   border-radius: var(--border-radius);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   z-index: 1000;
-  overflow: hidden;
+  overflow: visible;
   animation: slideIn 0.3s ease;
 }
 
@@ -352,8 +352,9 @@ h3 {
 .message-content {
   display: flex;
   padding: 1rem 1.5rem;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
+  gap: 1rem;
 }
 
 .message-box.success {
@@ -362,6 +363,7 @@ h3 {
 
 .message-box.error {
   border-left: 4px solid var(--danger-color);
+  max-width: 600px;
 }
 
 .message-box.info {
@@ -372,13 +374,32 @@ h3 {
   border-left: 4px solid var(--warning-color);
 }
 
+#message-text {
+  flex: 1;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  max-width: calc(100% - 2rem);
+}
+
 .close-button {
   background: none;
   border: none;
-  font-size: 1.2rem;
+  font-size: 1.5rem;
   cursor: pointer;
   color: var(--text-light);
-  margin-left: 1rem;
+  padding: 0;
+  flex-shrink: 0;
+  line-height: 1;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s ease;
+}
+
+.close-button:hover {
+  color: var(--danger-color);
 }
 
 /* Hidden */
