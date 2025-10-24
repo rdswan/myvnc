@@ -6,12 +6,14 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QFormLayout, QSpinBox, QComboBox)
 from PyQt6.QtCore import Qt, QTimer
 from .vnc_manager import VNCManager, VNCServer
+from .utils.config_manager import ConfigManager
 import sys
 
 class VNCManagerGUI(QMainWindow):
-    def __init__(self):
+    def __init__(self, config_manager=None):
         super().__init__()
         self.vnc_manager = VNCManager()
+        self.config_manager = config_manager if config_manager else ConfigManager()
         self.init_ui()
         
         # Update server list every 5 seconds
@@ -43,9 +45,9 @@ class VNCManagerGUI(QMainWindow):
         self.display_input = QSpinBox()
         self.display_input.setRange(1, 99)
         self.resolution_input = QComboBox()
-        self.resolution_input.addItems(['1024x768', '1280x1024', '1920x1080'])
+        self.resolution_input.addItems(self.config_manager.get_available_resolutions())
         self.window_manager_input = QComboBox()
-        self.window_manager_input.addItems(['gnome', 'kde', 'xfce'])
+        self.window_manager_input.addItems(self.config_manager.get_available_window_managers())
 
         form_layout.addRow('Name:', self.name_input)
         form_layout.addRow('Host:', self.host_input)

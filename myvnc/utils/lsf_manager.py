@@ -551,7 +551,7 @@ class LSFManager:
             
             # Calculate environment variables needed for VNC session
             # These are used for both LSF and singularity container
-            window_manager = vnc_config.get('window_manager', 'gnome')
+            window_manager = vnc_config.get('window_manager')
             user_uid = None
             xdg_runtime_dir = None
             dbus_session_bus_address = None

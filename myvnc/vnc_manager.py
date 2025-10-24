@@ -7,7 +7,7 @@ from typing import List, Dict, Optional
 
 class VNCServer:
     def __init__(self, name: str, host: str, port: int, display: int, 
-                 resolution: str = "1024x768", window_manager: str = "gnome"):
+                 resolution: str = "1024x768", window_manager: str = None):
         self.name = name
         self.host = host
         self.port = port
