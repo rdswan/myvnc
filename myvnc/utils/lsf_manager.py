@@ -300,10 +300,12 @@ class LSFManager:
         if lsf_command in self.lsf_cmd_paths:
             # Replace the command with its full path
             modified_cmd[0] = self.lsf_cmd_paths[lsf_command]
-            
-            # Use setuid binary to run as the authenticated user, but only if we have one
-            if authenticated_user:
-                modified_cmd = [self.setuid_binary, authenticated_user] + modified_cmd
+        
+        # Use setuid binary to run as the authenticated user whenever authenticated_user is provided
+        # This is needed for both LSF commands AND other commands (like 'test -f') that need to
+        # access the user's home directory or other files they own
+        if authenticated_user:
+            modified_cmd = [self.setuid_binary, authenticated_user] + modified_cmd
         
         # For logging and debugging
         cmd_str = ' '.join(str(arg) for arg in cmd)
