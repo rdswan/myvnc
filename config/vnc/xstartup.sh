@@ -30,7 +30,7 @@ xsetroot -solid grey
 vncconfig -iconic &
 
 # Get window manager from the command line or use default
-WM="${WINDOW_MANAGER:-gnome}"
+WM="${WINDOW_MANAGER:-xfce}"
 echo "Using window manager: $WM"
 
 # Get script directory - this is where the window manager configs are located
