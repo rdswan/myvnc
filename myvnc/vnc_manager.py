@@ -35,12 +35,14 @@ class VNCManager:
         """Start a VNC server with the given configuration."""
         try:
             # Construct the VNC server command
+            # Replace spaces with underscores in the name to avoid vncserver issues
+            safe_name = server.name.replace(' ', '_')
             cmd = [
                 "vncserver",
                 f":{server.display}",
                 "-geometry", server.resolution,
                 "-depth", "24",
-                "-name", server.name
+                "-name", safe_name
             ]
             
             # Start the VNC server

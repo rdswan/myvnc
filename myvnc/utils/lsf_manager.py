@@ -180,7 +180,9 @@ class LSFManager:
                 cmd.extend(['-m', f'{site_domain}-*'])
                 
             # Add the VNC command
-            vnc_cmd = f"{vnc_config['vncserver_path']} -geometry {vnc_config['resolution']} -depth {vnc_config['color_depth']} -name {vnc_config['name']}"
+            # Replace spaces with underscores in the name to avoid vncserver issues
+            safe_name = vnc_config['name'].replace(' ', '_')
+            vnc_cmd = f"{vnc_config['vncserver_path']} -geometry {vnc_config['resolution']} -depth {vnc_config['color_depth']} -name {safe_name}"
             cmd.append(vnc_cmd)
             
             # Try to run 'bsub -h' to test if bsub works
@@ -541,8 +543,10 @@ class LSFManager:
             
             # Add display name parameter to vncserver command only if specified
             # Only add -name if display_name has content
+            # Replace spaces with underscores in the name to avoid vncserver issues
             if display_name and display_name.strip():
-                vncserver_cmd.extend(['-name', display_name])
+                safe_display_name = display_name.replace(' ', '_')
+                vncserver_cmd.extend(['-name', safe_display_name])
             
             # Add the PasswordFile parameter to avoid password prompts
             # This references the VNC password file we already verified exists
