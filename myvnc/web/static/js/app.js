@@ -495,8 +495,31 @@ async function loadVNCConfig() {
         clearAndPopulateDropdown(resolutionSelect, vncConfig.resolutions);
         clearAndPopulateDropdown(windowManagerSelect, availableWindowManagers);
         
-        // Now set the selected values - prioritize user settings if available
+        // Validate user settings against available options (respect manager overrides)
         if (userVncSettings) {
+            // If user setting is not in available options, clear it to use default
+            if (userVncSettings.window_manager && !availableWindowManagers.includes(userVncSettings.window_manager)) {
+                console.warn(`User's window manager "${userVncSettings.window_manager}" not in available options, will use default`);
+                userVncSettings.window_manager = null;
+            }
+            if (userVncSettings.site && !vncConfig.sites.includes(userVncSettings.site)) {
+                console.warn(`User's site "${userVncSettings.site}" not in available options, will use default`);
+                userVncSettings.site = null;
+            }
+            if (userVncSettings.resolution && !vncConfig.resolutions.includes(userVncSettings.resolution)) {
+                console.warn(`User's resolution "${userVncSettings.resolution}" not in available options, will use default`);
+                userVncSettings.resolution = null;
+            }
+        }
+        
+        // Also validate defaults against available options
+        if (vncConfig.defaults.window_manager && !availableWindowManagers.includes(vncConfig.defaults.window_manager)) {
+            console.warn(`Default window manager "${vncConfig.defaults.window_manager}" not in available options, using first available`);
+            vncConfig.defaults.window_manager = availableWindowManagers[0];
+        }
+        
+        // Now set the selected values - prioritize user settings if available
+        if (userVncSettings && (userVncSettings.site || userVncSettings.resolution || userVncSettings.window_manager)) {
             console.log('Setting dropdown values from user settings');
             
             // After populating the dropdowns, wait longer to ensure the DOM has fully updated
@@ -688,6 +711,12 @@ function changeTab(tabId) {
         }
     } else if (tabId === 'vnc-manager') {
         refreshVNCList();
+    } else if (tabId === 'vnc-creator') {
+        // Reload VNC and LSF configuration to pick up any manager overrides or user settings updates
+        Promise.all([
+            loadVNCConfig(),
+            loadLSFConfig()
+        ]);
     } else if (tabId === 'debug-panel') {
         loadDebugInfo();
     }
@@ -847,17 +876,29 @@ async function loadLSFConfig() {
             console.warn('Error fetching user LSF settings:', e);
         }
         
-        // Use user settings if available, otherwise use defaults
-        const defaultQueue = userLsfSettings?.queue || lsfConfig.defaults.queue;
-        const defaultCores = userLsfSettings?.num_cores || lsfConfig.defaults.num_cores;
-        
-        console.log("Using queue default:", defaultQueue);
-        console.log("Using cores default:", defaultCores);
-        
         // Use enabled options if available, otherwise fall back to all options
         const availableCores = lsfConfig.enabled_cores || lsfConfig.core_options;
         const availableQueues = lsfConfig.enabled_queues || lsfConfig.queues;
         const availableOsOptions = lsfConfig.enabled_os_options || lsfConfig.os_options;
+        
+        // Use user settings if available, otherwise use defaults
+        // But ensure the default is in the available options (respect manager overrides)
+        let defaultQueue = userLsfSettings?.queue || lsfConfig.defaults.queue;
+        let defaultCores = userLsfSettings?.num_cores || lsfConfig.defaults.num_cores;
+        
+        // Validate that defaults are in the available options
+        // If not, use the first available option (important for manager overrides)
+        if (availableQueues && !availableQueues.includes(defaultQueue)) {
+            console.warn(`Default queue "${defaultQueue}" not in available queues, using first available: ${availableQueues[0]}`);
+            defaultQueue = availableQueues[0];
+        }
+        if (availableCores && !availableCores.includes(defaultCores)) {
+            console.warn(`Default cores "${defaultCores}" not in available cores, using first available: ${availableCores[0]}`);
+            defaultCores = availableCores[0];
+        }
+        
+        console.log("Using queue default:", defaultQueue);
+        console.log("Using cores default:", defaultCores);
         
         // Populate select fields
         populateSelect('lsf-queue', availableQueues, defaultQueue);
@@ -871,8 +912,15 @@ async function loadLSFConfig() {
                 osElement.innerHTML = '';
                 
                 // Get default OS from user settings or config
-                const defaultOs = userLsfSettings?.os || lsfConfig.defaults.os || "Any";
-                let foundDefault = false;
+                let defaultOs = userLsfSettings?.os || lsfConfig.defaults.os || "Any";
+                
+                // Validate that default is in available options (respect manager overrides)
+                // If not, use the first available option
+                const availableOsNames = availableOsOptions.map(os => os.name);
+                if (!availableOsNames.includes(defaultOs)) {
+                    console.warn(`Default OS "${defaultOs}" not in available OS options, using first available: ${availableOsNames[0]}`);
+                    defaultOs = availableOsNames[0] || "Any";
+                }
                 
                 // Add each OS option
                 availableOsOptions.forEach(os => {
@@ -883,21 +931,10 @@ async function loadLSFConfig() {
                     if (os.name === defaultOs) {
                         optionElement.selected = true;
                         optionElement.defaultSelected = true; // Set default for form.reset()
-                        foundDefault = true;
                     }
                     
                     osElement.appendChild(optionElement);
                 });
-                
-                // If default not found, add it
-                if (!foundDefault && defaultOs) {
-                    const optionElement = document.createElement('option');
-                    optionElement.value = defaultOs;
-                    optionElement.textContent = defaultOs + ' (Default)';
-                    optionElement.selected = true;
-                    optionElement.defaultSelected = true; // Set default for form.reset()
-                    osElement.appendChild(optionElement);
-                }
             }
         }
         
