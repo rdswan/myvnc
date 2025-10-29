@@ -2261,6 +2261,21 @@ def run_server(host=None, port=None, directory=None, config=None):
     
     logger.info(f"Ensuring data directory exists: {data_dir}")
     
+    # Verify and repair database integrity
+    logger.info("Verifying database integrity...")
+    try:
+        db_manager = DatabaseManager(data_dir=data_dir)
+        success, message, issues = db_manager.verify_database_integrity()
+        
+        if success:
+            logger.info(f"✓ Database verification: {message}")
+        else:
+            logger.error(f"✗ Database verification failed: {message}")
+            logger.error("Server startup will continue, but database issues may cause problems")
+    except Exception as e:
+        logger.error(f"Error during database verification: {str(e)}")
+        logger.error("Server startup will continue, but database issues may cause problems")
+    
     # Set serving directory
     os.chdir(directory)
     logger.info(f"Changed working directory to: {os.getcwd()}")

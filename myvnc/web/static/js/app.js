@@ -68,9 +68,14 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Initialize Manager Mode sub-tabs
     const managerSubtabs = document.querySelectorAll('.manager-subtab-button');
-    managerSubtabs.forEach(subtab => {
-        subtab.addEventListener('click', () => {
-            const subtabId = subtab.getAttribute('data-subtab');
+    console.log(`Found ${managerSubtabs.length} manager subtabs`);
+    managerSubtabs.forEach((subtab, index) => {
+        const subtabId = subtab.getAttribute('data-subtab');
+        console.log(`Attaching click listener to subtab ${index}: ${subtabId}`);
+        subtab.addEventListener('click', (event) => {
+            console.log(`Manager subtab clicked: ${subtabId}`);
+            event.preventDefault();
+            event.stopPropagation();
             changeManagerSubtab(subtabId);
         });
     });

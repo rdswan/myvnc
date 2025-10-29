@@ -275,12 +275,14 @@
             font-size: 1rem;
             font-weight: 500;
             color: #666;
-            cursor: pointer;
+            cursor: pointer !important;
             border-bottom: 3px solid transparent;
             transition: all 0.3s ease;
             display: flex;
             align-items: center;
             gap: 0.5rem;
+            position: relative;
+            z-index: 10;
         }
         
         .manager-subtab-button:hover {
@@ -486,10 +488,10 @@
         <div id="manager-mode" class="tab-content" style="display: none;">
             <!-- Manager Mode Sub-tabs -->
             <div class="manager-subtabs">
-                <button class="manager-subtab-button active" data-subtab="user-sessions">
+                <button class="manager-subtab-button active" data-subtab="user-sessions" onclick="console.log('User Sessions clicked'); changeManagerSubtab('user-sessions');">
                     <i class="fas fa-list"></i> User Sessions
                 </button>
-                <button class="manager-subtab-button" data-subtab="user-overrides">
+                <button class="manager-subtab-button" data-subtab="user-overrides" onclick="console.log('User Overrides clicked'); changeManagerSubtab('user-overrides');">
                     <i class="fas fa-user-cog"></i> User Overrides
                 </button>
             </div>

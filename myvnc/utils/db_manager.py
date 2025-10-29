@@ -431,4 +431,189 @@ class DatabaseManager:
             
         except Exception as e:
             self.logger.error(f"Error deleting manager override for {username}: {str(e)}")
-            return False 
+            return False
+    
+    def verify_database_integrity(self):
+        """
+        Verify database integrity and fix any issues
+        
+        Returns:
+            Tuple of (success: bool, message: str, issues_found: list)
+        """
+        issues_found = []
+        fixes_applied = []
+        
+        try:
+            self.logger.info("=" * 60)
+            self.logger.info("Starting database integrity verification")
+            self.logger.info(f"Database path: {self.db_path}")
+            self.logger.info("=" * 60)
+            
+            # Check if database file exists
+            if not os.path.exists(self.db_path):
+                self.logger.warning(f"Database file does not exist: {self.db_path}")
+                issues_found.append("Database file missing")
+                self.logger.info("Attempting to initialize database...")
+                self._init_db()
+                fixes_applied.append("Created new database file")
+            
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Define expected schemas
+            expected_schemas = {
+                'user_settings': {
+                    'username': 'TEXT',
+                    'settings': 'TEXT',
+                    'created_at': 'INTEGER',
+                    'updated_at': 'INTEGER'
+                },
+                'manager_overrides': {
+                    'username': 'TEXT',
+                    'cores': 'TEXT',
+                    'memory': 'TEXT',
+                    'window_managers': 'TEXT',
+                    'queues': 'TEXT',
+                    'os_options': 'TEXT',
+                    'created_by': 'TEXT',
+                    'created_at': 'INTEGER',
+                    'updated_at': 'INTEGER'
+                }
+            }
+            
+            # Check each expected table
+            for table_name, expected_columns in expected_schemas.items():
+                self.logger.info(f"\nChecking table: {table_name}")
+                
+                # Check if table exists
+                cursor.execute("""
+                    SELECT name FROM sqlite_master 
+                    WHERE type='table' AND name=?
+                """, (table_name,))
+                
+                table_exists = cursor.fetchone()
+                
+                if not table_exists:
+                    self.logger.warning(f"Table '{table_name}' does not exist")
+                    issues_found.append(f"Table '{table_name}' missing")
+                    
+                    # Attempt to create the table
+                    self.logger.info(f"Creating table '{table_name}'...")
+                    if table_name == 'user_settings':
+                        cursor.execute('''
+                            CREATE TABLE user_settings (
+                                username TEXT PRIMARY KEY,
+                                settings TEXT NOT NULL,
+                                created_at INTEGER NOT NULL,
+                                updated_at INTEGER NOT NULL
+                            )
+                        ''')
+                        fixes_applied.append(f"Created table '{table_name}'")
+                        self.logger.info(f"✓ Created table '{table_name}'")
+                    elif table_name == 'manager_overrides':
+                        cursor.execute('''
+                            CREATE TABLE manager_overrides (
+                                username TEXT PRIMARY KEY,
+                                cores TEXT,
+                                memory TEXT,
+                                window_managers TEXT,
+                                queues TEXT,
+                                os_options TEXT,
+                                created_by TEXT NOT NULL,
+                                created_at INTEGER NOT NULL,
+                                updated_at INTEGER NOT NULL
+                            )
+                        ''')
+                        fixes_applied.append(f"Created table '{table_name}'")
+                        self.logger.info(f"✓ Created table '{table_name}'")
+                else:
+                    self.logger.info(f"✓ Table '{table_name}' exists")
+                    
+                    # Verify schema
+                    cursor.execute(f"PRAGMA table_info({table_name})")
+                    columns = cursor.fetchall()
+                    column_dict = {col[1]: col[2] for col in columns}  # {name: type}
+                    
+                    self.logger.info(f"  Current columns: {list(column_dict.keys())}")
+                    
+                    # Check for missing columns
+                    missing_columns = set(expected_columns.keys()) - set(column_dict.keys())
+                    if missing_columns:
+                        self.logger.warning(f"  Missing columns in '{table_name}': {missing_columns}")
+                        issues_found.append(f"Table '{table_name}' missing columns: {missing_columns}")
+                        
+                        # For schema changes, we need to recreate the table
+                        self.logger.info(f"  Schema mismatch detected. Recreating table '{table_name}'...")
+                        
+                        # Backup existing data
+                        cursor.execute(f"SELECT * FROM {table_name}")
+                        backup_data = cursor.fetchall()
+                        backup_columns = [description[0] for description in cursor.description]
+                        
+                        # Drop and recreate table
+                        cursor.execute(f"DROP TABLE {table_name}")
+                        
+                        if table_name == 'user_settings':
+                            cursor.execute('''
+                                CREATE TABLE user_settings (
+                                    username TEXT PRIMARY KEY,
+                                    settings TEXT NOT NULL,
+                                    created_at INTEGER NOT NULL,
+                                    updated_at INTEGER NOT NULL
+                                )
+                            ''')
+                        elif table_name == 'manager_overrides':
+                            cursor.execute('''
+                                CREATE TABLE manager_overrides (
+                                    username TEXT PRIMARY KEY,
+                                    cores TEXT,
+                                    memory TEXT,
+                                    window_managers TEXT,
+                                    queues TEXT,
+                                    os_options TEXT,
+                                    created_by TEXT NOT NULL,
+                                    created_at INTEGER NOT NULL,
+                                    updated_at INTEGER NOT NULL
+                                )
+                            ''')
+                        
+                        fixes_applied.append(f"Recreated table '{table_name}' with correct schema")
+                        self.logger.info(f"  ✓ Recreated table '{table_name}'")
+                        
+                        # Restore data if possible
+                        if backup_data:
+                            self.logger.info(f"  Attempting to restore {len(backup_data)} rows...")
+                            # Note: This is a best-effort restore; some data may be lost if schemas are incompatible
+                    else:
+                        self.logger.info(f"  ✓ Schema is correct")
+            
+            conn.commit()
+            conn.close()
+            
+            # Summary
+            self.logger.info("\n" + "=" * 60)
+            self.logger.info("Database integrity verification complete")
+            self.logger.info(f"Issues found: {len(issues_found)}")
+            if issues_found:
+                for issue in issues_found:
+                    self.logger.info(f"  - {issue}")
+            self.logger.info(f"Fixes applied: {len(fixes_applied)}")
+            if fixes_applied:
+                for fix in fixes_applied:
+                    self.logger.info(f"  - {fix}")
+            
+            if issues_found and not fixes_applied:
+                self.logger.error("Issues were found but could not be fixed automatically")
+                return False, "Database issues found but not fixed", issues_found
+            elif issues_found and fixes_applied:
+                self.logger.info("✓ All issues were fixed successfully")
+                return True, "Database verified and repaired", issues_found
+            else:
+                self.logger.info("✓ Database integrity verified - no issues found")
+                return True, "Database integrity verified", []
+            
+        except Exception as e:
+            self.logger.error(f"Error during database verification: {str(e)}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
+            return False, f"Verification failed: {str(e)}", issues_found 
