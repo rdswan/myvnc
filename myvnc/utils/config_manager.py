@@ -228,4 +228,77 @@ class ConfigManager:
         
     def get_vnc_config(self):
         """Get the full VNC configuration"""
-        return self.vnc_config 
+        return self.vnc_config
+    
+    def get_enabled_window_managers(self):
+        """Get the list of enabled window managers (globally available by default)"""
+        # Check if enabled_window_managers exists, otherwise return all available
+        return self.vnc_config.get("enabled_window_managers", self.vnc_config.get("available_window_managers", []))
+    
+    def get_enabled_memory_options(self):
+        """Get the list of enabled memory options in GB (globally available by default)"""
+        # Check if enabled_memory_options_gb exists, otherwise return all available
+        return self.lsf_config.get("enabled_memory_options_gb", self.lsf_config.get("memory_options_gb", []))
+    
+    def get_enabled_core_options(self):
+        """Get the list of enabled core options (globally available by default)"""
+        # Check if enabled_core_options exists, otherwise return all available
+        return self.lsf_config.get("enabled_core_options", self.lsf_config.get("core_options", []))
+    
+    def get_enabled_os_options(self):
+        """Get the list of enabled OS options (globally available by default)"""
+        enabled_os_names = self.lsf_config.get("enabled_os_options", [])
+        
+        # If no enabled list, return all available OS options
+        if not enabled_os_names:
+            return self.get_os_options()
+        
+        # Filter OS options to only include enabled ones
+        all_os_options = self.get_os_options()
+        return [os_opt for os_opt in all_os_options if os_opt.get("name") in enabled_os_names]
+    
+    def get_user_specific_options(self, username, user_override=None):
+        """
+        Get options available for a specific user, considering manager overrides
+        
+        Args:
+            username: The username to get options for
+            user_override: Optional override dict (if None, will be fetched from DB)
+            
+        Returns:
+            Dictionary with user-specific options for cores, memory, window_managers, queues, os_options
+        """
+        # If override exists for user, use those options; otherwise use enabled options
+        if user_override:
+            return {
+                'cores': user_override.get('cores') if user_override.get('cores') is not None else self.get_enabled_core_options(),
+                'memory': user_override.get('memory') if user_override.get('memory') is not None else self.get_enabled_memory_options(),
+                'window_managers': user_override.get('window_managers') if user_override.get('window_managers') is not None else self.get_enabled_window_managers(),
+                'queues': user_override.get('queues') if user_override.get('queues') is not None else self.get_available_queues(),
+                'os_options': self._filter_os_options_by_names(user_override.get('os_options')) if user_override.get('os_options') is not None else self.get_enabled_os_options()
+            }
+        else:
+            # Return enabled options (global defaults)
+            return {
+                'cores': self.get_enabled_core_options(),
+                'memory': self.get_enabled_memory_options(),
+                'window_managers': self.get_enabled_window_managers(),
+                'queues': self.get_available_queues(),
+                'os_options': self.get_enabled_os_options()
+            }
+    
+    def _filter_os_options_by_names(self, os_names):
+        """
+        Filter OS options to only include those with specified names
+        
+        Args:
+            os_names: List of OS option names to include
+            
+        Returns:
+            List of OS option dictionaries
+        """
+        if not os_names:
+            return []
+        
+        all_os_options = self.get_os_options()
+        return [os_opt for os_opt in all_os_options if os_opt.get("name") in os_names] 

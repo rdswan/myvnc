@@ -259,6 +259,144 @@
             font-size: 0.85rem;
             color: #666;
         }
+        
+        /* Manager Mode Sub-tabs */
+        .manager-subtabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+            border-bottom: 2px solid #e5e5e5;
+        }
+        
+        .manager-subtab-button {
+            background: none;
+            border: none;
+            padding: 1rem 1.5rem;
+            font-size: 1rem;
+            font-weight: 500;
+            color: #666;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .manager-subtab-button:hover {
+            color: var(--color-primary);
+            background-color: rgba(120, 104, 176, 0.05);
+        }
+        
+        .manager-subtab-button.active {
+            color: var(--color-primary);
+            border-bottom-color: var(--color-primary);
+            font-weight: 600;
+        }
+        
+        .manager-subtab-content {
+            display: none;
+        }
+        
+        .manager-subtab-content.active {
+            display: block;
+        }
+        
+        /* Multi-select styling for override modal - completely override browser defaults */
+        #override-modal select[multiple] {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 0.5rem;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            appearance: none;
+        }
+        
+        /* Remove default browser highlight color */
+        #override-modal select[multiple]:focus {
+            outline: 2px solid var(--color-primary, #7868b0);
+            outline-offset: -1px;
+        }
+        
+        #override-modal select[multiple] option {
+            padding: 0.5rem;
+            border-radius: 3px;
+            margin-bottom: 2px;
+            color: #333;
+            background-color: white;
+        }
+        
+        /* ALL states for checked/selected options - MUST stay purple with white text */
+        #override-modal select[multiple] option:checked {
+            background: #7868b0 !important;
+            background-color: #7868b0 !important;
+            background-image: none !important;
+            color: #ffffff !important;
+            font-weight: 500;
+            -webkit-text-fill-color: #ffffff !important;
+            box-shadow: none !important;
+        }
+        
+        /* When the select is focused, keep checked items purple */
+        #override-modal select[multiple]:focus option:checked {
+            background: #7868b0 !important;
+            background-color: #7868b0 !important;
+            background-image: none !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            box-shadow: none !important;
+        }
+        
+        /* Hover on unchecked options */
+        #override-modal select[multiple] option:hover:not(:checked) {
+            background-color: rgba(120, 104, 176, 0.1) !important;
+        }
+        
+        /* Hover on checked options - slightly darker purple */
+        #override-modal select[multiple] option:checked:hover {
+            background: #6a5a9e !important;
+            background-color: #6a5a9e !important;
+            background-image: none !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            box-shadow: none !important;
+        }
+        
+        /* Focus on checked options when select is focused */
+        #override-modal select[multiple]:focus option:checked:hover {
+            background: #6a5a9e !important;
+            background-color: #6a5a9e !important;
+            background-image: none !important;
+            color: #ffffff !important;
+            -webkit-text-fill-color: #ffffff !important;
+            box-shadow: none !important;
+        }
+        
+        /* Force override for all highlight/selection states */
+        @supports selector(:focus-visible) {
+            #override-modal select[multiple]:focus-visible option:checked {
+                background: #7868b0 !important;
+                color: #ffffff !important;
+            }
+        }
+        
+        /* Override Chromium/Webkit specific highlight */
+        @media screen and (-webkit-min-device-pixel-ratio:0) {
+            #override-modal select[multiple]:focus option:checked,
+            #override-modal select[multiple] option:checked {
+                background: linear-gradient(#7868b0, #7868b0) !important;
+                color: #ffffff !important;
+                -webkit-text-fill-color: #ffffff !important;
+            }
+        }
+        
+        /* Override Firefox specific */
+        @-moz-document url-prefix() {
+            #override-modal select[multiple] option:checked {
+                background: #7868b0 !important;
+                color: #ffffff !important;
+            }
+        }
     </style>
 </head>
 <body>
@@ -342,48 +480,114 @@
             </div>
         </div>
         
-        <!-- Manager Mode content (duplicate of VNC Manager but lists all users) -->
+        <!-- Manager Mode content with sub-tabs -->
         <div id="manager-mode" class="tab-content" style="display: none;">
-            <div class="control-panel">
-                <button id="manager-refresh-button" class="button primary">
-                    <i class="fas fa-sync-alt"></i> Refresh
+            <!-- Manager Mode Sub-tabs -->
+            <div class="manager-subtabs">
+                <button class="manager-subtab-button active" data-subtab="user-sessions">
+                    <i class="fas fa-list"></i> User Sessions
+                </button>
+                <button class="manager-subtab-button" data-subtab="user-overrides">
+                    <i class="fas fa-user-cog"></i> User Overrides
                 </button>
             </div>
             
-            <div class="table-container">
-                <table id="manager-table">
-                    <thead>
-                        <tr>
-                            <th>Job ID</th>
-                            <th>Name</th>
-                            <th>User</th>
-                            <th>Status</th>
-                            <th>Queue</th>
-                            <th>Resources</th>
-                            <th>OS</th>
-                            <th>Host</th>
-                            <th>Display</th>
-                            <th>Runtime</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="manager-table-body">
-                        <tr class="loading-row">
-                            <td colspan="11" class="loading-cell">
-                                <div class="loading-spinner">
-                                    <i class="fas fa-spinner fa-spin"></i> Loading VNC sessions...
-                                </div>
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
+            <!-- User Sessions Sub-tab -->
+            <div id="user-sessions" class="manager-subtab-content active">
+                <div class="control-panel">
+                    <button id="manager-refresh-button" class="button primary">
+                        <i class="fas fa-sync-alt"></i> Refresh
+                    </button>
+                </div>
+                
+                <div class="table-container">
+                    <table id="manager-table">
+                        <thead>
+                            <tr>
+                                <th>Job ID</th>
+                                <th>Name</th>
+                                <th>User</th>
+                                <th>Status</th>
+                                <th>Queue</th>
+                                <th>Resources</th>
+                                <th>OS</th>
+                                <th>Host</th>
+                                <th>Display</th>
+                                <th>Runtime</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="manager-table-body">
+                            <tr class="loading-row">
+                                <td colspan="11" class="loading-cell">
+                                    <div class="loading-spinner">
+                                        <i class="fas fa-spinner fa-spin"></i> Loading VNC sessions...
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div id="manager-no-vnc-message" class="message-container">
+                    <div class="empty-state">
+                        <i class="fas fa-desktop empty-icon"></i>
+                        <p>No active VNC sessions found.</p>
+                        <p class="note">If you believe this is an error, please check if LSF is properly configured and available.</p>
+                    </div>
+                </div>
             </div>
             
-            <div id="manager-no-vnc-message" class="message-container">
-                <div class="empty-state">
-                    <i class="fas fa-desktop empty-icon"></i>
-                    <p>No active VNC sessions found.</p>
-                    <p class="note">If you believe this is an error, please check if LSF is properly configured and available.</p>
+            <!-- User Overrides Sub-tab -->
+            <div id="user-overrides" class="manager-subtab-content" style="display: none;">
+                <div class="form-card">
+                    <h2 class="form-title">User Overrides</h2>
+                    <p style="margin-bottom: 1.5rem; color: #666;">
+                        Configure user-specific resource overrides. Select options from all supported configurations to enable them for specific users.
+                    </p>
+                    
+                    <div class="control-panel">
+                        <button id="add-override-button" class="button primary" onclick="console.log('Button clicked directly'); if(typeof openOverrideModal === 'function') { openOverrideModal(); } else { console.error('openOverrideModal not defined'); }">
+                            <i class="fas fa-plus"></i> Add User Override
+                        </button>
+                        <button id="refresh-overrides-button" class="button secondary" onclick="console.log('Refresh clicked directly'); if(typeof loadManagerOverrides === 'function') { loadManagerOverrides(); } else { console.error('loadManagerOverrides not defined'); }">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
+                    </div>
+                    
+                    <div class="table-container">
+                        <table id="overrides-table">
+                            <thead>
+                                <tr>
+                                    <th>Username</th>
+                                    <th>Cores</th>
+                                    <th>Memory (GB)</th>
+                                    <th>Window Managers</th>
+                                    <th>Queues</th>
+                                    <th>OS Options</th>
+                                    <th>Created By</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="overrides-table-body">
+                                <tr class="loading-row">
+                                    <td colspan="8" class="loading-cell">
+                                        <div class="loading-spinner">
+                                            <i class="fas fa-spinner fa-spin"></i> Loading overrides...
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div id="no-overrides-message" class="message-container" style="display: none;">
+                        <div class="empty-state">
+                            <i class="fas fa-user-shield empty-icon"></i>
+                            <p>No user overrides configured.</p>
+                            <p class="note">Click "Add User Override" to create a custom configuration for a user.</p>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -610,6 +814,75 @@
         </div>
     </div>
     
+    <!-- Manager Override Modal -->
+    <div id="override-modal" class="modal-overlay">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h3 class="modal-title" id="override-modal-title">Add User Override</h3>
+                <button class="modal-close" onclick="closeOverrideModal();">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-section">
+                    <div class="form-group">
+                        <label for="override-username">Username</label>
+                        <div class="input-with-icon">
+                            <i class="fas fa-user icon-left"></i>
+                            <input type="text" id="override-username" name="username" placeholder="Enter username" required>
+                        </div>
+                    </div>
+                    
+                    <h3>Resource Overrides</h3>
+                    <p style="color: #666; font-size: 0.9rem; margin-bottom: 1rem;">
+                        Select from all supported options to enable for this user. Leave empty to use global defaults.
+                    </p>
+                    
+                    <div class="form-group">
+                        <label for="override-cores">CPU Cores (select multiple with Ctrl/Cmd)</label>
+                        <select id="override-cores" name="cores" multiple style="height: 100px;">
+                            <!-- Options will be loaded from configuration -->
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="override-memory">Memory (GB) (select multiple with Ctrl/Cmd)</label>
+                        <select id="override-memory" name="memory" multiple style="height: 100px;">
+                            <!-- Options will be loaded from configuration -->
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="override-window-managers">Window Managers (select multiple with Ctrl/Cmd)</label>
+                        <select id="override-window-managers" name="window_managers" multiple style="height: 80px;">
+                            <!-- Options will be loaded from configuration -->
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="override-queues">Queues (select multiple with Ctrl/Cmd)</label>
+                        <select id="override-queues" name="queues" multiple style="height: 80px;">
+                            <!-- Options will be loaded from configuration -->
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="override-os-options">Operating Systems (select multiple with Ctrl/Cmd)</label>
+                        <select id="override-os-options" name="os_options" multiple style="height: 120px;">
+                            <!-- Options will be loaded from configuration -->
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="button secondary" onclick="closeOverrideModal();">
+                    <i class="fas fa-times"></i> Cancel
+                </button>
+                <button id="save-override-button" class="button primary" onclick="saveOverride();">
+                    <i class="fas fa-save"></i> Save Override
+                </button>
+            </div>
+        </div>
+    </div>
+    
     <footer>
         <p>&copy; 2025 Tenstorrent AI ULC - Apache License 2.0</p>
     </footer>
@@ -619,6 +892,7 @@
     <script src="js/auth.js"></script>
     <script src="js/modal.js"></script>
     <script src="js/settings.js"></script>
+    <script src="js/manager_overrides.js"></script>
     
     <!-- Override confirm dialog -->
     <script>

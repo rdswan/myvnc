@@ -66,6 +66,15 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     });
     
+    // Initialize Manager Mode sub-tabs
+    const managerSubtabs = document.querySelectorAll('.manager-subtab-button');
+    managerSubtabs.forEach(subtab => {
+        subtab.addEventListener('click', () => {
+            const subtabId = subtab.getAttribute('data-subtab');
+            changeManagerSubtab(subtabId);
+        });
+    });
+    
     // Set up other event listeners
     if (refreshButton) {
         refreshButton.addEventListener('click', () => {
@@ -479,9 +488,12 @@ async function loadVNCConfig() {
         }
         
         // Clear and populate dropdowns with options
+        // Use enabled_window_managers if available, otherwise fall back to all window_managers
+        const availableWindowManagers = vncConfig.enabled_window_managers || vncConfig.window_managers;
+        
         clearAndPopulateDropdown(siteSelect, vncConfig.sites);
         clearAndPopulateDropdown(resolutionSelect, vncConfig.resolutions);
-        clearAndPopulateDropdown(windowManagerSelect, vncConfig.window_managers);
+        clearAndPopulateDropdown(windowManagerSelect, availableWindowManagers);
         
         // Now set the selected values - prioritize user settings if available
         if (userVncSettings) {
@@ -670,10 +682,58 @@ function changeTab(tabId) {
     // Trigger appropriate refresh when switching tabs
     if (tabId === 'manager-mode') {
         refreshManagerList();
+        // Initialize manager overrides if not already done
+        if (typeof initManagerOverrides === 'function') {
+            initManagerOverrides();
+        }
     } else if (tabId === 'vnc-manager') {
         refreshVNCList();
     } else if (tabId === 'debug-panel') {
         loadDebugInfo();
+    }
+}
+
+// Change Manager Mode sub-tab
+function changeManagerSubtab(subtabId) {
+    console.log('Switching to manager sub-tab:', subtabId);
+    
+    // Hide all manager sub-tab contents
+    const subtabContents = document.querySelectorAll('.manager-subtab-content');
+    subtabContents.forEach(content => {
+        content.classList.remove('active');
+        content.style.display = 'none';
+    });
+    
+    // Remove active class from all manager sub-tabs
+    const subtabButtons = document.querySelectorAll('.manager-subtab-button');
+    subtabButtons.forEach(button => {
+        button.classList.remove('active');
+    });
+    
+    // Show selected sub-tab content
+    const selectedContent = document.getElementById(subtabId);
+    if (selectedContent) {
+        selectedContent.classList.add('active');
+        selectedContent.style.display = 'block';
+    }
+    
+    // Add active class to the selected sub-tab button
+    const selectedButton = document.querySelector(`.manager-subtab-button[data-subtab="${subtabId}"]`);
+    if (selectedButton) {
+        selectedButton.classList.add('active');
+    }
+    
+    // Load data when switching to User Overrides sub-tab
+    if (subtabId === 'user-overrides') {
+        // Initialize manager overrides when switching to this tab
+        if (typeof initManagerOverrides === 'function') {
+            console.log('Calling initManagerOverrides from sub-tab change');
+            initManagerOverrides();
+        }
+        // Load the overrides data
+        if (typeof loadManagerOverrides === 'function') {
+            loadManagerOverrides();
+        }
     }
 }
 
@@ -794,12 +854,17 @@ async function loadLSFConfig() {
         console.log("Using queue default:", defaultQueue);
         console.log("Using cores default:", defaultCores);
         
+        // Use enabled options if available, otherwise fall back to all options
+        const availableCores = lsfConfig.enabled_cores || lsfConfig.core_options;
+        const availableQueues = lsfConfig.enabled_queues || lsfConfig.queues;
+        const availableOsOptions = lsfConfig.enabled_os_options || lsfConfig.os_options;
+        
         // Populate select fields
-        populateSelect('lsf-queue', lsfConfig.queues, defaultQueue);
-        populateSelect('lsf-cores', lsfConfig.core_options, defaultCores);
+        populateSelect('lsf-queue', availableQueues, defaultQueue);
+        populateSelect('lsf-cores', availableCores, defaultCores);
         
         // Populate OS options if available
-        if (lsfConfig.os_options && Array.isArray(lsfConfig.os_options)) {
+        if (availableOsOptions && Array.isArray(availableOsOptions)) {
             const osElement = document.getElementById('lsf-os');
             if (osElement) {
                 // Clear existing options
@@ -810,7 +875,7 @@ async function loadLSFConfig() {
                 let foundDefault = false;
                 
                 // Add each OS option
-                lsfConfig.os_options.forEach(os => {
+                availableOsOptions.forEach(os => {
                     const optionElement = document.createElement('option');
                     optionElement.value = os.name;
                     optionElement.textContent = os.name;
@@ -841,7 +906,8 @@ async function loadLSFConfig() {
         const memoryValue = document.getElementById('memory-value');
         
         // Get memory options from config (could be memory_options or memory_options_gb)
-        const memoryOptionsData = lsfConfig.memory_options_gb || lsfConfig.memory_options;
+        // Use enabled memory options if available, otherwise fall back to all options
+        const memoryOptionsData = lsfConfig.enabled_memory || lsfConfig.memory_options_gb || lsfConfig.memory_options;
         
         if (memorySlider && memoryValue && memoryOptionsData) {
             // Sort memory options to ensure they're in ascending order

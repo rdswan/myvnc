@@ -349,9 +349,39 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         # New User Settings API endpoint
         elif path == "/api/user/settings":
             self.handle_user_settings()
+        # Manager Overrides API endpoint
+        elif path == "/api/manager/overrides":
+            self.handle_manager_overrides()
         else:
             # Try to serve static file
             super().do_GET()
+    
+    def do_DELETE(self):
+        """Handle DELETE requests"""
+        # Parse URL path
+        parsed_path = urlparse(self.path)
+        path = parsed_path.path
+        
+        # Log the request
+        client_address = self.client_address[0] if hasattr(self, 'client_address') and self.client_address else 'unknown'
+        self.logger.info(f"DELETE request from {client_address}: {path}")
+        
+        # Check if authentication is enabled and available
+        auth_enabled = self.is_auth_enabled()
+        
+        # Only check authentication if it's enabled
+        if auth_enabled:
+            # Check authentication for protected endpoints
+            is_authenticated, message, session = self.check_auth()
+            if not is_authenticated:
+                self.send_error_response("Authentication required", 401)
+                return
+        
+        # Handle different endpoints
+        if path == "/api/manager/overrides":
+            self.handle_manager_overrides()
+        else:
+            self.send_error_response(f"Unknown endpoint: {path}", 404)
     
     def do_POST(self):
         """Handle POST requests"""
@@ -405,6 +435,9 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         # New User Settings API endpoint
         elif path == "/api/user/settings":
             self.handle_user_settings()
+        # Manager Overrides API endpoint
+        elif path == "/api/manager/overrides":
+            self.handle_manager_overrides()
         else:
             self.send_error_response(f"Unknown endpoint: {path}", 404)
     
@@ -907,6 +940,22 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         """Handle LSF configuration request"""
         try:
             self.logger.info("Handling LSF configuration request")
+            
+            # Get authenticated user
+            username = None
+            if self.is_auth_enabled():
+                is_authenticated, message, session = self.check_auth()
+                if is_authenticated:
+                    username = session.get("username", None)
+            else:
+                username = os.environ.get("USER", None)
+            
+            # Get user-specific override if it exists
+            user_override = None
+            if username:
+                user_override = self.db_manager.get_manager_override(username)
+            
+            # Get base LSF configuration
             config = {
                 'defaults': self.config_manager.get_lsf_defaults(),
                 'queues': self.config_manager.get_available_queues(),
@@ -916,6 +965,27 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 'sites': self.config_manager.get_available_sites(),
                 'os_options': self.config_manager.lsf_config.get('os_options', [])
             }
+            
+            # Add enabled/user-specific options
+            if user_override:
+                # User has override - return their specific options
+                config["enabled_cores"] = user_override.get('cores') if user_override.get('cores') is not None else self.config_manager.get_enabled_core_options()
+                config["enabled_memory"] = user_override.get('memory') if user_override.get('memory') is not None else self.config_manager.get_enabled_memory_options()
+                config["enabled_queues"] = user_override.get('queues') if user_override.get('queues') is not None else self.config_manager.get_available_queues()
+                
+                # For OS options, we need to filter the full os_options list
+                if user_override.get('os_options') is not None:
+                    os_names = user_override.get('os_options')
+                    config["enabled_os_options"] = [os_opt for os_opt in config['os_options'] if os_opt.get("name") in os_names]
+                else:
+                    config["enabled_os_options"] = self.config_manager.get_enabled_os_options()
+            else:
+                # Return globally enabled options
+                config["enabled_cores"] = self.config_manager.get_enabled_core_options()
+                config["enabled_memory"] = self.config_manager.get_enabled_memory_options()
+                config["enabled_queues"] = self.config_manager.get_available_queues()
+                config["enabled_os_options"] = self.config_manager.get_enabled_os_options()
+            
             self.logger.debug(f"Sending LSF config: {config}")
             self.send_json_response(config)
         except Exception as e:
@@ -1283,13 +1353,37 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         """Handle VNC configuration request"""
         try:
             self.logger.info("Handling VNC configuration request")
-            # Get VNC configuration
+            
+            # Get authenticated user
+            username = None
+            if self.is_auth_enabled():
+                is_authenticated, message, session = self.check_auth()
+                if is_authenticated:
+                    username = session.get("username", None)
+            else:
+                username = os.environ.get("USER", None)
+            
+            # Get user-specific override if it exists
+            user_override = None
+            if username:
+                user_override = self.db_manager.get_manager_override(username)
+            
+            # Get base VNC configuration
             config = {
                 "window_managers": self.config_manager.get_available_window_managers(),
                 "resolutions": self.config_manager.get_available_resolutions(),
                 "defaults": self.config_manager.get_vnc_defaults(),
                 "sites": self.config_manager.get_available_sites()
             }
+            
+            # Add enabled/user-specific options
+            if user_override:
+                # User has override - return their specific options
+                config["enabled_window_managers"] = user_override.get('window_managers') if user_override.get('window_managers') is not None else self.config_manager.get_enabled_window_managers()
+            else:
+                # Return globally enabled options
+                config["enabled_window_managers"] = self.config_manager.get_enabled_window_managers()
+            
             self.logger.debug(f"Sending VNC config: {config}")
             self.send_json_response(config)
         except Exception as e:
@@ -1638,6 +1732,154 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         except Exception as e:
             self.logger.error(f"Error saving user settings: {str(e)}")
             self.send_error_response(f"Error saving user settings: {str(e)}", 500)
+    
+    def handle_manager_overrides(self):
+        """Handle GET, POST, and DELETE requests for manager overrides"""
+        # Check authentication
+        if self.is_auth_enabled():
+            is_authenticated, message, session = self.check_auth()
+            if not is_authenticated:
+                self.send_error_response("Authentication required", 401)
+                return
+            
+            # Get username from session
+            manager_username = session.get("username", "unknown")
+        else:
+            # If authentication is disabled, use system username
+            manager_username = os.environ.get("USER", "unknown")
+        
+        # Verify manager permission
+        managers = self.server_config.get('managers', [])
+        if manager_username not in managers:
+            self.logger.warning(f"Unauthorized access to manager overrides by user {manager_username}")
+            self.send_error_response("Forbidden: Manager access required", 403)
+            return
+        
+        # Route to appropriate handler
+        if self.command == "GET":
+            self.handle_get_manager_overrides()
+        elif self.command == "POST":
+            self.handle_post_manager_override(manager_username)
+        elif self.command == "DELETE":
+            self.handle_delete_manager_override()
+    
+    def handle_get_manager_overrides(self):
+        """Handle GET request for all manager overrides"""
+        try:
+            # Get all overrides from database
+            self.logger.info("Getting all manager overrides")
+            overrides = self.db_manager.get_all_manager_overrides()
+            
+            # Send response
+            response = {
+                "success": True,
+                "overrides": overrides
+            }
+            
+            self.logger.info(f"Retrieved {len(overrides)} manager overrides")
+            self.send_json_response(response)
+            
+        except Exception as e:
+            self.logger.error(f"Error getting manager overrides: {str(e)}")
+            self.send_error_response(f"Error getting manager overrides: {str(e)}")
+    
+    def handle_post_manager_override(self, manager_username):
+        """Handle POST request to create/update a manager override"""
+        try:
+            self.logger.info(f"Handling POST manager override request from {manager_username}")
+            
+            # Get content length
+            content_length = int(self.headers.get('Content-Length', 0))
+            self.logger.info(f"Content length: {content_length}")
+            
+            # Read and parse request body
+            post_data = self.rfile.read(content_length).decode('utf-8')
+            self.logger.info(f"Request body: {post_data}")
+            
+            data = json.loads(post_data)
+            self.logger.info(f"Parsed data: {data}")
+            
+            # Validate request
+            if not isinstance(data, dict) or "username" not in data or "overrides" not in data:
+                self.logger.error("Invalid request structure")
+                self.send_error_response("Invalid request: 'username' and 'overrides' fields are required", 400)
+                return
+            
+            target_username = data["username"]
+            overrides = data["overrides"]
+            
+            self.logger.info(f"Target username: {target_username}")
+            self.logger.info(f"Overrides: {overrides}")
+            
+            # Validate overrides structure
+            if not isinstance(overrides, dict):
+                self.logger.error(f"Overrides is not a dict: {type(overrides)}")
+                self.send_error_response("Invalid request: 'overrides' must be an object", 400)
+                return
+            
+            # Save manager override
+            self.logger.info(f"Calling db_manager.save_manager_override for {target_username}")
+            success = self.db_manager.save_manager_override(target_username, overrides, manager_username)
+            
+            self.logger.info(f"Save result: {success}")
+            
+            if success:
+                # Send success response
+                response = {
+                    "success": True,
+                    "message": f"Override saved successfully for user {target_username}"
+                }
+                self.logger.info(f"Sending success response: {response}")
+                self.send_json_response(response)
+            else:
+                self.logger.error("Database save returned False")
+                self.send_error_response("Failed to save override", 500)
+                
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Invalid JSON in request: {str(e)}")
+            self.logger.error(f"JSON decode error traceback: {traceback.format_exc()}")
+            self.send_error_response(f"Invalid JSON in request: {str(e)}", 400)
+        except Exception as e:
+            self.logger.error(f"Error saving manager override: {str(e)}")
+            self.logger.error(f"Full traceback: {traceback.format_exc()}")
+            self.send_error_response(f"Error saving manager override: {str(e)}", 500)
+    
+    def handle_delete_manager_override(self):
+        """Handle DELETE request to remove a manager override"""
+        try:
+            # Get content length
+            content_length = int(self.headers.get('Content-Length', 0))
+            
+            # Read and parse request body
+            post_data = self.rfile.read(content_length).decode('utf-8')
+            data = json.loads(post_data)
+            
+            # Validate request
+            if not isinstance(data, dict) or "username" not in data:
+                self.send_error_response("Invalid request: 'username' field is required", 400)
+                return
+            
+            target_username = data["username"]
+            
+            # Delete manager override
+            success = self.db_manager.delete_manager_override(target_username)
+            
+            if success:
+                # Send success response
+                response = {
+                    "success": True,
+                    "message": f"Override deleted successfully for user {target_username}"
+                }
+                self.send_json_response(response)
+            else:
+                self.send_error_response("Failed to delete override", 500)
+                
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Invalid JSON in request: {str(e)}")
+            self.send_error_response(f"Invalid JSON in request: {str(e)}", 400)
+        except Exception as e:
+            self.logger.error(f"Error deleting manager override: {str(e)}")
+            self.send_error_response(f"Error deleting manager override: {str(e)}", 500)
 
     def get_server_status(self):
         """Get comprehensive server status information"""
