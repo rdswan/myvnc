@@ -743,13 +743,43 @@ class LSFManager:
                 })
             raise
     
-    def kill_vnc_job(self, job_id: str, authenticated_user: str = None) -> bool:
+    def get_job_owner(self, job_id: str, authenticated_user: str = None) -> Optional[str]:
+        """
+        Get the owner (user) of a specific job ID
+        
+        Args:
+            job_id: Job ID to query
+            authenticated_user: Optional authenticated username to run command as
+            
+        Returns:
+            Username of the job owner, or None if not found
+        """
+        try:
+            # Use bjobs to get just the user field for this job
+            cmd = ['bjobs', '-o', 'user', '-noheader', job_id]
+            output = self._run_command(cmd, authenticated_user)
+            
+            # Parse the output - should be just the username
+            if output and output.strip():
+                job_owner = output.strip()
+                self.logger.info(f"Job {job_id} is owned by user: {job_owner}")
+                return job_owner
+            else:
+                self.logger.warning(f"Could not determine owner for job {job_id}")
+                return None
+                
+        except RuntimeError as e:
+            self.logger.error(f"Error getting job owner for {job_id}: {str(e)}")
+            return None
+    
+    def kill_vnc_job(self, job_id: str, authenticated_user: str = None, reason: str = None) -> bool:
         """
         Kill a VNC job
         
         Args:
             job_id: Job ID to kill
             authenticated_user: Optional authenticated username to run command as
+            reason: Optional reason for killing the job (will be passed to bkill -C)
             
         Returns:
             True if successful, False otherwise
@@ -757,7 +787,18 @@ class LSFManager:
         self.logger.info(f"Killing VNC job: {job_id}")
         
         try:
-            result = self._run_command(['bkill', job_id], authenticated_user)
+            # Build the bkill command with optional reason
+            cmd = ['bkill']
+            
+            # Add the -C switch with reason if provided
+            if reason:
+                cmd.extend(['-C', reason])
+                self.logger.info(f"Kill reason: {reason}")
+            
+            # Add the job ID
+            cmd.append(job_id)
+            
+            result = self._run_command(cmd, authenticated_user)
             self.logger.info(f"Kill result: Job {job_id} killed successfully: {result}")
             return True
         except RuntimeError as e:

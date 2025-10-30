@@ -1496,17 +1496,19 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         try:
             # Parse path for job ID
             job_id = None
+            kill_reason = None
             path = self.path.strip("/").split("/")
             if len(path) >= 3:
                 job_id = path[-1]  # Last part of the path should be the job ID
             
-            if not job_id:
-                # If job ID is not in the path, try to read it from the request body
-                content_length = int(self.headers.get("Content-Length", 0))
-                if content_length > 0:
-                    post_data = self.rfile.read(content_length).decode("utf-8")
-                    data = json.loads(post_data)
+            # Try to read the request body for job_id and reason
+            content_length = int(self.headers.get("Content-Length", 0))
+            if content_length > 0:
+                post_data = self.rfile.read(content_length).decode("utf-8")
+                data = json.loads(post_data)
+                if not job_id:
                     job_id = data.get("job_id")
+                kill_reason = data.get("reason", "").strip()
             
             if not job_id:
                 raise ValueError("No job ID provided")
@@ -1518,10 +1520,36 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 if is_authenticated and session and 'username' in session:
                     authenticated_user = session.get('username')
                     self.logger.debug(f"Using authenticated user for LSF commands: {authenticated_user}")
+            else:
+                # If auth is not enabled, use system user
+                authenticated_user = os.environ.get('USER', 'unknown')
             
-            # Kill VNC job using the correct method name and authenticated user
-            self.logger.info(f"Stopping VNC job: {job_id}")
-            result = self.lsf_manager.kill_vnc_job(job_id, authenticated_user)
+            # Construct the full kill reason string
+            if kill_reason:
+                full_reason = f"{authenticated_user} killed this job from MyVNC for the following reason: {kill_reason}"
+            else:
+                full_reason = f"{authenticated_user} killed this job from MyVNC (no reason provided)"
+            
+            self.logger.info(f"Kill reason: {full_reason}")
+            
+            # Determine which user to use for the bkill command
+            # In Manager Mode, use the job owner; otherwise use the authenticated user
+            managers = self.server_config.get('managers', [])
+            is_manager = authenticated_user and authenticated_user in managers
+            
+            user_for_bkill = authenticated_user
+            if is_manager:
+                # Manager Mode: Get the job owner and use that for bkill
+                job_owner = self.lsf_manager.get_job_owner(job_id, authenticated_user)
+                if job_owner:
+                    user_for_bkill = job_owner
+                    self.logger.info(f"Manager {authenticated_user} killing job {job_id} owned by {job_owner}")
+                else:
+                    self.logger.warning(f"Could not determine job owner for {job_id}, using authenticated user {authenticated_user}")
+            
+            # Kill VNC job using the correct method name, appropriate user, and reason
+            self.logger.info(f"Stopping VNC job: {job_id} as user: {user_for_bkill}")
+            result = self.lsf_manager.kill_vnc_job(job_id, user_for_bkill, reason=full_reason)
             
             # Return result
             self.send_json_response({

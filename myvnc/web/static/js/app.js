@@ -1552,16 +1552,19 @@ async function createVNCSession(event) {
 
 // Kill VNC Session
 async function killVNCSession(jobId) {
-    // Create a modal confirmation dialog
+    // Create a modal dialog for kill reason
     const confirmDialog = document.createElement('div');
     confirmDialog.className = 'confirm-dialog';
     confirmDialog.innerHTML = `
         <div class="confirm-dialog-content">
-            <h3>Confirm Action</h3>
-            <p>Are you sure you want to kill VNC session ${jobId}?</p>
+            <h3>Kill VNC Session ${jobId}</h3>
+            <p>Please provide a reason for killing this session:</p>
+            <textarea id="kill-reason-input" class="kill-reason-textarea" 
+                      placeholder="Enter reason for killing this session..." 
+                      rows="4" style="width: 100%; margin: 10px 0; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-family: inherit;"></textarea>
             <div class="confirm-actions">
                 <button class="button primary cancel-button">Cancel</button>
-                <button class="button danger confirm-button">Yes, Kill Session</button>
+                <button class="button danger confirm-button">Kill Session</button>
             </div>
         </div>
     `;
@@ -1571,18 +1574,33 @@ async function killVNCSession(jobId) {
     // Add event listeners
     const cancelButton = confirmDialog.querySelector('.cancel-button');
     const confirmButton = confirmDialog.querySelector('.confirm-button');
+    const reasonInput = confirmDialog.querySelector('#kill-reason-input');
+    
+    // Focus on the textarea
+    setTimeout(() => reasonInput.focus(), 100);
     
     cancelButton.addEventListener('click', () => {
         document.body.removeChild(confirmDialog);
     });
     
     confirmButton.addEventListener('click', async () => {
+        const reason = reasonInput.value.trim();
+        
+        // Validate that a reason was provided
+        if (!reason) {
+            showMessage('Please provide a reason for killing this session.', 'error');
+            reasonInput.focus();
+            return;
+        }
+        
         // Show loading state
         confirmButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Killing...';
         confirmButton.disabled = true;
+        cancelButton.disabled = true;
         
         try {
-            await apiRequest(`vnc/kill/${jobId}`, 'POST');
+            // Send the kill request with the reason
+            await apiRequest(`vnc/kill/${jobId}`, 'POST', { reason: reason });
             showMessage(`VNC session ${jobId} killed successfully.`, 'success');
             
             // Reset refresh button if it was in refreshing state
@@ -1598,8 +1616,14 @@ async function killVNCSession(jobId) {
             
         } catch (error) {
             console.error('Failed to kill VNC session:', error);
+            showMessage(`Failed to kill VNC session: ${error.message || 'Unknown error'}`, 'error');
+            confirmButton.innerHTML = 'Kill Session';
+            confirmButton.disabled = false;
+            cancelButton.disabled = false;
         } finally {
-            document.body.removeChild(confirmDialog);
+            if (document.body.contains(confirmDialog)) {
+                document.body.removeChild(confirmDialog);
+            }
         }
     });
 }
