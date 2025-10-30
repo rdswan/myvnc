@@ -1427,6 +1427,12 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 "job_name": lsf_defaults.get("job_name", "myvnc_vncserver")
             }
             
+            # Add host filter if provided
+            host_filter = data.get("host_filter", "").strip()
+            if host_filter:
+                lsf_settings["host_filter"] = host_filter
+                self.logger.info(f"Using host filter: {host_filter}")
+            
             # Convert OS name to os_select and get container path if applicable
             os_name = data.get("os", lsf_defaults.get("os", "Any"))
             os_config = self.config_manager.get_os_config_by_name(os_name)
