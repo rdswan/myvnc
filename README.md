@@ -169,5 +169,7 @@ We welcome contributions! To contribute:
    ```
 4. Open a pull request.
 
+Note: This project is in active use and is regularly being contributed to so I expect to be extremely responsive with PR requests. If you are willing and able to build support for SLURM (as opposed to the current LSF implementation), that would be fast tracked.
+
 ## License
 This project is licensed under the Apache License 2.0. See the [LICENSE](LICENSE) file for details.
