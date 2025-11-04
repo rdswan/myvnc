@@ -1465,11 +1465,12 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             if fake_no_home:
                 self.logger.warning("Testing mode: faking missing home directory (nohome=true)")
             
-            # Get the server hostname for error messages
-            server_hostname = self.server_config.get("host", "localhost")
+            # Get the login hostname for error messages (where users should SSH to)
+            # Use login_host if specified, otherwise fall back to host, then localhost
+            login_hostname = self.server_config.get("login_host") or self.server_config.get("host", "localhost")
             
             # Submit VNC job with authenticated user
-            job_id = self.lsf_manager.submit_vnc_job(vnc_settings, lsf_settings, authenticated_user, fake_no_home=fake_no_home, server_hostname=server_hostname)
+            job_id = self.lsf_manager.submit_vnc_job(vnc_settings, lsf_settings, authenticated_user, fake_no_home=fake_no_home, server_hostname=login_hostname)
             
             # Return result - job_id is a string, not a dictionary
             self.send_json_response({
