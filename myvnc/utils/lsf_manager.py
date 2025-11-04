@@ -454,6 +454,13 @@ class LSFManager:
             container_path = lsf_config.get('container', '')
             using_container = container_path and container_path.strip()
             
+            # Resolve symlinks in container path to document the actual version
+            if using_container:
+                original_container_path = container_path
+                container_path = os.path.realpath(container_path)
+                if original_container_path != container_path:
+                    self.logger.info(f"Resolved container path from '{original_container_path}' to '{container_path}'")
+            
             # Add OS selection if specified (but NOT when using a container)
             os_select = lsf_config.get('os_select', '')
             
@@ -989,6 +996,9 @@ class LSFManager:
                             # Try to match container path to OS options
                             for os_option in os_options:
                                 container_path = os_option.get('container', '')
+                                # Resolve symlinks to match the actual path used in the command
+                                if container_path:
+                                    container_path = os.path.realpath(container_path)
                                 if container_path and container_path in command:
                                     # Format as "Name (Description)"
                                     name = os_option.get('name', '')
