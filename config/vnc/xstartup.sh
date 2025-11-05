@@ -61,6 +61,9 @@ else
         mate)
             exec mate-session
             ;;
+        none)
+            xterm -geometry 80x24+10+10 -ls &
+            ;;
         *)
             echo "Unknown window manager: $WM, falling back to TWM"
             xterm -geometry 80x24+10+10 -ls -title "$VNCDESKTOP Desktop" &
