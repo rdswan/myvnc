@@ -21,7 +21,7 @@ from contextlib import contextmanager
 
 
 class ServerMonitor:
-    def __init__(self, server_url, logfile, quiet=False, timeout=10, restart_cmd=None, verify_ssl=True):
+    def __init__(self, server_url, logfile, quiet=False, debug=False, timeout=10, restart_cmd=None, verify_ssl=True):
         """
         Initialize the server monitor
         
@@ -29,6 +29,7 @@ class ServerMonitor:
             server_url: URL to check (e.g., https://myvnc-yyz.local.tenstorrent.com)
             logfile: Path to log file
             quiet: If True, suppress stdout/stderr (only log to file)
+            debug: If True, show DEBUG level messages
             timeout: HTTP request timeout in seconds
             restart_cmd: Command to restart the server
             verify_ssl: If True, verify SSL certificates (default: True)
@@ -36,6 +37,7 @@ class ServerMonitor:
         self.server_url = server_url.rstrip('/')
         self.logfile = Path(logfile)
         self.quiet = quiet
+        self.debug = debug
         self.timeout = timeout
         self.restart_cmd = restart_cmd
         self.verify_ssl = verify_ssl
@@ -50,10 +52,14 @@ class ServerMonitor:
         
     def log(self, message, level="INFO"):
         """Log a message to file and optionally to stdout"""
+        # Skip DEBUG messages entirely unless debug mode is enabled
+        if level == "DEBUG" and not self.debug:
+            return
+        
         timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_line = f"[{timestamp}] [{level}] {message}\n"
         
-        # Always write to log file
+        # Write to log file
         with open(self.logfile, 'a') as f:
             f.write(log_line)
         
@@ -454,6 +460,12 @@ Cron example (check every minute):
         help='Disable SSL certificate verification (for self-signed certificates)'
     )
     
+    parser.add_argument(
+        '--debug',
+        action='store_true',
+        help='Show DEBUG level messages in output'
+    )
+    
     args = parser.parse_args()
     
     # Create monitor instance
@@ -461,6 +473,7 @@ Cron example (check every minute):
         server_url=args.url,
         logfile=args.logfile,
         quiet=args.quiet,
+        debug=args.debug,
         timeout=args.timeout,
         restart_cmd=args.restart_cmd,
         verify_ssl=not args.no_verify_ssl  # Invert the flag
