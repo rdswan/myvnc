@@ -281,8 +281,8 @@ class ServerMonitor:
         self.log(f"Starting server with command: {self.restart_cmd}", "INFO")
         
         try:
-            # Start server in background
-            # Use nohup to detach from this process
+            # Start server using the restart command
+            # The manage.py restart command is designed to exit after starting the server
             with open(os.devnull, 'r') as devnull:
                 process = subprocess.Popen(
                     self.restart_cmd,
@@ -293,16 +293,17 @@ class ServerMonitor:
                     start_new_session=True  # Detach from parent process
                 )
             
-            # Give it a moment to start
-            time.sleep(2)
+            # Wait for the restart command to complete
+            stdout, stderr = process.communicate()
             
-            # Check if process is still running
-            if process.poll() is None:
-                self.log(f"Server started successfully (PID: {process.pid})", "INFO")
+            # Check the exit code - 0 means success
+            if process.returncode == 0:
+                self.log(f"Server restart command completed successfully (exit code: 0)", "INFO")
+                if stdout:
+                    self.log(f"STDOUT: {stdout.decode()}", "INFO")
                 return True
             else:
-                stdout, stderr = process.communicate()
-                self.log(f"Server failed to start (exit code: {process.returncode})", "ERROR")
+                self.log(f"Server restart command failed (exit code: {process.returncode})", "ERROR")
                 if stdout:
                     self.log(f"STDOUT: {stdout.decode()}", "ERROR")
                 if stderr:
