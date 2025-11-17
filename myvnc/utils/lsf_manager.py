@@ -345,10 +345,19 @@ class LSFManager:
             stderr = e.stderr.decode('utf-8')
             stdout = e.stdout.decode('utf-8') if e.stdout else ''
             
+            # Check if this is a benign "not found" error from bjobs
+            # "Job <myvnc_vncserver> is not found" is a normal condition when user has no jobs
+            is_job_not_found = 'is not found' in stderr and 'bjobs' in cmd_str
+            
             # Log the error - using the original command format for logs
-            self.logger.error(f"Command failed: {cmd_str}")
-            self.logger.error(f"Command stdout: {stdout}")
-            self.logger.error(f"Command stderr: {stderr}")
+            # Use DEBUG level for benign job-not-found errors
+            if is_job_not_found:
+                self.logger.debug(f"Command completed with no results: {cmd_str}")
+                self.logger.debug(f"Command stderr: {stderr}")
+            else:
+                self.logger.error(f"Command failed: {cmd_str}")
+                self.logger.error(f"Command stdout: {stdout}")
+                self.logger.error(f"Command stderr: {stderr}")
             
             # Add failed command to history for debugging
             self.command_history.append({

@@ -467,14 +467,21 @@ def log_command_output(command, stdout, stderr=None, success=True):
     if stderr:
         if isinstance(stderr, bytes):
             stderr = stderr.decode('utf-8')
-            
+        
+        # Check if this is a benign "not found" error from bjobs
+        # "Job <myvnc_vncserver> is not found" is a normal condition when user has no jobs
+        is_job_not_found = 'is not found' in stderr and 'bjobs' in command.lower()
+        
         if success:
             logger.info(f"COMMAND STDERR (non-fatal):")
+            for line in stderr.splitlines():
+                logger.info(f"  {line}")
+        elif is_job_not_found:
+            # Don't log job-not-found as ERROR, it's a normal condition
+            logger.debug(f"COMMAND RESULT (no jobs found):")
+            for line in stderr.splitlines():
+                logger.debug(f"  {line}")
         else:
             logger.error(f"COMMAND ERROR:")
-            
-        for line in stderr.splitlines():
-            if success:
-                logger.info(f"  {line}")
-            else:
+            for line in stderr.splitlines():
                 logger.error(f"  {line}") 
