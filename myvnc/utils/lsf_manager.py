@@ -610,9 +610,9 @@ class LSFManager:
                 bsub_cmd.extend(['-env', env_string])
                 self.logger.info(f"Setting LSF environment variables: {env_string}")
             
-            # Add loginctl enable-linger command when using a container
+            # Add loginctl enable-linger command for all jobs
             # This ensures /run/user/$UID exists on the destination machine even though LSF doesn't actually login
-            if using_container and authenticated_user:
+            if authenticated_user:
                 loginctl_cmd = f'/usr/bin/loginctl enable-linger {authenticated_user}'
                 bsub_cmd.extend(['-E', loginctl_cmd])
                 self.logger.info(f"Adding pre-execution command to enable user lingering: {loginctl_cmd}")
