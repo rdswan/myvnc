@@ -16,12 +16,15 @@ import subprocess
 import datetime
 import requests
 import urllib3
+import json
+import psutil
+import glob
 from pathlib import Path
 from contextlib import contextmanager
 
 
 class ServerMonitor:
-    def __init__(self, server_url, logfile, quiet=False, debug=False, timeout=10, restart_cmd=None, verify_ssl=True):
+    def __init__(self, server_url, logfile, quiet=False, debug=False, timeout=10, restart_cmd=None, verify_ssl=True, log_history_minutes=2):
         """
         Initialize the server monitor
         
@@ -33,6 +36,7 @@ class ServerMonitor:
             timeout: HTTP request timeout in seconds
             restart_cmd: Command to restart the server
             verify_ssl: If True, verify SSL certificates (default: True)
+            log_history_minutes: Number of minutes of log history to capture in diagnostics
         """
         self.server_url = server_url.rstrip('/')
         self.logfile = Path(logfile)
@@ -41,6 +45,7 @@ class ServerMonitor:
         self.timeout = timeout
         self.restart_cmd = restart_cmd
         self.verify_ssl = verify_ssl
+        self.log_history_minutes = log_history_minutes
         self.lock_file = None
         
         # Disable SSL warnings if verification is disabled
@@ -128,6 +133,7 @@ class ServerMonitor:
         try:
             # Try to access the main page
             self.log(f"Checking server health: {self.server_url}", "DEBUG")
+            start_time = time.time()
             
             response = requests.get(
                 self.server_url,
@@ -136,26 +142,41 @@ class ServerMonitor:
                 allow_redirects=True
             )
             
+            response_time = time.time() - start_time
+            
             # Consider 200-399 as healthy (including redirects to login)
             if 200 <= response.status_code < 400:
-                self.log(f"Server responded with status {response.status_code}", "DEBUG")
-                return True, f"Server is healthy (status: {response.status_code})"
+                self.log(f"Server responded with status {response.status_code} in {response_time:.3f}s", "DEBUG")
+                
+                # Log slow responses as warnings
+                if response_time > 5.0:
+                    self.log(f"WARNING: Slow response time: {response_time:.3f}s", "WARNING")
+                
+                return True, f"Server is healthy (status: {response.status_code}, response time: {response_time:.3f}s)"
             else:
+                self.log(f"Server returned error status: {response.status_code}", "WARNING")
                 return False, f"Server returned error status: {response.status_code}"
                 
         except requests.exceptions.SSLError as e:
+            self.log(f"SSL certificate error: {e}", "WARNING")
             return False, f"SSL certificate error: {e}"
             
         except requests.exceptions.Timeout:
+            self.log(f"Server request timed out after {self.timeout} seconds", "WARNING")
             return False, f"Server request timed out after {self.timeout} seconds"
             
         except requests.exceptions.ConnectionError as e:
+            self.log(f"Connection error: {e}", "WARNING")
+            # Try to get more details about why the connection failed
+            self.collect_diagnostics()
             return False, f"Connection error: {e}"
             
         except requests.exceptions.RequestException as e:
+            self.log(f"Request error: {e}", "WARNING")
             return False, f"Request error: {e}"
             
         except Exception as e:
+            self.log(f"Unexpected error: {e}", "ERROR")
             return False, f"Unexpected error: {e}"
     
     def find_server_process(self):
@@ -185,14 +206,23 @@ class ServerMonitor:
                         self.log(f"Skipping PID {pid} (monitor itself)", "DEBUG")
                         continue
                     
-                    # Check the process command line to exclude monitor_myvnc.py
+                    # Check the process command line to verify it's actually a MyVNC process
                     try:
                         with open(f'/proc/{pid}/cmdline', 'r') as f:
-                            cmdline = f.read()
+                            cmdline = f.read().replace('\x00', ' ')  # Replace null bytes with spaces
+                            
+                            # Skip monitor_myvnc.py
                             if 'monitor_myvnc.py' in cmdline:
                                 self.log(f"Skipping PID {pid} (monitor script)", "DEBUG")
                                 continue
-                            filtered_pids.append(pid)
+                            
+                            # Only include if it contains 'myvnc' in the path or command
+                            # This ensures we only match MyVNC-related processes
+                            if 'myvnc' in cmdline.lower() and ('manage.py' in cmdline or 'main.py' in cmdline):
+                                self.log(f"Found MyVNC process {pid}: {cmdline[:100]}", "DEBUG")
+                                filtered_pids.append(pid)
+                            else:
+                                self.log(f"Skipping PID {pid} (not a MyVNC process): {cmdline[:100]}", "DEBUG")
                     except (FileNotFoundError, PermissionError):
                         # Process may have terminated or no permission to read
                         pass
@@ -209,6 +239,196 @@ class ServerMonitor:
         except Exception as e:
             self.log(f"Error finding server process: {e}", "ERROR")
             return []
+    
+    def collect_diagnostics(self):
+        """
+        Collect diagnostic information when the server is unresponsive
+        """
+        self.log("=" * 80, "INFO")
+        self.log("COLLECTING DIAGNOSTICS", "INFO")
+        self.log("=" * 80, "INFO")
+        
+        # Find server processes
+        pids = self.find_server_process()
+        
+        if not pids:
+            self.log("No server processes found", "INFO")
+            self.check_port_status()
+            return
+        
+        # Get detailed process information
+        for pid in pids:
+            try:
+                proc = psutil.Process(pid)
+                self.log(f"Process {pid} details:", "INFO")
+                self.log(f"  Status: {proc.status()}", "INFO")
+                self.log(f"  CPU: {proc.cpu_percent(interval=0.1)}%", "INFO")
+                self.log(f"  Memory: {proc.memory_info().rss / 1024 / 1024:.2f} MB", "INFO")
+                self.log(f"  Threads: {proc.num_threads()}", "INFO")
+                self.log(f"  Open files: {len(proc.open_files())}", "INFO")
+                self.log(f"  Connections: {len(proc.net_connections())}", "INFO")
+                
+                # Check if process is zombie or stopped
+                if proc.status() in [psutil.STATUS_ZOMBIE, psutil.STATUS_STOPPED]:
+                    self.log(f"  WARNING: Process is in {proc.status()} state!", "WARNING")
+                
+                # Get command line
+                try:
+                    cmdline = ' '.join(proc.cmdline())
+                    self.log(f"  Command: {cmdline}", "INFO")
+                except:
+                    pass
+                
+                # Check file descriptors
+                try:
+                    num_fds = proc.num_fds()
+                    self.log(f"  File descriptors: {num_fds}", "INFO")
+                    if num_fds > 900:
+                        self.log(f"  WARNING: High file descriptor count ({num_fds}/1024)", "WARNING")
+                except:
+                    pass
+                
+                # Check open connections
+                try:
+                    connections = proc.net_connections(kind='inet')
+                    listening = [c for c in connections if c.status == 'LISTEN']
+                    self.log(f"  Listening connections: {len(listening)}", "INFO")
+                    for conn in listening[:5]:  # Show first 5
+                        self.log(f"    {conn.laddr.ip}:{conn.laddr.port} ({conn.status})", "INFO")
+                except:
+                    pass
+                    
+            except psutil.NoSuchProcess:
+                self.log(f"Process {pid} no longer exists", "DEBUG")
+            except psutil.AccessDenied:
+                self.log(f"Access denied when querying process {pid} (insufficient permissions)", "DEBUG")
+            except Exception as e:
+                self.log(f"Error getting process info for {pid}: {type(e).__name__}: {e}", "DEBUG")
+        
+        # Check port status
+        self.check_port_status()
+        
+        # Tail server logs
+        self.tail_server_logs()
+        
+        self.log("=" * 80, "INFO")
+    
+    def check_port_status(self):
+        """Check if the server port is open and listening"""
+        try:
+            # Parse port from URL
+            from urllib.parse import urlparse
+            parsed = urlparse(self.server_url)
+            port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+            host = parsed.hostname or 'localhost'
+            
+            self.log(f"Checking port status: {host}:{port}", "INFO")
+            
+            # Try to connect to the port
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2)
+            result = sock.connect_ex((host, port))
+            sock.close()
+            
+            if result == 0:
+                self.log(f"Port {port} is open", "INFO")
+            else:
+                self.log(f"Port {port} is closed or filtered (error code: {result})", "WARNING")
+                
+        except Exception as e:
+            self.log(f"Error checking port status: {e}", "ERROR")
+    
+    def tail_server_logs(self, lines=50):
+        """Tail the server logs to see recent activity"""
+        try:
+            # Try to find server log files
+            log_patterns = [
+                "/localdev/myvnc/logs/myvnc_*.log",
+                "/mnt/myvnc/logs/myvnc_*.log",
+                "/var/log/myvnc*.log"
+            ]
+            
+            log_files = []
+            for pattern in log_patterns:
+                log_files.extend(glob.glob(pattern))
+            
+            if not log_files:
+                self.log("No server log files found", "INFO")
+                return
+            
+            # Get the most recent log file
+            log_files.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+            recent_log = log_files[0]
+            
+            # Calculate cutoff time for log filtering
+            cutoff_time = datetime.datetime.now() - datetime.timedelta(minutes=self.log_history_minutes)
+            
+            self.log(f"Recent server log ({recent_log}) - last {self.log_history_minutes} minute(s):", "INFO")
+            self.log(f"Current time: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", "DEBUG")
+            self.log(f"Cutoff time: {cutoff_time.strftime('%Y-%m-%d %H:%M:%S')}", "DEBUG")
+            self.log(f"Capturing logs from {cutoff_time.strftime('%Y-%m-%d %H:%M:%S')} onwards", "DEBUG")
+            
+            # Read and filter lines by timestamp
+            recent_lines = []
+            with open(recent_log, 'r') as f:
+                for line in f:
+                    # Try to parse timestamp from log line
+                    # Expected formats:
+                    #   1. 2025-11-17 12:28:45,123 - myvnc - INFO - ...
+                    #   2. [2025-11-17 12:28:45] [INFO] ...
+                    try:
+                        log_time = None
+                        
+                        # Try format 1: YYYY-MM-DD HH:MM:SS,milliseconds - ...
+                        if ' - ' in line:
+                            timestamp_str = line.split(' - ')[0].split(',')[0].strip()
+                            try:
+                                log_time = datetime.datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+                            except ValueError:
+                                pass
+                        
+                        # Try format 2: [YYYY-MM-DD HH:MM:SS] [LEVEL] ...
+                        if log_time is None and line.startswith('['):
+                            try:
+                                timestamp_str = line.split(']')[0].strip('[')
+                                log_time = datetime.datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S")
+                            except (ValueError, IndexError):
+                                pass
+                        
+                        # If we successfully parsed a timestamp, check if it's recent
+                        if log_time is not None:
+                            # Debug: Log first few parsed timestamps
+                            if len(recent_lines) < 3:
+                                self.log(f"Parsed timestamp: {log_time.strftime('%Y-%m-%d %H:%M:%S')} (cutoff: {cutoff_time.strftime('%Y-%m-%d %H:%M:%S')}, match: {log_time >= cutoff_time})", "DEBUG")
+                            
+                            if log_time >= cutoff_time:
+                                recent_lines.append(line)
+                        else:
+                            # If we can't parse the timestamp, include the line anyway
+                            # (it might be a continuation of a previous line)
+                            if recent_lines:  # Only add if we've already started collecting
+                                recent_lines.append(line)
+                    except Exception:
+                        # If anything goes wrong, include the line if we've started collecting
+                        if recent_lines:
+                            recent_lines.append(line)
+            
+            if recent_lines:
+                self.log(f"Found {len(recent_lines)} log lines from the past {self.log_history_minutes} minute(s)", "INFO")
+                # Show all recent lines (or limit to reasonable max)
+                max_lines = 200  # Prevent overwhelming output
+                display_lines = recent_lines[-max_lines:] if len(recent_lines) > max_lines else recent_lines
+                
+                if len(recent_lines) > max_lines:
+                    self.log(f"(Showing last {max_lines} of {len(recent_lines)} lines)", "INFO")
+                
+                for line in display_lines:
+                    self.log(f"  {line.rstrip()}", "INFO")
+            else:
+                self.log(f"No log entries found in the past {self.log_history_minutes} minute(s)", "INFO")
+                    
+        except Exception as e:
+            self.log(f"Error tailing server logs: {e}", "ERROR")
     
     def stop_server(self, pids):
         """
@@ -355,9 +575,12 @@ class ServerMonitor:
             self.log("=" * 80, "INFO")
             return False
     
-    def run(self):
+    def run(self, diagnostics_only=False):
         """
         Main monitoring loop - check health and restart if needed
+        
+        Args:
+            diagnostics_only: If True, only collect diagnostics without restarting
         
         Returns:
             int: Exit code (0 = success, 1 = error)
@@ -366,6 +589,12 @@ class ServerMonitor:
         
         try:
             with self.acquire_lock(lock_path):
+                # If diagnostics-only mode, just collect diagnostics
+                if diagnostics_only:
+                    self.log(f"Collecting diagnostics for {self.server_url}", "INFO")
+                    self.collect_diagnostics()
+                    return 0
+                
                 self.log(f"Starting health check for {self.server_url}", "INFO")
                 
                 # Check if server is healthy
@@ -467,6 +696,19 @@ Cron example (check every minute):
         help='Show DEBUG level messages in output'
     )
     
+    parser.add_argument(
+        '--collect-diagnostics',
+        action='store_true',
+        help='Collect detailed diagnostics without restarting the server'
+    )
+    
+    parser.add_argument(
+        '--log-history-minutes',
+        type=int,
+        default=2,
+        help='Number of minutes of log history to capture in diagnostics (default: 2)'
+    )
+    
     args = parser.parse_args()
     
     # Create monitor instance
@@ -477,11 +719,12 @@ Cron example (check every minute):
         debug=args.debug,
         timeout=args.timeout,
         restart_cmd=args.restart_cmd,
-        verify_ssl=not args.no_verify_ssl  # Invert the flag
+        verify_ssl=not args.no_verify_ssl,  # Invert the flag
+        log_history_minutes=args.log_history_minutes
     )
     
     # Run monitoring check
-    exit_code = monitor.run()
+    exit_code = monitor.run(diagnostics_only=args.collect_diagnostics)
     sys.exit(exit_code)
 
 
