@@ -163,9 +163,19 @@ def register_subprocess_handler():
                         error_str = error.decode('utf-8')
                         
                     if logger:
-                        logger.error(f"COMMAND ERROR from '{log_cmd_str}':")
-                        for line in error_str.splitlines():
-                            logger.error(f"  {line}")
+                        # Check if this is a benign "not found" error from bjobs
+                        # "Job <myvnc_vncserver> is not found" is a normal condition when user has no jobs
+                        is_job_not_found = 'is not found' in error_str and 'bjobs' in log_cmd_str.lower()
+                        
+                        if is_job_not_found:
+                            # Don't log job-not-found as ERROR, it's a normal condition
+                            logger.debug(f"COMMAND RESULT (no jobs found) from '{log_cmd_str}':")
+                            for line in error_str.splitlines():
+                                logger.debug(f"  {line}")
+                        else:
+                            logger.error(f"COMMAND ERROR from '{log_cmd_str}':")
+                            for line in error_str.splitlines():
+                                logger.error(f"  {line}")
                 except Exception as e:
                     logger.error(f"Error logging subprocess error: {str(e)}")
                     
