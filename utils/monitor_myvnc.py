@@ -128,7 +128,7 @@ class ServerMonitor:
         Check if the server is responding to HTTP requests
         
         Returns:
-            tuple: (is_healthy: bool, message: str)
+            tuple: (is_healthy: bool, message: str, diagnostics_collected: bool)
         """
         try:
             # Try to access the main page
@@ -152,32 +152,32 @@ class ServerMonitor:
                 if response_time > 5.0:
                     self.log(f"WARNING: Slow response time: {response_time:.3f}s", "WARNING")
                 
-                return True, f"Server is healthy (status: {response.status_code}, response time: {response_time:.3f}s)"
+                return True, f"Server is healthy (status: {response.status_code}, response time: {response_time:.3f}s)", False
             else:
                 self.log(f"Server returned error status: {response.status_code}", "WARNING")
-                return False, f"Server returned error status: {response.status_code}"
+                return False, f"Server returned error status: {response.status_code}", False
                 
         except requests.exceptions.SSLError as e:
             self.log(f"SSL certificate error: {e}", "WARNING")
-            return False, f"SSL certificate error: {e}"
+            return False, f"SSL certificate error: {e}", False
             
         except requests.exceptions.Timeout:
             self.log(f"Server request timed out after {self.timeout} seconds", "WARNING")
-            return False, f"Server request timed out after {self.timeout} seconds"
+            return False, f"Server request timed out after {self.timeout} seconds", False
             
         except requests.exceptions.ConnectionError as e:
             self.log(f"Connection error: {e}", "WARNING")
             # Try to get more details about why the connection failed
             self.collect_diagnostics()
-            return False, f"Connection error: {e}"
+            return False, f"Connection error: {e}", True
             
         except requests.exceptions.RequestException as e:
             self.log(f"Request error: {e}", "WARNING")
-            return False, f"Request error: {e}"
+            return False, f"Request error: {e}", False
             
         except Exception as e:
             self.log(f"Unexpected error: {e}", "ERROR")
-            return False, f"Unexpected error: {e}"
+            return False, f"Unexpected error: {e}", False
     
     def find_server_process(self):
         """
@@ -561,7 +561,7 @@ class ServerMonitor:
             self.log("Waiting for server to become responsive...", "INFO")
             for i in range(30):  # Try for 30 seconds
                 time.sleep(1)
-                is_healthy, message = self.check_server_health()
+                is_healthy, message, _ = self.check_server_health()
                 if is_healthy:
                     self.log(f"Server is now responsive after {i+1} seconds", "INFO")
                     self.log("=" * 80, "INFO")
@@ -598,13 +598,20 @@ class ServerMonitor:
                 self.log(f"Starting health check for {self.server_url}", "INFO")
                 
                 # Check if server is healthy
-                is_healthy, message = self.check_server_health()
+                is_healthy, message, diagnostics_collected = self.check_server_health()
                 
                 if is_healthy:
                     self.log(f"✓ {message}", "INFO")
                     return 0
                 else:
                     self.log(f"✗ Server is unresponsive: {message}", "ERROR")
+                    
+                    # Collect diagnostics before attempting restart (if not already collected)
+                    if not diagnostics_collected:
+                        self.log("Collecting diagnostics before restart...", "INFO")
+                        self.collect_diagnostics()
+                    else:
+                        self.log("Diagnostics already collected during health check", "DEBUG")
                     
                     # Attempt restart
                     if self.restart_server():
