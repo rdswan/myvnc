@@ -534,9 +534,9 @@ class LSFManager:
             except Exception as e:
                 self.logger.warning(f"Could not create .vnc directory {vnc_log_dir}: {e}")
             
-            # Add double quotes around the paths to handle any special characters
-            stdout_log_path = f'"{user_home}/.vnc/myvnc.%J.lsf_stdout.log"'
-            stderr_log_path = f'"{user_home}/.vnc/myvnc.%J.lsf_stderr.log"'
+            # Set LSF log paths (without quotes - let LSF handle them)
+            stdout_log_path = f'{user_home}/.vnc/myvnc.%J.lsf_stdout.log'
+            stderr_log_path = f'{user_home}/.vnc/myvnc.%J.lsf_stderr.log'
             
             bsub_cmd.extend(['-oo', stdout_log_path])
             bsub_cmd.extend(['-eo', stderr_log_path])
