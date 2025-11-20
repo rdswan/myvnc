@@ -126,6 +126,16 @@ document.addEventListener('DOMContentLoaded', function() {
         createVNCForm.addEventListener('submit', createVNCSession);
     }
     
+    // Session type toggle handler
+    const sessionTypeVnc = document.getElementById('session-type-vnc');
+    const sessionTypeTmux = document.getElementById('session-type-tmux');
+    
+    if (sessionTypeVnc && sessionTypeTmux) {
+        sessionTypeVnc.addEventListener('change', handleSessionTypeChange);
+        sessionTypeTmux.addEventListener('change', handleSessionTypeChange);
+        console.log('Session type toggle handlers attached');
+    }
+    
     if (messageClose) {
         messageClose.addEventListener('click', hideMessage);
     }
@@ -727,6 +737,34 @@ function changeTab(tabId) {
     }
 }
 
+// Handle session type toggle (VNC vs tmux)
+function handleSessionTypeChange() {
+    const sessionTypeVnc = document.getElementById('session-type-vnc');
+    const sessionTypeTmux = document.getElementById('session-type-tmux');
+    const vncSpecificOptions = document.getElementById('vnc-specific-options');
+    const createButtonText = document.getElementById('create-button-text');
+    
+    if (sessionTypeTmux && sessionTypeTmux.checked) {
+        // tmux selected - hide VNC-specific options
+        console.log('Session type changed to: tmux');
+        if (vncSpecificOptions) {
+            vncSpecificOptions.style.display = 'none';
+        }
+        if (createButtonText) {
+            createButtonText.textContent = 'Create tmux Session';
+        }
+    } else {
+        // VNC selected - show VNC-specific options
+        console.log('Session type changed to: VNC');
+        if (vncSpecificOptions) {
+            vncSpecificOptions.style.display = 'block';
+        }
+        if (createButtonText) {
+            createButtonText.textContent = 'Create VNC Session';
+        }
+    }
+}
+
 // Change Manager Mode sub-tab
 function changeManagerSubtab(subtabId) {
     console.log('Switching to manager sub-tab:', subtabId);
@@ -1187,6 +1225,7 @@ async function refreshVNCList(withRetries = false) {
                     `<span class="status-badge ${statusClass}">${job.status}</span>` : 
                     `<span class="status-badge ${statusClass}">${job.status}</span>`}
                 </td>
+                <td>${job.session_type || 'Unknown'}</td>
                 <td>${job.queue}</td>
                 <td>${job.resources_unknown ? 'Unknown' : `${job.num_cores || '-'} cores, ${job.memory_gb || '-'} GB`}</td>
                 <td>${job.os || 'N/A'}</td>
@@ -1384,6 +1423,13 @@ function showDetailedInstructions(job) {
 async function createVNCSession(event) {
     event.preventDefault();
     
+    // Check session type
+    const sessionTypeTmux = document.getElementById('session-type-tmux');
+    const isTmux = sessionTypeTmux && sessionTypeTmux.checked;
+    const sessionType = isTmux ? 'tmux' : 'vnc';
+    
+    console.log('Creating session of type:', sessionType);
+    
     // Show loading on button
     const submitButton = createVNCForm.querySelector('button[type="submit"]');
     const originalText = submitButton.innerHTML;
@@ -1404,9 +1450,12 @@ async function createVNCSession(event) {
         
         // Log all form element values for debugging
         console.log('Form values at submission:');
+        console.log('Session Type:', sessionType);
         console.log('Site:', siteSelect ? siteSelect.value : 'Not found');
-        console.log('Resolution:', resolutionSelect ? resolutionSelect.value : 'Not found');
-        console.log('Window Manager:', windowManagerSelect ? windowManagerSelect.value : 'Not found');
+        if (!isTmux) {
+            console.log('Resolution:', resolutionSelect ? resolutionSelect.value : 'Not found');
+            console.log('Window Manager:', windowManagerSelect ? windowManagerSelect.value : 'Not found');
+        }
         console.log('Name:', nameInput ? nameInput.value : 'Not found');
         console.log('Cores:', coresSelect ? coresSelect.value : 'Not found');
         console.log('Queue:', queueSelect ? queueSelect.value : 'Not found');
@@ -1415,21 +1464,26 @@ async function createVNCSession(event) {
         console.log('Host Filter:', hostFilterInput ? hostFilterInput.value : 'Not found');
         
         // Build the data object manually from form elements
-        const data = {};
+        const data = {
+            session_type: sessionType
+        };
         
         // Add site if available and valid
         if (siteSelect && siteSelect.value) {
             data.site = siteSelect.value;
         }
         
-        // Add resolution if available and valid
-        if (resolutionSelect && resolutionSelect.value) {
-            data.resolution = resolutionSelect.value;
-        }
-        
-        // Add window manager if available and valid
-        if (windowManagerSelect && windowManagerSelect.value) {
-            data.window_manager = windowManagerSelect.value;
+        // Add VNC-specific fields only for VNC sessions
+        if (!isTmux) {
+            // Add resolution if available and valid
+            if (resolutionSelect && resolutionSelect.value) {
+                data.resolution = resolutionSelect.value;
+            }
+            
+            // Add window manager if available and valid
+            if (windowManagerSelect && windowManagerSelect.value) {
+                data.window_manager = windowManagerSelect.value;
+            }
         }
         
         // Add name if provided (not empty)
@@ -1523,7 +1577,8 @@ async function createVNCSession(event) {
         }
         
         // Show success message
-        showMessage(`VNC session created successfully. Job ID: ${result.job_id}`, 'success');
+        const sessionTypeName = isTmux ? 'tmux' : 'VNC';
+        showMessage(`${sessionTypeName} session created successfully. Job ID: ${result.job_id}`, 'success');
         
         // Log cores value before reset
         const coresBeforeReset = document.getElementById('lsf-cores');
@@ -2660,6 +2715,7 @@ async function refreshManagerList() {
                 <td>${job.name === "VNC Session" ? "" : job.name}</td>
                 <td>${job.user}</td>
                 <td><span class="status-badge ${statusClass}">${job.status}</span></td>
+                <td>${job.session_type || 'Unknown'}</td>
                 <td>${job.queue}</td>
                 <td>${job.resources_unknown ? 'Unknown' : `${job.num_cores || '-'} cores, ${job.memory_gb || '-'} GB`}</td>
                 <td>${job.os || 'N/A'}</td>

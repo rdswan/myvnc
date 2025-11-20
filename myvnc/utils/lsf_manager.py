@@ -346,7 +346,7 @@ class LSFManager:
             stdout = e.stdout.decode('utf-8') if e.stdout else ''
             
             # Check if this is a benign "not found" error from bjobs
-            # "Job <myvnc_vncserver> is not found" is a normal condition when user has no jobs
+            # "Job <myvnc_*> is not found" is a normal condition when user has no jobs
             is_job_not_found = 'is not found' in stderr and 'bjobs' in cmd_str
             
             # Log the error - using the original command format for logs
@@ -760,6 +760,212 @@ class LSFManager:
                 })
             raise
     
+    def submit_tmux_job(self, session_config: Dict, lsf_config: Dict, authenticated_user: str = None, server_hostname: str = None) -> str:
+        """Submit a tmux job using bsub
+        
+        Args:
+            session_config: Session configuration (name, site, etc.)
+            lsf_config: LSF configuration (queue, cores, memory, etc.)
+            authenticated_user: Optional authenticated username to run command as
+            server_hostname: Server hostname for error messages
+            
+        Returns:
+            Job ID if successful
+            
+        Raises:
+            Exception if submission fails
+        """
+        try:
+            # Get current user for fallback if no authenticated user
+            user = authenticated_user if authenticated_user else os.environ.get('USER', '')
+            user_home = os.path.expanduser(f'~{user}')
+            
+            # Get the full path to bsub
+            bsub_path = self.lsf_cmd_paths.get('bsub', 'bsub')
+            
+            # Extract parameters from config
+            job_name = 'myvnc_tmux'  # Fixed name for all tmux jobs
+            num_cores = int(lsf_config.get('num_cores', 2))
+            memory_gb = float(lsf_config.get('memory_gb', 2.0))
+            
+            # Get session name
+            session_name = session_config.get('name', 'myvnc_tmux_session')
+            # Replace spaces with underscores for tmux session name
+            safe_session_name = session_name.replace(' ', '_')
+            
+            # Get LSF group (queue) to use
+            queue = lsf_config.get('queue', 'interactive')
+            
+            # Format resource request string with span[hosts=1] and rusage[mem=XG]
+            resource_req = f"span[hosts=1] rusage[mem={memory_gb}G]"
+            
+            # Check if a container is specified
+            container_path = lsf_config.get('container', '')
+            using_container = container_path and container_path.strip()
+            
+            # Resolve symlinks in container path to document the actual version
+            if using_container:
+                original_container_path = container_path
+                container_path = os.path.realpath(container_path)
+                if original_container_path != container_path:
+                    self.logger.info(f"Resolved container path from '{original_container_path}' to '{container_path}'")
+            
+            # Add OS selection if specified (but NOT when using a container)
+            os_select = lsf_config.get('os_select', '')
+            
+            # Add processor architecture selection if specified
+            arch_select = lsf_config.get('arch_select', '')
+            if arch_select and arch_select != "any":
+                self.logger.info(f"Adding architecture selection '{arch_select}' to resource requirements")
+                if resource_req:
+                    resource_req = f"select[{arch_select}] {resource_req}"
+                else:
+                    resource_req = f"select[{arch_select}]"
+            
+            # Modify resource string based on OS selection
+            if using_container:
+                self.logger.info(f"Using container - skipping OS selection constraint (container provides OS environment)")
+            elif os_select and os_select != "any":
+                self.logger.info(f"Adding OS selection '{os_select}' to resource requirements")
+                resource_req = f"select[{os_select}] {resource_req}"
+            
+            self.logger.info(f"Final resource requirements string: '{resource_req}'")
+            
+            # Build LSF command
+            bsub_cmd = [
+                'bsub',
+                '-q', queue,
+                '-n', str(num_cores),
+                '-R', resource_req,
+                '-M', f'{memory_gb}G',
+                '-J', job_name
+            ]
+            
+            # Add time limit if specified
+            time_limit = lsf_config.get('time_limit', '')
+            if time_limit and time_limit.strip():
+                bsub_cmd.extend(['-W', time_limit])
+            
+            # Add host filter only if specified
+            host_filter = lsf_config.get('host_filter', '')
+            if host_filter and host_filter.strip():
+                bsub_cmd.extend(['-m', host_filter])
+            
+            # Set the current working directory for the job to the user's home directory
+            bsub_cmd.extend(['-cwd', user_home])
+            self.logger.info(f"Setting LSF working directory: {user_home}")
+            
+            # Add LSF output and error log file paths
+            tmux_log_dir = os.path.join(user_home, '.tmux')
+            
+            # Ensure the .tmux directory exists for log file creation
+            try:
+                os.makedirs(tmux_log_dir, mode=0o755, exist_ok=True)
+                self.logger.info(f"Ensured .tmux directory exists: {tmux_log_dir}")
+            except Exception as e:
+                self.logger.warning(f"Could not create .tmux directory {tmux_log_dir}: {e}")
+            
+            # Set LSF log paths
+            stdout_log_path = f'{user_home}/.tmux/myvnc.%J.lsf_stdout.log'
+            stderr_log_path = f'{user_home}/.tmux/myvnc.%J.lsf_stderr.log'
+            
+            bsub_cmd.extend(['-oo', stdout_log_path])
+            bsub_cmd.extend(['-eo', stderr_log_path])
+            
+            self.logger.info(f"Setting LSF stdout log file: {stdout_log_path}")
+            self.logger.info(f"Setting LSF stderr log file: {stderr_log_path}")
+            
+            # Add loginctl enable-linger command
+            if authenticated_user:
+                loginctl_cmd = f'/usr/bin/loginctl enable-linger {authenticated_user}'
+                bsub_cmd.extend(['-E', loginctl_cmd])
+                self.logger.info(f"Adding pre-execution command to enable user lingering: {loginctl_cmd}")
+            
+            # Build the tmux command
+            # Start a new tmux session and keep it running
+            tmux_cmd = f'/usr/bin/tmux new-session -d -s {safe_session_name} && sleep infinity'
+            
+            # Check if a container is specified
+            if using_container:
+                self.logger.info(f"Wrapping tmux command with singularity container: {container_path}")
+                container_cmd = ['singularity', 'exec', '--cleanenv']
+                
+                # Add cgroup resource limits to match LSF reservation
+                container_cmd.extend(['--cpus', str(num_cores)])
+                container_cmd.extend(['--memory-reservation', f'{memory_gb}G'])
+                container_cmd.extend(['--memory', f'{memory_gb + 2}G'])
+                container_cmd.extend(['--memory-swap', f'{memory_gb * 2}G'])
+                
+                # Get bind paths from configuration
+                bindpaths_name = lsf_config.get('bindpaths', '')
+                if bindpaths_name:
+                    self.logger.info(f"Using configured bindpaths set: {bindpaths_name}")
+                    bindpaths = self.config_manager.get_bindpaths_by_name(bindpaths_name)
+                    
+                    if bindpaths:
+                        for path in bindpaths:
+                            path = path.strip()
+                            if path and os.path.exists(path):
+                                container_cmd.extend(['--bind', f'{path}:{path}'])
+                
+                # Add the container path and command
+                container_cmd.append(container_path)
+                container_cmd.extend(['/usr/bin/bash', '-c', tmux_cmd])
+                
+                bsub_cmd.extend(container_cmd)
+            else:
+                # No container, execute tmux directly with bash
+                bsub_cmd.extend(['/usr/bin/bash', '-c', tmux_cmd])
+            
+            # Convert command list to string for logging
+            cmd_str = ' '.join(str(arg) for arg in bsub_cmd)
+            
+            # Add to command history before execution
+            cmd_entry = {
+                'command': cmd_str,
+                'stdout': '',
+                'stderr': '',
+                'success': False,
+                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            self.command_history.append(cmd_entry)
+            
+            # Execute the command
+            try:
+                self.logger.info(f"Submitting tmux job with bsub")
+                stdout = self._run_command(bsub_cmd, authenticated_user)
+                
+                # Extract job ID from output
+                job_id_match = re.search(r'Job <(\d+)>', stdout)
+                job_id = job_id_match.group(1) if job_id_match else 'unknown'
+                
+                self.logger.info(f"tmux job submitted successfully, ID: {job_id}")
+                
+                return job_id
+                
+            except LSFError as e:
+                self.logger.error(f"tmux job submission failed: {str(e)}")
+                cmd_entry['stderr'] += f"\nException: {str(e)}"
+                raise e
+            except Exception as e:
+                error_msg = f"tmux job submission error: {str(e)}"
+                self.logger.error(error_msg)
+                cmd_entry['stderr'] += f"\nException: {str(e)}"
+                raise Exception(error_msg)
+                
+        except Exception as e:
+            if 'cmd_entry' in locals():
+                cmd_entry['stderr'] += f"\nException: {str(e)}"
+            else:
+                self.command_history.append({
+                    'command': 'Error preparing tmux job submission',
+                    'stdout': '',
+                    'stderr': str(e),
+                    'success': False,
+                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                })
+            raise
+    
     def get_job_owner(self, job_id: str, authenticated_user: str = None) -> Optional[str]:
         """
         Get the owner (user) of a specific job ID
@@ -848,15 +1054,15 @@ class LSFManager:
             # Create the base command as a list of arguments - this will be properly quoted
             cmd = [
                 'bjobs',
-                '-o', "jobid stat user queue first_host run_time slots max_req_proc combined_resreq command delimiter=';'",
+                '-o', "jobid stat user queue first_host run_time slots max_req_proc combined_resreq command job_name delimiter=';'",
                 '-noheader',
             ]
             
             # Always include user filter ("all" requests all jobs)
             cmd.extend(['-u', user])
             
-            # Limit job name to our VNC jobs
-            cmd.extend(['-J', 'myvnc_vncserver'])
+            # Limit job name to our VNC and tmux jobs
+            cmd.extend(['-J', 'myvnc_*'])
             
             # For logging purposes, store the original command string
             base_cmd = ' '.join(cmd)
@@ -926,6 +1132,7 @@ class LSFManager:
                     max_req_proc = parts[7] if len(parts) > 7 else None
                     combined_resreq = parts[8] if len(parts) > 8 else ""
                     command = parts[9] if len(parts) > 9 else ""
+                    job_name = parts[10] if len(parts) > 10 else ""
                     
                     self.logger.debug(f"Job {job_id}: status={status}, user={job_user}, host={first_host}")
                     self.logger.debug(f"Job {job_id}: combined_resreq='{combined_resreq}'")
@@ -1096,6 +1303,14 @@ class LSFManager:
                             display_name = name_match.group(1)
                         self.logger.debug(f"Found display name: {display_name}")
                     
+                    # Determine session type from job_name
+                    session_type = "Unknown"
+                    if job_name == "myvnc_vncserver":
+                        session_type = "VNC"
+                    elif job_name == "myvnc_tmux":
+                        session_type = "tmux"
+                    self.logger.debug(f"Job {job_id} session type: {session_type} (job_name: {job_name})")
+                    
                     # Try to extract the display number from the command
                     display_match = re.search(r':(\d+)', command)
                     if display_match:
@@ -1163,7 +1378,8 @@ class LSFManager:
                         'runtime_display': runtime_display,  # Add runtime_display for consistency with client
                         'run_time_seconds': run_time_seconds if 'run_time_seconds' in locals() else 0,
                         'resource_req': combined_resreq,  # Add the raw resource requirements string
-                        'os': os_name  # Add the OS name
+                        'os': os_name,  # Add the OS name
+                        'session_type': session_type  # Add the session type
                     }
                     
                     # Add resource information based on what we found
@@ -1220,7 +1436,7 @@ class LSFManager:
             # Build the command dynamically depending on whether we filter by user
             cmd = ['bjobs', '-u', user]
 
-            cmd.extend(['-J', 'myvnc_vncserver', '-o', "jobid stat user queue from_host exec_host job_name submit_time slots max_req_proc combined_resreq"])
+            cmd.extend(['-J', 'myvnc_*', '-o', "jobid stat user queue from_host exec_host submit_time job_name slots max_req_proc combined_resreq"])
             
             self.logger.info(f"Executing command: {' '.join(cmd)}")
             
@@ -1350,7 +1566,8 @@ class LSFManager:
                                 'mem_gb': None,
                                 'memory_gb': None,
                                 'resources_unknown': True,
-                                'os': 'N/A'  # Add OS field
+                                'os': 'N/A',  # Add OS field
+                                'session_type': session_type  # Add session type
                             }
                             jobs.append(job)
                             continue
@@ -1378,6 +1595,19 @@ class LSFManager:
                             self.logger.info(f"Treating memory value {mem_value} as GB")
                         else:
                             self.logger.debug(f"No memory information found in combined_resreq: {combined_resreq}")
+                    
+                    # Extract job_name if available
+                    job_name = ""
+                    if len(fields) > 7:
+                        job_name = fields[7].strip()
+                    
+                    # Determine session type from job_name
+                    session_type = "Unknown"
+                    if job_name == "myvnc_vncserver":
+                        session_type = "VNC"
+                    elif job_name == "myvnc_tmux":
+                        session_type = "tmux"
+                    self.logger.debug(f"Job {job_id} session type: {session_type} (job_name: {job_name})")
                     
                     # Extract OS information from combined_resreq or command
                     os_name = 'N/A'
@@ -1433,7 +1663,8 @@ class LSFManager:
                         'submit_time': submit_time,
                         'submit_time_raw': submit_time_raw,
                         'resource_req': combined_resreq,  # Add the raw resource requirements string
-                        'os': os_name  # Add the OS name
+                        'os': os_name,  # Add the OS name
+                        'session_type': session_type  # Add session type
                     }
                     
                     # Add resource information based on what we found

@@ -306,6 +306,66 @@
             display: block;
         }
         
+        /* Table column width constraints */
+        #vnc-table th:nth-child(5),
+        #vnc-table td:nth-child(5),
+        #manager-table th:nth-child(5),
+        #manager-table td:nth-child(5) {
+            width: 70px;
+            max-width: 70px;
+            white-space: nowrap;
+        }
+        
+        #vnc-table th:nth-child(6),
+        #vnc-table td:nth-child(6),
+        #manager-table th:nth-child(6),
+        #manager-table td:nth-child(6) {
+            width: 100px;
+            max-width: 100px;
+            white-space: nowrap;
+        }
+        
+        #vnc-table th:nth-child(10),
+        #vnc-table td:nth-child(10),
+        #manager-table th:nth-child(10),
+        #manager-table td:nth-child(10) {
+            width: 80px;
+            max-width: 80px;
+            white-space: nowrap;
+        }
+        
+        #vnc-table th:nth-child(11),
+        #vnc-table td:nth-child(11),
+        #manager-table th:nth-child(11),
+        #manager-table td:nth-child(11) {
+            width: 90px;
+            max-width: 90px;
+            white-space: nowrap;
+            padding-right: 1.5rem;
+        }
+        
+        /* Actions column spacing and styling */
+        #vnc-table .actions-cell,
+        #manager-table .actions-cell {
+            padding-left: 1rem;
+            padding-right: 0.5rem;
+        }
+        
+        /* Make action buttons more compact */
+        .actions-cell .button {
+            padding: 0.4rem 0.6rem;
+            font-size: 0.85rem;
+            margin-right: 0.25rem;
+        }
+        
+        .actions-cell .button:last-child {
+            margin-right: 0;
+        }
+        
+        .actions-cell .button i {
+            font-size: 0.8rem;
+        }
+        
         /* Multi-select styling for override modal - completely override browser defaults */
         #override-modal select[multiple] {
             border: 1px solid #ddd;
@@ -450,6 +510,7 @@
                             <th>Name</th>
                             <th>User</th>
                             <th>Status</th>
+                            <th>Type</th>
                             <th>Queue</th>
                             <th>Resources</th>
                             <th>OS</th>
@@ -462,7 +523,7 @@
                     <tbody id="vnc-table-body">
                         <!-- Show loading state by default -->
                         <tr class="loading-row">
-                            <td colspan="11" class="loading-cell">
+                            <td colspan="12" class="loading-cell">
                                 <div class="loading-spinner">
                                     <i class="fas fa-spinner fa-spin"></i> Loading VNC sessions...
                                 </div>
@@ -512,6 +573,7 @@
                                 <th>Name</th>
                                 <th>User</th>
                                 <th>Status</th>
+                                <th>Type</th>
                                 <th>Queue</th>
                                 <th>Resources</th>
                                 <th>OS</th>
@@ -523,7 +585,7 @@
                         </thead>
                         <tbody id="manager-table-body">
                             <tr class="loading-row">
-                                <td colspan="11" class="loading-cell">
+                                <td colspan="12" class="loading-cell">
                                     <div class="loading-spinner">
                                         <i class="fas fa-spinner fa-spin"></i> Loading VNC sessions...
                                     </div>
@@ -598,8 +660,32 @@
         
         <div id="vnc-creator" class="tab-content">
             <div class="form-card">
-                <h2 class="form-title">Create New VNC Session</h2>
+                <h2 class="form-title">Create New Session</h2>
                 <form id="create-vnc-form">
+                    <div class="form-section">
+                        <h3>Session Type</h3>
+                        <div class="form-row">
+                            <div class="form-group" style="flex: 1;">
+                                <label style="display: block; margin-bottom: 0.75rem; font-weight: 500;">Session Type</label>
+                                <div style="display: flex; gap: 2rem;">
+                                    <label style="display: flex; align-items: center; cursor: pointer;">
+                                        <input type="radio" name="session-type" id="session-type-vnc" value="vnc" checked style="margin-right: 0.5rem;">
+                                        <i class="fas fa-desktop" style="margin-right: 0.5rem; color: var(--primary-color);"></i>
+                                        <span>VNC Session</span>
+                                    </label>
+                                    <label style="display: flex; align-items: center; cursor: pointer;">
+                                        <input type="radio" name="session-type" id="session-type-tmux" value="tmux" style="margin-right: 0.5rem;">
+                                        <i class="fas fa-terminal" style="margin-right: 0.5rem; color: var(--primary-color);"></i>
+                                        <span>tmux Session</span>
+                                    </label>
+                                </div>
+                                <p style="margin-top: 0.5rem; font-size: 0.9rem; color: #666;">
+                                    Choose VNC for graphical desktop sessions or tmux for terminal-only sessions.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    
                     <div class="form-section">
                         <h3>Session Settings</h3>
                         <div class="form-row">
@@ -620,28 +706,6 @@
                                     <i class="fas fa-chevron-down"></i>
                                 </div>
                             </div>
-                        </div>
-                        
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label for="vnc-resolution">Resolution</label>
-                                <div class="select-wrapper">
-                                    <select id="vnc-resolution" name="resolution">
-                                        <!-- Options will be loaded from configuration -->
-                                    </select>
-                                    <i class="fas fa-chevron-down"></i>
-                                </div>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label for="vnc-window-manager">Window Manager</label>
-                                <div class="select-wrapper">
-                                    <select id="vnc-window-manager" name="window_manager">
-                                        <!-- Options will be loaded from configuration -->
-                                    </select>
-                                    <i class="fas fa-chevron-down"></i>
-                                </div>
-                            </div>
                             
                             <div class="form-group">
                                 <label for="lsf-os">Operating System</label>
@@ -650,6 +714,31 @@
                                         <!-- Options will be loaded from configuration -->
                                     </select>
                                     <i class="fas fa-chevron-down"></i>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- VNC-specific options (hidden for tmux) -->
+                        <div id="vnc-specific-options">
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="vnc-resolution">Resolution</label>
+                                    <div class="select-wrapper">
+                                        <select id="vnc-resolution" name="resolution">
+                                            <!-- Options will be loaded from configuration -->
+                                        </select>
+                                        <i class="fas fa-chevron-down"></i>
+                                    </div>
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="vnc-window-manager">Window Manager</label>
+                                    <div class="select-wrapper">
+                                        <select id="vnc-window-manager" name="window_manager">
+                                            <!-- Options will be loaded from configuration -->
+                                        </select>
+                                        <i class="fas fa-chevron-down"></i>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -702,8 +791,8 @@
                     </div>
                     
                     <div class="form-actions">
-                        <button type="submit" class="button primary">
-                            <i class="fas fa-rocket"></i> Create VNC Session
+                        <button type="submit" class="button primary" id="create-session-button">
+                            <i class="fas fa-rocket"></i> <span id="create-button-text">Create VNC Session</span>
                         </button>
                     </div>
                 </form>

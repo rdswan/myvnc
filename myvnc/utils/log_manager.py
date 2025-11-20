@@ -164,7 +164,7 @@ def register_subprocess_handler():
                         
                     if logger:
                         # Check if this is a benign "not found" error from bjobs
-                        # "Job <myvnc_vncserver> is not found" is a normal condition when user has no jobs
+                        # "Job <myvnc_*> is not found" is a normal condition when user has no jobs
                         is_job_not_found = 'is not found' in error_str and 'bjobs' in log_cmd_str.lower()
                         
                         if is_job_not_found:
@@ -479,7 +479,7 @@ def log_command_output(command, stdout, stderr=None, success=True):
             stderr = stderr.decode('utf-8')
         
         # Check if this is a benign "not found" error from bjobs
-        # "Job <myvnc_vncserver> is not found" is a normal condition when user has no jobs
+        # "Job <myvnc_*> is not found" is a normal condition when user has no jobs
         is_job_not_found = 'is not found' in stderr and 'bjobs' in command.lower()
         
         if success:

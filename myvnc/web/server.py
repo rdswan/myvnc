@@ -1397,33 +1397,44 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.send_error_response(str(e))
 
     def handle_vnc_start(self):
-        """Handle VNC start request"""
+        """Handle VNC/tmux session start request"""
         try:
-            self.logger.info("Handling VNC start request")
             # Read request body
             content_length = int(self.headers.get("Content-Length", 0))
             post_data = self.rfile.read(content_length).decode("utf-8")
             data = json.loads(post_data)
             
+            # Check session type (default to 'vnc' for backward compatibility)
+            session_type = data.get("session_type", "vnc")
+            self.logger.info(f"Handling {session_type} session start request")
+            
             # Log all incoming data for debugging
-            self.logger.info(f"VNC start request data: {json.dumps(data)}")
+            self.logger.info(f"Session start request data: {json.dumps(data)}")
             
             # Get default settings from config
             vnc_defaults = self.config_manager.get_vnc_defaults()
             lsf_defaults = self.config_manager.get_lsf_defaults()
             
-            # Extract VNC settings from request
-            vnc_settings = {
-                "resolution": data.get("resolution", vnc_defaults.get("resolution")),
-                "window_manager": data.get("window_manager", vnc_defaults.get("window_manager")),
-                "color_depth": vnc_defaults.get("color_depth", 24),
-                "site": data.get("site", vnc_defaults.get("site")),
-                "vncserver_path": vnc_defaults.get("vncserver_path", "/usr/bin/vncserver"),
-                "name": data.get("name", vnc_defaults.get("name_prefix", "vnc_session")),
-                # Add xstartup configuration
-                "xstartup_path": vnc_defaults.get("xstartup_path", ""),
-                "use_custom_xstartup": vnc_defaults.get("use_custom_xstartup", False)
-            }
+            # Extract session settings based on type
+            if session_type == "tmux":
+                # For tmux, we don't need VNC-specific settings
+                session_settings = {
+                    "name": data.get("name", "tmux_session"),
+                    "site": data.get("site", vnc_defaults.get("site"))
+                }
+            else:
+                # For VNC, extract all VNC-specific settings
+                session_settings = {
+                    "resolution": data.get("resolution", vnc_defaults.get("resolution")),
+                    "window_manager": data.get("window_manager", vnc_defaults.get("window_manager")),
+                    "color_depth": vnc_defaults.get("color_depth", 24),
+                    "site": data.get("site", vnc_defaults.get("site")),
+                    "vncserver_path": vnc_defaults.get("vncserver_path", "/usr/bin/vncserver"),
+                    "name": data.get("name", vnc_defaults.get("name_prefix", "vnc_session")),
+                    # Add xstartup configuration
+                    "xstartup_path": vnc_defaults.get("xstartup_path", ""),
+                    "use_custom_xstartup": vnc_defaults.get("use_custom_xstartup", False)
+                }
             
             # Extract LSF settings from request
             lsf_settings = {
@@ -1455,7 +1466,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 lsf_settings["os_select"] = "any"
             
             # Log the settings that will be used
-            self.logger.info(f"Using VNC settings: {json.dumps(vnc_settings)}")
+            self.logger.info(f"Using session settings: {json.dumps(session_settings)}")
             self.logger.info(f"Using LSF settings: {json.dumps(lsf_settings)}")
             
             # Get authenticated user if available
@@ -1466,29 +1477,36 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                     authenticated_user = session.get('username')
                     self.logger.debug(f"Using authenticated user for LSF commands: {authenticated_user}")
             
-            # Check for testing parameter to fake missing home directory
-            fake_no_home = data.get("nohome", False)
-            if fake_no_home:
-                self.logger.warning("Testing mode: faking missing home directory (nohome=true)")
-            
             # Get the login hostname for error messages (where users should SSH to)
             # Use login_host if specified, otherwise fall back to host, then localhost
             login_hostname = self.server_config.get("login_host") or self.server_config.get("host", "localhost")
             
-            # Submit VNC job with authenticated user
-            job_id = self.lsf_manager.submit_vnc_job(vnc_settings, lsf_settings, authenticated_user, fake_no_home=fake_no_home, server_hostname=login_hostname)
+            # Submit job based on session type
+            if session_type == "tmux":
+                # Submit tmux job
+                job_id = self.lsf_manager.submit_tmux_job(session_settings, lsf_settings, authenticated_user, server_hostname=login_hostname)
+                success_message = "tmux session created successfully"
+            else:
+                # Submit VNC job with authenticated user
+                # Check for testing parameter to fake missing home directory (VNC only)
+                fake_no_home = data.get("nohome", False)
+                if fake_no_home:
+                    self.logger.warning("Testing mode: faking missing home directory (nohome=true)")
+                
+                job_id = self.lsf_manager.submit_vnc_job(session_settings, lsf_settings, authenticated_user, fake_no_home=fake_no_home, server_hostname=login_hostname)
+                success_message = "VNC session created successfully"
             
             # Return result - job_id is a string, not a dictionary
             self.send_json_response({
                 "success": True,
-                "message": "VNC session created successfully",
+                "message": success_message,
                 "job_id": job_id,
                 "status": "pending"
             })
         except LSFError as e:
             # LSF errors have clean error messages that should be shown to the user
             error_msg = str(e)
-            self.logger.error(f"LSF error creating VNC session: {error_msg}")
+            self.logger.error(f"LSF error creating session: {error_msg}")
             # Don't print stack trace for LSF errors as they are expected user errors
             self.send_json_response({
                 "success": False,
@@ -1496,7 +1514,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             }, 500)
         except Exception as e:
             # For other unexpected errors, show generic message and log details
-            error_msg = f"Error creating VNC session: {str(e)}"
+            error_msg = f"Error creating session: {str(e)}"
             self.logger.error(error_msg)
             traceback.print_exc()
             self.send_json_response({
