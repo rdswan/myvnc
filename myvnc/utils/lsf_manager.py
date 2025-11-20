@@ -881,6 +881,46 @@ class LSFManager:
                 bsub_cmd.extend(['-E', loginctl_cmd])
                 self.logger.info(f"Adding pre-execution command to enable user lingering: {loginctl_cmd}")
             
+            # Get environment variables for container (XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS)
+            user_uid = None
+            xdg_runtime_dir = None
+            dbus_session_bus_address = None
+            
+            # Get the UID for the authenticated user to set XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS
+            if using_container and authenticated_user:
+                try:
+                    # Get UID for the authenticated user
+                    uid_result = subprocess.run(['id', '-u', authenticated_user], 
+                                               check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    user_uid = uid_result.stdout.decode('utf-8').strip()
+                    
+                    # Calculate XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS
+                    xdg_runtime_dir = f'/run/user/{user_uid}'
+                    dbus_session_bus_address = f'unix:path=/run/user/{user_uid}/bus'
+                    
+                    self.logger.info(f"Calculated environment for user {authenticated_user} (UID={user_uid})")
+                    self.logger.debug(f"XDG_RUNTIME_DIR={xdg_runtime_dir}")
+                    self.logger.debug(f"DBUS_SESSION_BUS_ADDRESS={dbus_session_bus_address}")
+                except subprocess.CalledProcessError as e:
+                    self.logger.error(f"Failed to get UID for user {authenticated_user}: {e.stderr.decode('utf-8')}")
+                    self.logger.warning("Continuing without XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS")
+                except Exception as e:
+                    self.logger.error(f"Error getting UID for user {authenticated_user}: {str(e)}")
+                    self.logger.warning("Continuing without XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS")
+            
+            # Add environment variables to bsub command for container sessions
+            if using_container:
+                env_vars = []
+                if xdg_runtime_dir:
+                    env_vars.append(f'XDG_RUNTIME_DIR={xdg_runtime_dir}')
+                if dbus_session_bus_address:
+                    env_vars.append(f'DBUS_SESSION_BUS_ADDRESS={dbus_session_bus_address}')
+                
+                if env_vars:
+                    env_string = ','.join(env_vars)
+                    bsub_cmd.extend(['-env', env_string])
+                    self.logger.info(f"Adding environment variables to bsub: {env_string}")
+            
             # Build the tmux command
             # Start a new tmux session in detached mode, then monitor it
             # The while loop keeps the job alive while tmux session exists
@@ -891,6 +931,15 @@ class LSFManager:
             if using_container:
                 self.logger.info(f"Wrapping tmux command with singularity container: {container_path}")
                 container_cmd = ['singularity', 'exec', '--cleanenv']
+                
+                # Pass XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS if available
+                # These are required for container sessions to work properly
+                if xdg_runtime_dir:
+                    container_cmd.extend(['--env', f'XDG_RUNTIME_DIR={xdg_runtime_dir}'])
+                    self.logger.info(f"Passing XDG_RUNTIME_DIR={xdg_runtime_dir} to container")
+                if dbus_session_bus_address:
+                    container_cmd.extend(['--env', f'DBUS_SESSION_BUS_ADDRESS={dbus_session_bus_address}'])
+                    self.logger.info(f"Passing DBUS_SESSION_BUS_ADDRESS={dbus_session_bus_address} to container")
                 
                 # Add cgroup resource limits to match LSF reservation
                 container_cmd.extend(['--cpus', str(num_cores)])
