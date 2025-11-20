@@ -134,6 +134,8 @@ document.addEventListener('DOMContentLoaded', function() {
         sessionTypeVnc.addEventListener('change', handleSessionTypeChange);
         sessionTypeTmux.addEventListener('change', handleSessionTypeChange);
         console.log('Session type toggle handlers attached');
+        // Call once to set initial state
+        handleSessionTypeChange();
     }
     
     if (messageClose) {
@@ -730,6 +732,8 @@ function changeTab(tabId) {
             loadVNCConfig(),
             loadLSFConfig()
         ]);
+        // Update button text to match selected session type
+        handleSessionTypeChange();
     } else if (tabId === 'debug-panel') {
         loadDebugInfo();
     }
