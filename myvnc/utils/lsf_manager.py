@@ -882,8 +882,8 @@ class LSFManager:
                 self.logger.info(f"Adding pre-execution command to enable user lingering: {loginctl_cmd}")
             
             # Build the tmux command
-            # Start a new tmux session and keep it running
-            tmux_cmd = f'/usr/bin/tmux new-session -d -s {safe_session_name} && sleep infinity'
+            # Start a new tmux session
+            tmux_cmd = f'/usr/bin/tmux new-session -d -s {safe_session_name}'
             
             # Check if a container is specified
             if using_container:
