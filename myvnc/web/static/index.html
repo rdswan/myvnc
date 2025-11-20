@@ -366,6 +366,185 @@
             font-size: 0.8rem;
         }
         
+        /* Table filter dropdown styling (matching group_audit look & feel) */
+        #manager-table th {
+            background-color: #7868B0 !important;
+            color: white !important;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-size: 12px;
+            vertical-align: top;
+            padding: 12px 8px;
+        }
+        
+        .table-filter-dropdown {
+            position: relative;
+            width: 100%;
+            max-width: 100%;
+            margin-top: 2px;
+        }
+        
+        .filter-dropdown-button {
+            width: 100%;
+            padding: 6px 20px 6px 8px;
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            border-radius: 4px;
+            background-color: rgba(255, 255, 255, 0.25);
+            color: white;
+            font-size: 11px;
+            font-weight: 400;
+            text-transform: none;
+            letter-spacing: 0;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: left;
+            min-height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-sizing: border-box;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+        
+        .filter-dropdown-button:hover {
+            background-color: rgba(255, 255, 255, 0.25);
+            border-color: rgba(255, 255, 255, 0.5);
+        }
+        
+        .filter-dropdown-button:focus {
+            outline: none;
+            border-color: rgba(255, 255, 255, 0.6);
+            background-color: rgba(255, 255, 255, 0.25);
+            box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.2);
+        }
+        
+        .filter-dropdown-arrow {
+            margin-left: 4px;
+            font-size: 10px;
+            color: rgba(255, 255, 255, 0.8);
+            transition: transform 0.2s ease;
+            flex-shrink: 0;
+        }
+        
+        .filter-dropdown-button span:first-child {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        
+        .filter-dropdown-arrow.open {
+            transform: rotate(180deg);
+        }
+        
+        .filter-dropdown-content {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            background-color: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            max-height: 200px;
+            overflow-y: auto;
+            z-index: 1000;
+            display: none;
+            min-width: 200px;
+            width: max-content;
+            max-width: 400px;
+        }
+        
+        .filter-dropdown-content.open {
+            display: block;
+        }
+        
+        .filter-dropdown-search {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+            background-color: #f9f9f9;
+        }
+        
+        .filter-dropdown-search input {
+            width: 100%;
+            padding: 6px 10px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+            font-size: 11px;
+            outline: none;
+            background-color: white !important;
+            color: #333 !important;
+        }
+        
+        .filter-dropdown-search input:focus {
+            border-color: #7868B0;
+            box-shadow: 0 0 0 2px rgba(120, 104, 176, 0.2);
+        }
+        
+        .filter-dropdown-search input::placeholder {
+            color: #999 !important;
+        }
+        
+        .filter-dropdown-options {
+            max-height: 150px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(0, 0, 0, 0.3) rgba(0, 0, 0, 0.1);
+        }
+        
+        .filter-dropdown-options::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .filter-dropdown-options::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.1);
+            border-radius: 4px;
+        }
+        
+        .filter-dropdown-options::-webkit-scrollbar-thumb {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 4px;
+        }
+        
+        .filter-dropdown-options::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 0, 0, 0.5);
+        }
+        
+        .filter-dropdown-option {
+            padding: 8px 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            font-size: 11px;
+            color: #333;
+            transition: background-color 0.1s ease;
+        }
+        
+        .filter-dropdown-option:hover {
+            background-color: #f5f5f5;
+        }
+        
+        .filter-dropdown-option.selected {
+            background-color: #7868B0;
+            color: white;
+        }
+        
+        .filter-dropdown-option.selected:hover {
+            background-color: #6a5acd;
+        }
+        
+        .filter-dropdown-option input[type="checkbox"] {
+            margin-right: 8px;
+            transform: scale(1.1);
+        }
+        
+        .filter-selected-count {
+            color: rgba(255, 255, 255, 0.8);
+            font-size: 10px;
+            margin-left: 5px;
+        }
+        
         /* Multi-select styling for override modal - completely override browser defaults */
         #override-modal select[multiple] {
             border: 1px solid #ddd;
@@ -563,24 +742,125 @@
                     <button id="manager-refresh-button" class="button primary">
                         <i class="fas fa-sync-alt"></i> Refresh
                     </button>
+                    <button id="clear-all-filters-button" class="button secondary" style="margin-left: 10px;" onclick="clearAllManagerFilters();">
+                        <i class="fas fa-times-circle"></i> Clear All Filters
+                    </button>
                 </div>
                 
                 <div class="table-container">
                     <table id="manager-table">
                         <thead>
                             <tr>
-                                <th>Job ID</th>
-                                <th>Name</th>
-                                <th>User</th>
-                                <th>Status</th>
-                                <th>Type</th>
-                                <th>Queue</th>
-                                <th>Resources</th>
-                                <th>OS</th>
-                                <th>Host</th>
-                                <th>Display</th>
-                                <th>Runtime</th>
-                                <th>Actions</th>
+                                <th>JOB ID</th>
+                                <th>
+                                    <div>NAME</div>
+                                    <div class="table-filter-dropdown" id="filter-name-dropdown">
+                                        <button class="filter-dropdown-button" type="button">
+                                            <span>All</span>
+                                            <span class="filter-dropdown-arrow">▼</span>
+                                        </button>
+                                        <div class="filter-dropdown-content">
+                                            <div class="filter-dropdown-search">
+                                                <input type="text" placeholder="Search..." />
+                                            </div>
+                                            <div class="filter-dropdown-options"></div>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th>
+                                    <div>USER</div>
+                                    <div class="table-filter-dropdown" id="filter-user-dropdown">
+                                        <button class="filter-dropdown-button" type="button">
+                                            <span>All</span>
+                                            <span class="filter-dropdown-arrow">▼</span>
+                                        </button>
+                                        <div class="filter-dropdown-content">
+                                            <div class="filter-dropdown-search">
+                                                <input type="text" placeholder="Search..." />
+                                            </div>
+                                            <div class="filter-dropdown-options"></div>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th>
+                                    <div>STATUS</div>
+                                    <div class="table-filter-dropdown" id="filter-status-dropdown">
+                                        <button class="filter-dropdown-button" type="button">
+                                            <span>All</span>
+                                            <span class="filter-dropdown-arrow">▼</span>
+                                        </button>
+                                        <div class="filter-dropdown-content">
+                                            <div class="filter-dropdown-search">
+                                                <input type="text" placeholder="Search..." />
+                                            </div>
+                                            <div class="filter-dropdown-options"></div>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th>
+                                    <div>TYPE</div>
+                                    <div class="table-filter-dropdown" id="filter-type-dropdown">
+                                        <button class="filter-dropdown-button" type="button">
+                                            <span>All</span>
+                                            <span class="filter-dropdown-arrow">▼</span>
+                                        </button>
+                                        <div class="filter-dropdown-content">
+                                            <div class="filter-dropdown-search">
+                                                <input type="text" placeholder="Search..." />
+                                            </div>
+                                            <div class="filter-dropdown-options"></div>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th>
+                                    <div>QUEUE</div>
+                                    <div class="table-filter-dropdown" id="filter-queue-dropdown">
+                                        <button class="filter-dropdown-button" type="button">
+                                            <span>All</span>
+                                            <span class="filter-dropdown-arrow">▼</span>
+                                        </button>
+                                        <div class="filter-dropdown-content">
+                                            <div class="filter-dropdown-search">
+                                                <input type="text" placeholder="Search..." />
+                                            </div>
+                                            <div class="filter-dropdown-options"></div>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th>RESOURCES</th>
+                                <th>
+                                    <div>OS</div>
+                                    <div class="table-filter-dropdown" id="filter-os-dropdown">
+                                        <button class="filter-dropdown-button" type="button">
+                                            <span>All</span>
+                                            <span class="filter-dropdown-arrow">▼</span>
+                                        </button>
+                                        <div class="filter-dropdown-content">
+                                            <div class="filter-dropdown-search">
+                                                <input type="text" placeholder="Search..." />
+                                            </div>
+                                            <div class="filter-dropdown-options"></div>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th>
+                                    <div>HOST</div>
+                                    <div class="table-filter-dropdown" id="filter-host-dropdown">
+                                        <button class="filter-dropdown-button" type="button">
+                                            <span>All</span>
+                                            <span class="filter-dropdown-arrow">▼</span>
+                                        </button>
+                                        <div class="filter-dropdown-content">
+                                            <div class="filter-dropdown-search">
+                                                <input type="text" placeholder="Search..." />
+                                            </div>
+                                            <div class="filter-dropdown-options"></div>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th>DISPLAY</th>
+                                <th>RUNTIME</th>
+                                <th>ACTIONS</th>
                             </tr>
                         </thead>
                         <tbody id="manager-table-body">

@@ -2769,6 +2769,9 @@ async function refreshManagerList() {
 
         // Ensure sorting functionality attached (re-attaching safe)
         enableTableSorting('manager-table');
+        
+        // Setup table filters after populating the table
+        setupManagerTableFilters(jobs);
 
         // Attach event listeners
         document.querySelectorAll('#manager-mode .kill-button').forEach(button => {
@@ -3114,6 +3117,257 @@ function closePersistentDialog() {
     if (dialog) {
         dialog.remove();
     }
+}
+
+// Manager table filter functionality
+let managerTableFilters = {
+    name: [],
+    user: [],
+    status: [],
+    type: [],
+    queue: [],
+    os: [],
+    host: []
+};
+
+// Setup manager table filters
+function setupManagerTableFilters(jobs) {
+    // Get all unique values for each filterable column
+    const filterColumns = {
+        name: { id: 'filter-name-dropdown', values: new Set() },
+        user: { id: 'filter-user-dropdown', values: new Set() },
+        status: { id: 'filter-status-dropdown', values: new Set() },
+        type: { id: 'filter-type-dropdown', values: new Set() },
+        queue: { id: 'filter-queue-dropdown', values: new Set() },
+        os: { id: 'filter-os-dropdown', values: new Set() },
+        host: { id: 'filter-host-dropdown', values: new Set() }
+    };
+    
+    // Collect unique values from jobs
+    jobs.forEach(job => {
+        filterColumns.name.values.add(job.name || '');
+        filterColumns.user.values.add(job.user || '');
+        filterColumns.status.values.add(job.status || '');
+        filterColumns.type.values.add(job.session_type || 'Unknown');
+        filterColumns.queue.values.add(job.queue || '');
+        filterColumns.os.values.add(job.os || 'N/A');
+        filterColumns.host.values.add(job.host || 'N/A');
+    });
+    
+    // Setup each filter dropdown
+    Object.keys(filterColumns).forEach(columnKey => {
+        const column = filterColumns[columnKey];
+        const dropdown = document.getElementById(column.id);
+        if (!dropdown) return;
+        
+        const button = dropdown.querySelector('.filter-dropdown-button');
+        const content = dropdown.querySelector('.filter-dropdown-content');
+        const arrow = dropdown.querySelector('.filter-dropdown-arrow');
+        const searchInput = dropdown.querySelector('.filter-dropdown-search input');
+        const optionsContainer = dropdown.querySelector('.filter-dropdown-options');
+        const textSpan = button.querySelector('span:first-child');
+        
+        if (!button || !content || !arrow || !searchInput || !optionsContainer || !textSpan) return;
+        
+        // Populate options
+        const sortedValues = Array.from(column.values).sort();
+        optionsContainer.innerHTML = '';
+        
+        sortedValues.forEach(value => {
+            const option = document.createElement('div');
+            option.className = 'filter-dropdown-option';
+            option.innerHTML = `
+                <input type="checkbox" value="${value}" id="${column.id}-${value.replace(/\s+/g, '_')}">
+                <label for="${column.id}-${value.replace(/\s+/g, '_')}">${value || '(empty)'}</label>
+            `;
+            
+            const checkbox = option.querySelector('input[type="checkbox"]');
+            checkbox.addEventListener('change', () => {
+                if (checkbox.checked) {
+                    if (!managerTableFilters[columnKey].includes(value)) {
+                        managerTableFilters[columnKey].push(value);
+                    }
+                    option.classList.add('selected');
+                } else {
+                    managerTableFilters[columnKey] = managerTableFilters[columnKey].filter(v => v !== value);
+                    option.classList.remove('selected');
+                }
+                
+                updateFilterButtonText(columnKey, textSpan);
+                applyManagerTableFilters();
+            });
+            
+            optionsContainer.appendChild(option);
+        });
+        
+        // Toggle dropdown
+        button.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const isOpen = content.classList.contains('open');
+            
+            // Close all dropdowns
+            document.querySelectorAll('.filter-dropdown-content').forEach(d => {
+                d.classList.remove('open');
+            });
+            document.querySelectorAll('.filter-dropdown-arrow').forEach(a => {
+                a.classList.remove('open');
+            });
+            
+            // Toggle current dropdown
+            if (!isOpen) {
+                content.classList.add('open');
+                arrow.classList.add('open');
+                searchInput.focus();
+            }
+        });
+        
+        // Search functionality
+        searchInput.addEventListener('input', (e) => {
+            const searchTerm = e.target.value.toLowerCase();
+            optionsContainer.querySelectorAll('.filter-dropdown-option').forEach(option => {
+                const label = option.querySelector('label').textContent.toLowerCase();
+                option.style.display = label.includes(searchTerm) ? 'flex' : 'none';
+            });
+        });
+        
+        // Prevent dropdown from closing when clicking inside
+        content.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+        
+        // Prevent table header sorting when clicking on the dropdown
+        dropdown.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+    });
+    
+    // Close all dropdowns when clicking outside
+    document.addEventListener('click', () => {
+        document.querySelectorAll('.filter-dropdown-content').forEach(d => {
+            d.classList.remove('open');
+        });
+        document.querySelectorAll('.filter-dropdown-arrow').forEach(a => {
+            a.classList.remove('open');
+        });
+    });
+}
+
+// Update filter button text based on selections
+function updateFilterButtonText(columnKey, textSpan) {
+    const selectedCount = managerTableFilters[columnKey].length;
+    if (selectedCount === 0) {
+        textSpan.textContent = 'All';
+    } else if (selectedCount === 1) {
+        textSpan.textContent = managerTableFilters[columnKey][0];
+    } else {
+        textSpan.textContent = `${selectedCount} selected`;
+    }
+}
+
+// Apply filters to manager table
+function applyManagerTableFilters() {
+    const tbody = document.getElementById('manager-table-body');
+    if (!tbody) return;
+    
+    const rows = tbody.querySelectorAll('tr:not(.loading-row)');
+    
+    rows.forEach(row => {
+        let shouldShow = true;
+        
+        // Check each filter
+        const cells = row.querySelectorAll('td');
+        
+        // Name filter (column 1)
+        if (managerTableFilters.name.length > 0) {
+            const nameCell = cells[1]?.textContent.trim();
+            if (!managerTableFilters.name.includes(nameCell)) {
+                shouldShow = false;
+            }
+        }
+        
+        // User filter (column 2)
+        if (managerTableFilters.user.length > 0) {
+            const userCell = cells[2]?.textContent.trim();
+            if (!managerTableFilters.user.includes(userCell)) {
+                shouldShow = false;
+            }
+        }
+        
+        // Status filter (column 3)
+        if (managerTableFilters.status.length > 0) {
+            const statusCell = cells[3]?.textContent.trim();
+            if (!managerTableFilters.status.includes(statusCell)) {
+                shouldShow = false;
+            }
+        }
+        
+        // Type filter (column 4)
+        if (managerTableFilters.type.length > 0) {
+            const typeCell = cells[4]?.textContent.trim();
+            if (!managerTableFilters.type.includes(typeCell)) {
+                shouldShow = false;
+            }
+        }
+        
+        // Queue filter (column 5)
+        if (managerTableFilters.queue.length > 0) {
+            const queueCell = cells[5]?.textContent.trim();
+            if (!managerTableFilters.queue.includes(queueCell)) {
+                shouldShow = false;
+            }
+        }
+        
+        // OS filter (column 7)
+        if (managerTableFilters.os.length > 0) {
+            const osCell = cells[7]?.textContent.trim();
+            if (!managerTableFilters.os.includes(osCell)) {
+                shouldShow = false;
+            }
+        }
+        
+        // Host filter (column 8)
+        if (managerTableFilters.host.length > 0) {
+            const hostCell = cells[8]?.textContent.trim();
+            if (!managerTableFilters.host.includes(hostCell)) {
+                shouldShow = false;
+            }
+        }
+        
+        // Show or hide row
+        row.style.display = shouldShow ? '' : 'none';
+    });
+}
+
+// Clear all manager table filters
+function clearAllManagerFilters() {
+    // Reset all filters
+    managerTableFilters = {
+        name: [],
+        user: [],
+        status: [],
+        type: [],
+        queue: [],
+        os: [],
+        host: []
+    };
+    
+    // Uncheck all checkboxes and remove selected class
+    document.querySelectorAll('.filter-dropdown-option').forEach(option => {
+        const checkbox = option.querySelector('input[type="checkbox"]');
+        if (checkbox) {
+            checkbox.checked = false;
+        }
+        option.classList.remove('selected');
+    });
+    
+    // Reset all button texts to "All"
+    document.querySelectorAll('.filter-dropdown-button span:first-child').forEach(span => {
+        span.textContent = 'All';
+    });
+    
+    // Reapply filters (which will show all rows)
+    applyManagerTableFilters();
 }
 
 // Test function to simulate missing home directory
