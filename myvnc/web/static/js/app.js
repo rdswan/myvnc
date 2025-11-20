@@ -1216,6 +1216,9 @@ async function refreshVNCList(withRetries = false) {
             // Format runtime for display
             const formattedRuntime = formatRuntime(job.runtime_display || job.runtime || 'N/A');
             
+            // Determine if this is a tmux session
+            const isTmux = job.session_type === 'tmux';
+            
             // Create cells
             row.innerHTML = `
                 <td>${job.job_id}</td>
@@ -1229,17 +1232,23 @@ async function refreshVNCList(withRetries = false) {
                 <td>${job.queue}</td>
                 <td>${job.resources_unknown ? 'Unknown' : `${job.num_cores || '-'} cores, ${job.memory_gb || '-'} GB`}</td>
                 <td>${job.os || 'N/A'}</td>
-                <td title="VNC Connection: ${connectionInfo}">${job.host || 'N/A'}</td>
-                <td>${job.port || 'N/A'}</td>
+                <td title="${isTmux ? 'Host: ' + (job.host || 'N/A') : 'VNC Connection: ' + connectionInfo}">${job.host || 'N/A'}</td>
+                <td>${isTmux ? 'N/A' : (job.port || 'N/A')}</td>
                 <td>${formattedRuntime}</td>
                 <td class="actions-cell">
-                    <button class="button secondary connect-button" data-job-id="${job.job_id}" title="Connect to VNC (${connectionInfo})">
-                        <i class="fas fa-plug"></i> Connect
-                    </button>
-                    <button class="button secondary vnc-viewer-button" data-job-id="${job.job_id}" title="VNC Viewer Instructions">
-                        <i class="fas fa-desktop"></i> Connect w/ vncviewer
-                    </button>
-                    <button class="button danger kill-button" data-job-id="${job.job_id}" title="Kill VNC Session">
+                    ${isTmux ? `
+                        <button class="button secondary tmux-connect-button" data-job-id="${job.job_id}" title="tmux Connection Instructions">
+                            <i class="fas fa-terminal"></i> Connect
+                        </button>
+                    ` : `
+                        <button class="button secondary connect-button" data-job-id="${job.job_id}" title="Connect to VNC (${connectionInfo})">
+                            <i class="fas fa-plug"></i> Connect
+                        </button>
+                        <button class="button secondary vnc-viewer-button" data-job-id="${job.job_id}" title="VNC Viewer Instructions">
+                            <i class="fas fa-desktop"></i> Connect w/ vncviewer
+                        </button>
+                    `}
+                    <button class="button danger kill-button" data-job-id="${job.job_id}" title="Kill ${isTmux ? 'tmux' : 'VNC'} Session">
                         <i class="fas fa-times"></i> Kill
                     </button>
                 </td>
@@ -1278,6 +1287,17 @@ async function refreshVNCList(withRetries = false) {
                 const job = jobs.find(j => j.job_id === jobId);
                 if (job) {
                     showVNCViewerInstructions(job);
+                }
+            });
+        });
+
+        document.querySelectorAll('.tmux-connect-button').forEach(button => {
+            button.addEventListener('click', () => {
+                const jobId = button.getAttribute('data-job-id');
+                // Find job info
+                const job = jobs.find(j => j.job_id === jobId);
+                if (job) {
+                    showTmuxConnectionInstructions(job);
                 }
             });
         });
@@ -2709,6 +2729,9 @@ async function refreshManagerList() {
             
             // Format runtime for display
             const formattedRuntime = formatRuntime(job.runtime_display || job.runtime || 'N/A');
+            
+            // Determine if this is a tmux session
+            const isTmux = job.session_type === 'tmux';
 
             row.innerHTML = `
                 <td>${job.job_id}</td>
@@ -2719,17 +2742,23 @@ async function refreshManagerList() {
                 <td>${job.queue}</td>
                 <td>${job.resources_unknown ? 'Unknown' : `${job.num_cores || '-'} cores, ${job.memory_gb || '-'} GB`}</td>
                 <td>${job.os || 'N/A'}</td>
-                <td title="VNC Connection: ${connectionInfo}">${job.host || 'N/A'}</td>
-                <td>${job.port || 'N/A'}</td>
+                <td title="${isTmux ? 'Host: ' + (job.host || 'N/A') : 'VNC Connection: ' + connectionInfo}">${job.host || 'N/A'}</td>
+                <td>${isTmux ? 'N/A' : (job.port || 'N/A')}</td>
                 <td>${formattedRuntime}</td>
                 <td class="actions-cell">
-                    <button class="button secondary connect-button" data-job-id="${job.job_id}" title="Connect to VNC (${connectionInfo})">
-                        <i class="fas fa-plug"></i> Connect
-                    </button>
-                    <button class="button secondary vnc-viewer-button" data-job-id="${job.job_id}" title="VNC Viewer Instructions">
-                        <i class="fas fa-desktop"></i> Connect w/ vncviewer
-                    </button>
-                    <button class="button danger kill-button" data-job-id="${job.job_id}" title="Kill VNC Session">
+                    ${isTmux ? `
+                        <button class="button secondary tmux-connect-button" data-job-id="${job.job_id}" title="tmux Connection Instructions">
+                            <i class="fas fa-terminal"></i> Connect
+                        </button>
+                    ` : `
+                        <button class="button secondary connect-button" data-job-id="${job.job_id}" title="Connect to VNC (${connectionInfo})">
+                            <i class="fas fa-plug"></i> Connect
+                        </button>
+                        <button class="button secondary vnc-viewer-button" data-job-id="${job.job_id}" title="VNC Viewer Instructions">
+                            <i class="fas fa-desktop"></i> Connect w/ vncviewer
+                        </button>
+                    `}
+                    <button class="button danger kill-button" data-job-id="${job.job_id}" title="Kill ${isTmux ? 'tmux' : 'VNC'} Session">
                         <i class="fas fa-times"></i> Kill
                     </button>
                 </td>
@@ -2765,6 +2794,16 @@ async function refreshManagerList() {
                 const job = jobs.find(j => j.job_id === jobId);
                 if (job) {
                     showVNCViewerInstructions(job);
+                }
+            });
+        });
+
+        document.querySelectorAll('#manager-mode .tmux-connect-button').forEach(button => {
+            button.addEventListener('click', () => {
+                const jobId = button.getAttribute('data-job-id');
+                const job = jobs.find(j => j.job_id === jobId);
+                if (job) {
+                    showTmuxConnectionInstructions(job);
                 }
             });
         });
@@ -2922,6 +2961,104 @@ function showVNCViewerInstructions(job) {
             </div>
         </div>
     `);
+}
+
+// Show tmux connection instructions
+function showTmuxConnectionInstructions(job) {
+    // Check if we have host information
+    if (!job.host) {
+        showMessage(`Connection details unavailable for ${job.name || 'tmux session'}. Host information missing.`, 'error');
+        return;
+    }
+    
+    const hostname = job.host;
+    const sessionName = job.name || 'myvnc_tmux_session';
+    const sshCommand = `ssh ${hostname}`;
+    // Properly escape session name with quotes for tmux
+    const tmuxAttachCommand = `tmux attach-session -t '${sessionName}'`;
+    const fullCommand = `${sshCommand} -t "${tmuxAttachCommand}"`;
+    
+    // Create persistent dialog
+    showPersistentDialog('tmux Connection Instructions', `
+        <div class="vnc-instructions">
+            <p class="instruction-intro">To connect to this tmux session:</p>
+            
+            <div class="instruction-sections">
+                <div class="instruction-section">
+                    <h4>Quick Connect (One Command):</h4>
+                    <div class="command-container">
+                        <code class="command-text">${fullCommand}</code>
+                        <button class="button mini copy-button" data-copy-text="${fullCommand.replace(/"/g, '&quot;')}">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="instruction-section">
+                    <h4>Step-by-Step Instructions:</h4>
+                    <ol class="instruction-list">
+                        <li><strong>SSH to the host:</strong>
+                            <div class="command-container">
+                                <code class="command-text">${sshCommand}</code>
+                                <button class="button mini copy-button" data-copy-text="${sshCommand}">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                        </li>
+                        <li><strong>Attach to the tmux session:</strong>
+                            <div class="command-container">
+                                <code class="command-text">${tmuxAttachCommand}</code>
+                                <button class="button mini copy-button" data-copy-text="${tmuxAttachCommand.replace(/"/g, '&quot;')}">
+                                    <i class="fas fa-copy"></i>
+                                </button>
+                            </div>
+                        </li>
+                    </ol>
+                </div>
+                
+                <div class="instruction-section">
+                    <h4>Connection Details:</h4>
+                    <div class="connection-details">
+                        <div class="detail-row">
+                            <span class="detail-label">Host:</span>
+                            <code>${hostname}</code>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Session Name:</span>
+                            <code>${sessionName}</code>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">Job ID:</span>
+                            <code>${job.job_id}</code>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="instruction-section">
+                    <h4>Useful tmux Commands:</h4>
+                    <ul class="instruction-list">
+                        <li><code>Ctrl+b d</code> - Detach from session (keeps it running)</li>
+                        <li><code>tmux ls</code> - List all tmux sessions</li>
+                        <li><code>exit</code> - Exit and close the tmux session</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="instruction-note">
+                <p><strong>Note:</strong> Detaching from the session (Ctrl+b d) will keep your work running. You can reconnect anytime using the attach command.</p>
+            </div>
+        </div>
+    `);
+    
+    // Attach event listeners to copy buttons with data attributes
+    setTimeout(() => {
+        document.querySelectorAll('.copy-button[data-copy-text]').forEach(button => {
+            button.addEventListener('click', function() {
+                const textToCopy = this.getAttribute('data-copy-text');
+                copyToClipboard(textToCopy);
+            });
+        });
+    }, 0);
 }
 
 // Show persistent dialog (doesn't auto-hide)

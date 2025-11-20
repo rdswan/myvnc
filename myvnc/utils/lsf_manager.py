@@ -1291,25 +1291,33 @@ class LSFManager:
                             
                     self.logger.debug(f"Cleaned host name: '{host}'")
                     
-                    # Default display name
-                    display_name = "VNC Session"
-                    
-                    # Extract display name from command
-                    name_match = re.search(r'-name\s+([^\s"]+|"([^"]+)")', command)
-                    if name_match:
-                        if name_match.group(2):  # If captured in quotes
-                            display_name = name_match.group(2)
-                        else:
-                            display_name = name_match.group(1)
-                        self.logger.debug(f"Found display name: {display_name}")
-                    
-                    # Determine session type from job_name
+                    # Determine session type from job_name first
                     session_type = "Unknown"
                     if job_name == "myvnc_vncserver":
                         session_type = "VNC"
                     elif job_name == "myvnc_tmux":
                         session_type = "tmux"
                     self.logger.debug(f"Job {job_id} session type: {session_type} (job_name: {job_name})")
+                    
+                    # Default display name
+                    display_name = "VNC Session" if session_type == "VNC" else "tmux Session"
+                    
+                    # Extract display/session name from command based on session type
+                    if session_type == "tmux":
+                        # For tmux, extract session name from -s flag
+                        name_match = re.search(r'-s\s+([^\s&]+)', command)
+                        if name_match:
+                            display_name = name_match.group(1)
+                            self.logger.debug(f"Found tmux session name: {display_name}")
+                    else:
+                        # For VNC, extract display name from -name flag
+                        name_match = re.search(r'-name\s+([^\s"]+|"([^"]+)")', command)
+                        if name_match:
+                            if name_match.group(2):  # If captured in quotes
+                                display_name = name_match.group(2)
+                            else:
+                                display_name = name_match.group(1)
+                            self.logger.debug(f"Found VNC display name: {display_name}")
                     
                     # Try to extract the display number from the command
                     display_match = re.search(r':(\d+)', command)
@@ -1436,7 +1444,7 @@ class LSFManager:
             # Build the command dynamically depending on whether we filter by user
             cmd = ['bjobs', '-u', user]
 
-            cmd.extend(['-J', 'myvnc_*', '-o', "jobid stat user queue from_host exec_host submit_time job_name slots max_req_proc combined_resreq"])
+            cmd.extend(['-J', 'myvnc_*', '-o', "jobid stat user queue from_host exec_host submit_time job_name slots max_req_proc combined_resreq command"])
             
             self.logger.info(f"Executing command: {' '.join(cmd)}")
             
@@ -1463,6 +1471,19 @@ class LSFManager:
                     
                     # Get job ID and basic info
                     job_id = fields[0].strip()
+                    
+                    # Extract job_name early (needed for session type detection)
+                    job_name = ""
+                    if len(fields) > 7:
+                        job_name = fields[7].strip()
+                    
+                    # Determine session type from job_name early
+                    session_type = "Unknown"
+                    if job_name == "myvnc_vncserver":
+                        session_type = "VNC"
+                    elif job_name == "myvnc_tmux":
+                        session_type = "tmux"
+                    self.logger.debug(f"Job {job_id} session type: {session_type} (job_name: {job_name})")
                     
                     # Extract submit time
                     submit_time = "N/A"  # Default value
@@ -1515,8 +1536,76 @@ class LSFManager:
                     if len(fields) > 10:
                         max_req_proc = fields[10].strip()
                     
+                    # Extract combined resource requirements and command if present early
+                    # In newer bjobs -o output, it would be after max_req_proc field
+                    # The format is: combined_resreq followed by command (everything after)
+                    command = ""
+                    if len(fields) > 11:
+                        # Everything from field 11 onwards could be combined_resreq and command
+                        # We'll need to parse carefully
+                        remaining = ' '.join(fields[11:])
+                        
+                        # Try to split by common command patterns
+                        # Look for common command starts like /bin/sh, bash, singularity, tmux, vncserver, etc.
+                        cmd_start_patterns = [r'\s+((?:/[\w/.]+/)?(?:bash|sh|singularity|tmux|vncserver|Xvnc)\s+.*)']
+                        
+                        for pattern in cmd_start_patterns:
+                            match = re.search(pattern, remaining)
+                            if match:
+                                command = match.group(1)
+                                combined_resreq = remaining[:match.start()].strip()
+                                break
+                        
+                        # If no match found, treat everything as combined_resreq
+                        if not command:
+                            combined_resreq = remaining
+                    
                     # Log exact values for debugging
                     self.logger.debug(f"Job {fields[0].strip()} raw field values - slots: '{slots}', max_req_proc: '{max_req_proc}'")
+                    
+                    # Check if combined_resreq is just a dash, indicating unknown resources
+                    if combined_resreq == "-" or (len(fields) > 11 and combined_resreq == ""):
+                        self.logger.info(f"Job {job_id} has unknown resource requirements")
+                        num_cores = None
+                        memory_gb = None
+                        resources_unknown = True
+                        
+                        # Extract display name even for unknown resources
+                        display_name_early = "VNC Session" if session_type == "VNC" else "tmux Session"
+                        if command:
+                            if session_type == "tmux":
+                                name_match = re.search(r'-s\s+([^\s&]+)', command)
+                                if name_match:
+                                    display_name_early = name_match.group(1)
+                            else:
+                                name_match = re.search(r'-name\s+([^\s"]+|"([^"]+)")', command)
+                                if name_match:
+                                    display_name_early = name_match.group(2) if name_match.group(2) else name_match.group(1)
+                        
+                        job = {
+                            'job_id': fields[0].strip(),
+                            'name': display_name_early,
+                            'user': fields[2].strip(),
+                            'status': fields[1].strip(),
+                            'queue': fields[3].strip(),
+                            'from_host': fields[4].strip(),
+                            'exec_host': fields[5].strip(),
+                            'host': fields[5].strip(),
+                            'runtime': 'N/A',
+                            'runtime_display': 'N/A',
+                            'submit_time': submit_time,
+                            'submit_time_raw': submit_time_raw,
+                            'resource_req': combined_resreq,
+                            'num_cores': None,
+                            'cores': None,
+                            'mem_gb': None,
+                            'memory_gb': None,
+                            'resources_unknown': True,
+                            'os': 'N/A',  # Add OS field
+                            'session_type': session_type  # Add session type
+                        }
+                        jobs.append(job)
+                        continue
                     
                     # Determine number of cores - first try max_req_proc, then slots
                     # Default value first
@@ -1537,41 +1626,8 @@ class LSFManager:
                         except (ValueError, TypeError):
                             self.logger.warning(f"Could not parse slots value '{slots}' as integer")
                     
-                    # Extract combined resource requirements if present
-                    # In newer bjobs -o output, it would be after max_req_proc field
-                    if len(fields) > 11:
-                        combined_resreq = ' '.join(fields[11:])
-                        
-                        # Check if combined_resreq is just a dash, indicating unknown resources
-                        if combined_resreq == "-":
-                            self.logger.info(f"Job {job_id} has unknown resource requirements")
-                            num_cores = None
-                            memory_gb = None
-                            resources_unknown = True
-                            job = {
-                                'job_id': fields[0].strip(),
-                                'user': fields[2].strip(),
-                                'status': fields[1].strip(),
-                                'queue': fields[3].strip(),
-                                'from_host': fields[4].strip(),
-                                'exec_host': fields[5].strip(),
-                                'host': fields[5].strip(),
-                                'runtime': 'N/A',
-                                'runtime_display': 'N/A',
-                                'submit_time': submit_time,
-                                'submit_time_raw': submit_time_raw,
-                                'resource_req': combined_resreq,
-                                'num_cores': None,
-                                'cores': None,
-                                'mem_gb': None,
-                                'memory_gb': None,
-                                'resources_unknown': True,
-                                'os': 'N/A',  # Add OS field
-                                'session_type': session_type  # Add session type
-                            }
-                            jobs.append(job)
-                            continue
-                            
+                    # Parse resource requirements if available
+                    if combined_resreq:
                         self.logger.debug(f"Found combined resreq: {combined_resreq}")
                         
                         # Extract cores from affinity[core(N)] pattern
@@ -1596,18 +1652,26 @@ class LSFManager:
                         else:
                             self.logger.debug(f"No memory information found in combined_resreq: {combined_resreq}")
                     
-                    # Extract job_name if available
-                    job_name = ""
-                    if len(fields) > 7:
-                        job_name = fields[7].strip()
+                    # Default display name
+                    display_name = "VNC Session" if session_type == "VNC" else "tmux Session"
                     
-                    # Determine session type from job_name
-                    session_type = "Unknown"
-                    if job_name == "myvnc_vncserver":
-                        session_type = "VNC"
-                    elif job_name == "myvnc_tmux":
-                        session_type = "tmux"
-                    self.logger.debug(f"Job {job_id} session type: {session_type} (job_name: {job_name})")
+                    # Extract display/session name from command based on session type
+                    if command:
+                        if session_type == "tmux":
+                            # For tmux, extract session name from -s flag
+                            name_match = re.search(r'-s\s+([^\s&]+)', command)
+                            if name_match:
+                                display_name = name_match.group(1)
+                                self.logger.debug(f"Found tmux session name: {display_name}")
+                        else:
+                            # For VNC, extract display name from -name flag
+                            name_match = re.search(r'-name\s+([^\s"]+|"([^"]+)")', command)
+                            if name_match:
+                                if name_match.group(2):  # If captured in quotes
+                                    display_name = name_match.group(2)
+                                else:
+                                    display_name = name_match.group(1)
+                                self.logger.debug(f"Found VNC display name: {display_name}")
                     
                     # Extract OS information from combined_resreq or command
                     os_name = 'N/A'
@@ -1652,6 +1716,7 @@ class LSFManager:
                     # Create basic job info
                     job = {
                         'job_id': fields[0].strip(),
+                        'name': display_name,
                         'user': fields[2].strip(),
                         'status': fields[1].strip(),
                         'queue': fields[3].strip(),
