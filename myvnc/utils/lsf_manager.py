@@ -1173,6 +1173,8 @@ class LSFManager:
                         return self._get_active_vnc_jobs_standard(authenticated_user, all_users=all_users)
                     
                     # Extract fields
+                    # Note: job_name is the LAST field, so we extract it from the end
+                    # The command field may contain semicolons which interfere with delimiter parsing
                     job_id = parts[0]
                     status = parts[1]
                     job_user = parts[2] 
@@ -1182,11 +1184,17 @@ class LSFManager:
                     slots = parts[6] if len(parts) > 6 else None
                     max_req_proc = parts[7] if len(parts) > 7 else None
                     combined_resreq = parts[8] if len(parts) > 8 else ""
-                    command = parts[9] if len(parts) > 9 else ""
-                    job_name = parts[10] if len(parts) > 10 else ""
                     
-                    self.logger.debug(f"Job {job_id}: status={status}, user={job_user}, host={first_host}")
-                    self.logger.debug(f"Job {job_id}: combined_resreq='{combined_resreq}'")
+                    # job_name is the last field (after command)
+                    job_name = parts[-1].strip() if len(parts) > 10 else ""
+                    
+                    # command is everything between combined_resreq and job_name
+                    # Rejoin parts[9] through parts[-2] to reconstruct the command with any semicolons it contains
+                    command = ';'.join(parts[9:-1]) if len(parts) > 10 else (parts[9] if len(parts) > 9 else "")
+                    
+                    self.logger.info(f"Job {job_id}: status={status}, user={job_user}, host={first_host}")
+                    self.logger.info(f"Job {job_id}: EXTRACTED job_name='{job_name}' (from parts[-1]), num_parts={len(parts)}")
+                    self.logger.info(f"Job {job_id}: command preview: {command[:100] if command else 'N/A'}...")
                     
                     # Format run time
                     run_time_parts = run_time.split(':')
@@ -1344,11 +1352,17 @@ class LSFManager:
                     
                     # Determine session type from job_name first
                     session_type = "Unknown"
-                    if job_name == "myvnc_vncserver":
+                    job_name_clean = job_name.strip() if job_name else ""
+                    self.logger.info(f"Job {job_id} BEFORE SESSION TYPE CHECK: job_name_clean='{job_name_clean}', len={len(job_name_clean)}, repr={repr(job_name_clean)}")
+                    if job_name_clean == "myvnc_vncserver":
                         session_type = "VNC"
-                    elif job_name == "myvnc_tmux":
+                        self.logger.info(f"Job {job_id} matched VNC session")
+                    elif job_name_clean == "myvnc_tmux":
                         session_type = "tmux"
-                    self.logger.debug(f"Job {job_id} session type: {session_type} (job_name: {job_name})")
+                        self.logger.info(f"Job {job_id} matched tmux session")
+                    else:
+                        self.logger.warning(f"Job {job_id} NO MATCH - job_name_clean='{job_name_clean}' (expected 'myvnc_vncserver' or 'myvnc_tmux')")
+                    self.logger.info(f"Job {job_id} FINAL session type: {session_type}")
                     
                     # Default display name
                     display_name = "VNC Session" if session_type == "VNC" else "tmux Session"
@@ -1440,6 +1454,7 @@ class LSFManager:
                         'os': os_name,  # Add the OS name
                         'session_type': session_type  # Add the session type
                     }
+                    self.logger.info(f"Job {job_id} CREATED JOB DICT with session_type='{session_type}'")
                     
                     # Add resource information based on what we found
                     if resources_unknown:
@@ -1524,9 +1539,10 @@ class LSFManager:
                     job_id = fields[0].strip()
                     
                     # Extract job_name early (needed for session type detection)
+                    # Note: submit_time takes 3 fields (e.g., "Nov 20 14:30"), so job_name is at index 9, not 7
                     job_name = ""
-                    if len(fields) > 7:
-                        job_name = fields[7].strip()
+                    if len(fields) > 9:
+                        job_name = fields[9].strip()
                     
                     # Determine session type from job_name early
                     session_type = "Unknown"
@@ -1534,16 +1550,16 @@ class LSFManager:
                         session_type = "VNC"
                     elif job_name == "myvnc_tmux":
                         session_type = "tmux"
-                    self.logger.debug(f"Job {job_id} session type: {session_type} (job_name: {job_name})")
+                    self.logger.debug(f"Job {job_id} session type: {session_type} (job_name: '{job_name}', fields count: {len(fields)})")
                     
                     # Extract submit time
                     submit_time = "N/A"  # Default value
                     submit_time_raw = "N/A"
                     
-                    # In standard bjobs -o output, submit time might be in column 7
-                    if len(fields) > 7:
-                        # Handle the submit time field
-                        submit_time_raw = ' '.join(fields[7:9])  # Get date and time parts
+                    # In standard bjobs -o output, submit time starts at column 6
+                    if len(fields) > 6:
+                        # Handle the submit time field (typically 3 parts: "Nov 20 14:30")
+                        submit_time_raw = ' '.join(fields[6:9])  # Get date and time parts
                         
                         try:
                             # Try to convert to standard datetime format for consistency
@@ -1579,22 +1595,22 @@ class LSFManager:
                     slots = None
                     max_req_proc = None
                     
-                    # Extract slots if present (should be in column 9 after submit time)
-                    if len(fields) > 9:
-                        slots = fields[9].strip()
-                    
-                    # Extract max_req_proc if present (should be in column 10 after slots)
+                    # Extract slots if present (should be in column 10 after submit time and job_name)
                     if len(fields) > 10:
-                        max_req_proc = fields[10].strip()
+                        slots = fields[10].strip()
+                    
+                    # Extract max_req_proc if present (should be in column 11 after slots)
+                    if len(fields) > 11:
+                        max_req_proc = fields[11].strip()
                     
                     # Extract combined resource requirements and command if present early
                     # In newer bjobs -o output, it would be after max_req_proc field
                     # The format is: combined_resreq followed by command (everything after)
                     command = ""
-                    if len(fields) > 11:
-                        # Everything from field 11 onwards could be combined_resreq and command
+                    if len(fields) > 12:
+                        # Everything from field 12 onwards could be combined_resreq and command
                         # We'll need to parse carefully
-                        remaining = ' '.join(fields[11:])
+                        remaining = ' '.join(fields[12:])
                         
                         # Try to split by common command patterns
                         # Look for common command starts like /bin/sh, bash, singularity, tmux, vncserver, etc.
@@ -1615,7 +1631,7 @@ class LSFManager:
                     self.logger.debug(f"Job {fields[0].strip()} raw field values - slots: '{slots}', max_req_proc: '{max_req_proc}'")
                     
                     # Check if combined_resreq is just a dash, indicating unknown resources
-                    if combined_resreq == "-" or (len(fields) > 11 and combined_resreq == ""):
+                    if combined_resreq == "-" or (len(fields) > 12 and combined_resreq == ""):
                         self.logger.info(f"Job {job_id} has unknown resource requirements")
                         num_cores = None
                         memory_gb = None
