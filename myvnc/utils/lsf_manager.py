@@ -1304,8 +1304,8 @@ class LSFManager:
                     
                     # Extract display/session name from command based on session type
                     if session_type == "tmux":
-                        # For tmux, extract session name from -s flag
-                        name_match = re.search(r'-s\s+([^\s&]+)', command)
+                        # For tmux, extract session name from -s flag (excluding quotes and special chars)
+                        name_match = re.search(r'-s\s+([^\s&"\']+)', command)
                         if name_match:
                             display_name = name_match.group(1)
                             self.logger.debug(f"Found tmux session name: {display_name}")
@@ -1574,7 +1574,7 @@ class LSFManager:
                         display_name_early = "VNC Session" if session_type == "VNC" else "tmux Session"
                         if command:
                             if session_type == "tmux":
-                                name_match = re.search(r'-s\s+([^\s&]+)', command)
+                                name_match = re.search(r'-s\s+([^\s&"\']+)', command)
                                 if name_match:
                                     display_name_early = name_match.group(1)
                             else:
@@ -1658,8 +1658,8 @@ class LSFManager:
                     # Extract display/session name from command based on session type
                     if command:
                         if session_type == "tmux":
-                            # For tmux, extract session name from -s flag
-                            name_match = re.search(r'-s\s+([^\s&]+)', command)
+                            # For tmux, extract session name from -s flag (excluding quotes and special chars)
+                            name_match = re.search(r'-s\s+([^\s&"\']+)', command)
                             if name_match:
                                 display_name = name_match.group(1)
                                 self.logger.debug(f"Found tmux session name: {display_name}")
