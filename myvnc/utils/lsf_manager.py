@@ -882,8 +882,10 @@ class LSFManager:
                 self.logger.info(f"Adding pre-execution command to enable user lingering: {loginctl_cmd}")
             
             # Build the tmux command
-            # Start a new tmux session
-            tmux_cmd = f'/usr/bin/tmux new-session -d -s {safe_session_name}'
+            # Start a new tmux session in detached mode, then monitor it
+            # The while loop keeps the job alive while tmux session exists
+            # When the session is closed/exited, the loop exits and the job terminates
+            tmux_cmd = f'/usr/bin/tmux new-session -d -s {safe_session_name} && while /usr/bin/tmux has-session -t {safe_session_name} 2>/dev/null; do sleep 5; done'
             
             # Check if a container is specified
             if using_container:
