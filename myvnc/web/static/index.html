@@ -366,6 +366,56 @@
             font-size: 0.8rem;
         }
         
+        /* Session summary styling */
+        .session-summary {
+            display: flex;
+            justify-content: flex-start;
+            margin-bottom: 1.5rem;
+        }
+        
+        .summary-card {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 15px 25px;
+            border-radius: 8px;
+            background: linear-gradient(135deg, #F8F9FA 0%, #E9ECEF 100%);
+            border: 1px solid #DEE2E6;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            transition: all 0.3s ease;
+            border-left: 4px solid #7868B0;
+        }
+        
+        .summary-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+        }
+        
+        .summary-card i {
+            font-size: 32px;
+            color: #7868B0;
+            opacity: 0.8;
+        }
+        
+        .summary-content {
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .summary-number {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #333;
+            line-height: 1.2;
+        }
+        
+        .summary-label {
+            font-size: 0.85rem;
+            color: #666;
+            font-weight: 500;
+            margin-top: 2px;
+        }
+        
         /* Table filter dropdown styling (matching group_audit look & feel) */
         #manager-table th {
             background-color: #7868B0 !important;
@@ -738,6 +788,15 @@
             
             <!-- User Sessions Sub-tab -->
             <div id="user-sessions" class="manager-subtab-content active">
+                <div class="session-summary">
+                    <div class="summary-card">
+                        <i class="fas fa-desktop"></i>
+                        <div class="summary-content">
+                            <div class="summary-number" id="filtered-session-count">0</div>
+                            <div class="summary-label">Total Sessions</div>
+                        </div>
+                    </div>
+                </div>
                 <div class="control-panel">
                     <button id="manager-refresh-button" class="button primary">
                         <i class="fas fa-sync-alt"></i> Refresh

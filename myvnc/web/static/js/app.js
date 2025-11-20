@@ -225,9 +225,7 @@ async function initializeApplication() {
         console.log('Setting up periodic refresh interval');
         setInterval(() => {
             refreshVNCList();
-            if (isManagerUser) {
-                refreshManagerList();
-            }
+            // Note: Manager Mode auto-refresh disabled to preserve filter state
         }, 30000);
         
         console.log('==== APPLICATION INITIALIZATION COMPLETE ====');
@@ -2772,6 +2770,12 @@ async function refreshManagerList() {
         
         // Setup table filters after populating the table
         setupManagerTableFilters(jobs);
+        
+        // Restore filter state from before refresh
+        restoreManagerFilterState();
+        
+        // Reapply existing filters after refresh
+        applyManagerTableFilters();
 
         // Attach event listeners
         document.querySelectorAll('#manager-mode .kill-button').forEach(button => {
@@ -3130,6 +3134,12 @@ let managerTableFilters = {
     host: []
 };
 
+// Flag to track if global filter click listener has been added
+let managerFilterGlobalListenerAdded = false;
+
+// Flag to track if filter event listeners have been set up
+let managerFilterListenersSetup = false;
+
 // Setup manager table filters
 function setupManagerTableFilters(jobs) {
     // Get all unique values for each filterable column
@@ -3200,57 +3210,66 @@ function setupManagerTableFilters(jobs) {
             optionsContainer.appendChild(option);
         });
         
-        // Toggle dropdown
-        button.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            const isOpen = content.classList.contains('open');
+        // Only add button/dropdown event listeners once
+        if (!managerFilterListenersSetup) {
+            // Toggle dropdown
+            button.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const isOpen = content.classList.contains('open');
+                
+                // Close all dropdowns
+                document.querySelectorAll('.filter-dropdown-content').forEach(d => {
+                    d.classList.remove('open');
+                });
+                document.querySelectorAll('.filter-dropdown-arrow').forEach(a => {
+                    a.classList.remove('open');
+                });
+                
+                // Toggle current dropdown
+                if (!isOpen) {
+                    content.classList.add('open');
+                    arrow.classList.add('open');
+                    searchInput.focus();
+                }
+            });
             
-            // Close all dropdowns
+            // Search functionality
+            searchInput.addEventListener('input', (e) => {
+                const searchTerm = e.target.value.toLowerCase();
+                optionsContainer.querySelectorAll('.filter-dropdown-option').forEach(option => {
+                    const label = option.querySelector('label').textContent.toLowerCase();
+                    option.style.display = label.includes(searchTerm) ? 'flex' : 'none';
+                });
+            });
+            
+            // Prevent dropdown from closing when clicking inside
+            content.addEventListener('click', (e) => {
+                e.stopPropagation();
+            });
+            
+            // Prevent table header sorting when clicking on the dropdown
+            dropdown.addEventListener('click', (e) => {
+                e.stopPropagation();
+            });
+        }
+    });
+    
+    // Mark that event listeners have been set up
+    managerFilterListenersSetup = true;
+    
+    // Close all dropdowns when clicking outside (only add listener once)
+    if (!managerFilterGlobalListenerAdded) {
+        document.addEventListener('click', () => {
             document.querySelectorAll('.filter-dropdown-content').forEach(d => {
                 d.classList.remove('open');
             });
             document.querySelectorAll('.filter-dropdown-arrow').forEach(a => {
                 a.classList.remove('open');
             });
-            
-            // Toggle current dropdown
-            if (!isOpen) {
-                content.classList.add('open');
-                arrow.classList.add('open');
-                searchInput.focus();
-            }
         });
-        
-        // Search functionality
-        searchInput.addEventListener('input', (e) => {
-            const searchTerm = e.target.value.toLowerCase();
-            optionsContainer.querySelectorAll('.filter-dropdown-option').forEach(option => {
-                const label = option.querySelector('label').textContent.toLowerCase();
-                option.style.display = label.includes(searchTerm) ? 'flex' : 'none';
-            });
-        });
-        
-        // Prevent dropdown from closing when clicking inside
-        content.addEventListener('click', (e) => {
-            e.stopPropagation();
-        });
-        
-        // Prevent table header sorting when clicking on the dropdown
-        dropdown.addEventListener('click', (e) => {
-            e.stopPropagation();
-        });
-    });
-    
-    // Close all dropdowns when clicking outside
-    document.addEventListener('click', () => {
-        document.querySelectorAll('.filter-dropdown-content').forEach(d => {
-            d.classList.remove('open');
-        });
-        document.querySelectorAll('.filter-dropdown-arrow').forEach(a => {
-            a.classList.remove('open');
-        });
-    });
+        managerFilterGlobalListenerAdded = true;
+    }
 }
 
 // Update filter button text based on selections
@@ -3271,6 +3290,7 @@ function applyManagerTableFilters() {
     if (!tbody) return;
     
     const rows = tbody.querySelectorAll('tr:not(.loading-row)');
+    let visibleCount = 0;
     
     rows.forEach(row => {
         let shouldShow = true;
@@ -3336,6 +3356,57 @@ function applyManagerTableFilters() {
         
         // Show or hide row
         row.style.display = shouldShow ? '' : 'none';
+        if (shouldShow) {
+            visibleCount++;
+        }
+    });
+    
+    // Update the session count display
+    updateManagerSessionCount(visibleCount);
+}
+
+// Update the manager session count display
+function updateManagerSessionCount(count) {
+    const countElement = document.getElementById('filtered-session-count');
+    if (countElement) {
+        countElement.textContent = count;
+    }
+}
+
+// Restore filter UI state after refresh
+function restoreManagerFilterState() {
+    // Restore checkbox states and button text for each filter
+    Object.keys(managerTableFilters).forEach(filterKey => {
+        const selectedValues = managerTableFilters[filterKey];
+        const dropdown = document.getElementById(`filter-${filterKey}-dropdown`);
+        if (!dropdown) return;
+        
+        const button = dropdown.querySelector('.filter-dropdown-button');
+        const textSpan = button.querySelector('span:first-child');
+        
+        // Update button text
+        if (selectedValues.length === 0) {
+            textSpan.textContent = 'All';
+        } else if (selectedValues.length === 1) {
+            textSpan.textContent = selectedValues[0];
+        } else {
+            textSpan.textContent = `${selectedValues.length} selected`;
+        }
+        
+        // Restore checkbox states
+        dropdown.querySelectorAll('.filter-dropdown-option').forEach(option => {
+            const checkbox = option.querySelector('input[type="checkbox"]');
+            if (checkbox) {
+                const value = checkbox.value;
+                if (selectedValues.includes(value)) {
+                    checkbox.checked = true;
+                    option.classList.add('selected');
+                } else {
+                    checkbox.checked = false;
+                    option.classList.remove('selected');
+                }
+            }
+        });
     });
 }
 
