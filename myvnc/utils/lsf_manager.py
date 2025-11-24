@@ -639,6 +639,12 @@ class LSFManager:
                 
                 # Pass environment variables to singularity
                 # This is needed because --cleanenv wipes all environment variables
+                
+                # Always pass USER environment variable
+                if authenticated_user:
+                    container_cmd.extend(['--env', f'USER={authenticated_user}'])
+                    self.logger.info(f"Passing USER={authenticated_user} to container")
+                
                 if use_custom_xstartup and xstartup_path:
                     container_cmd.extend(['--env', f'WINDOW_MANAGER={window_manager}'])
                     self.logger.info(f"Passing WINDOW_MANAGER={window_manager} to container")
@@ -931,6 +937,11 @@ class LSFManager:
             if using_container:
                 self.logger.info(f"Wrapping tmux command with singularity container: {container_path}")
                 container_cmd = ['singularity', 'exec', '--cleanenv']
+                
+                # Always pass USER environment variable
+                if authenticated_user:
+                    container_cmd.extend(['--env', f'USER={authenticated_user}'])
+                    self.logger.info(f"Passing USER={authenticated_user} to container")
                 
                 # Pass XDG_RUNTIME_DIR and DBUS_SESSION_BUS_ADDRESS if available
                 # These are required for container sessions to work properly
