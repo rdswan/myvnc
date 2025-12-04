@@ -66,10 +66,12 @@ def create(name, resolution, wm, queue, cores, memory, vncserver_path, user):
             'vncserver_path': vncserver_path or default_vncserver_path
         }
         
+        lsf_defaults = config_manager.get_lsf_defaults()
         lsf_config = {
             'queue': queue,
             'num_cores': cores,
-            'memory_mb': memory
+            'memory_mb': memory,
+            'memlimit_multiplier': lsf_defaults.get('memlimit_multiplier', 1.0)
         }
         
         # Submit job

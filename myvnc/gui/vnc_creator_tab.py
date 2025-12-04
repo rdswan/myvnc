@@ -74,10 +74,12 @@ class VNCreatorTab(QWidget):
         }
         
         # Prepare LSF configuration
+        lsf_defaults = self.config_manager.get_lsf_defaults()
         lsf_config = {
             'queue': self.queue_combo.currentText(),
             'num_cores': self.cores_spin.value(),
-            'memory_gb': int(self.memory_combo.currentText())
+            'memory_gb': int(self.memory_combo.currentText()),
+            'memlimit_multiplier': lsf_defaults.get('memlimit_multiplier', 1.0)
         }
         
         try:

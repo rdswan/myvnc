@@ -110,6 +110,10 @@ class ConfigManager:
         # Ensure memory_gb is always present
         if "memory_gb" not in defaults:
             defaults["memory_gb"] = 16
+        
+        # Add top-level configuration settings
+        if "memlimit_multiplier" in self.lsf_config:
+            defaults["memlimit_multiplier"] = self.lsf_config["memlimit_multiplier"]
             
         return defaults
     

@@ -1441,7 +1441,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 "queue": data.get("queue", lsf_defaults.get("queue")),
                 "num_cores": int(data.get("num_cores", lsf_defaults.get("num_cores"))),
                 "memory_gb": int(data.get("memory_gb", lsf_defaults.get("memory_gb"))),
-                "job_name": lsf_defaults.get("job_name", "myvnc_vncserver")
+                "job_name": lsf_defaults.get("job_name", "myvnc_vncserver"),
+                "memlimit_multiplier": lsf_defaults.get("memlimit_multiplier", 1.0)
             }
             
             # Add host filter if provided
@@ -1653,7 +1654,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 "queue": session_to_copy.get("queue", lsf_defaults.get("queue")),
                 "num_cores": int(session_to_copy.get("num_cores", lsf_defaults.get("num_cores"))),
                 "memory_gb": int(session_to_copy.get("memory_gb", lsf_defaults.get("memory_gb"))),
-                "job_name": lsf_defaults.get("job_name", "myvnc_vncserver")
+                "job_name": lsf_defaults.get("job_name", "myvnc_vncserver"),
+                "memlimit_multiplier": lsf_defaults.get("memlimit_multiplier", 1.0)
             }
             
             # Submit new VNC job with the authenticated user

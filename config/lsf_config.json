@@ -7,6 +7,7 @@
         "default_site": "Austin",
         "os": "Any"
     },
+    "memlimit_multiplier": 2.0,
     "available_queues": [
         "interactive",
         "vnc_queue",
@@ -60,5 +61,8 @@
             "select": "any"
         }
     ],
-    "env_file": "/site/lsf/aus-hw/conf/profile.lsf"
+    "env_file": "/site/lsf/aus-hw/conf/profile.lsf",
+    "notes": {
+        "memlimit_multiplier": "Multiplier applied to memory_gb to calculate the -M (memory limit) value. The -R rusage[mem=] uses the base memory_gb value, while -M uses memory_gb * memlimit_multiplier. This allows setting a higher kill limit than the reservation. Example: memory_gb=16 with memlimit_multiplier=2.0 results in -R 'rusage[mem=16G]' -M 32G"
+    }
 } 

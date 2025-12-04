@@ -497,6 +497,12 @@ class LSFManager:
                 
             self.logger.info(f"Final resource requirements string: '{resource_req}'")
             
+            # Calculate memory limit using multiplier from configuration
+            # The -M switch sets the memory limit, which can be different from rusage[mem=]
+            memlimit_multiplier = lsf_config.get('memlimit_multiplier', 1.0)
+            memory_limit_gb = int(memory_gb * memlimit_multiplier)
+            self.logger.info(f"Memory limit multiplier: {memlimit_multiplier}x, calculated limit: {memory_limit_gb}G (from {memory_gb}G base)")
+            
             # Build LSF command with -n for cores, -R for resource requirements, and -M for memory limit
             # Use GB units for -M parameter to match the mem= specification
             bsub_cmd = [
@@ -504,7 +510,7 @@ class LSFManager:
                 '-q', lsf_config.get('queue', 'interactive'),
                 '-n', str(num_cores),
                 '-R', resource_req,
-                '-M', f'{memory_gb}G',
+                '-M', f'{memory_limit_gb}G',
                 '-J', job_name
             ]
             
@@ -837,13 +843,19 @@ class LSFManager:
             
             self.logger.info(f"Final resource requirements string: '{resource_req}'")
             
+            # Calculate memory limit using multiplier from configuration
+            # The -M switch sets the memory limit, which can be different from rusage[mem=]
+            memlimit_multiplier = lsf_config.get('memlimit_multiplier', 1.0)
+            memory_limit_gb = int(memory_gb * memlimit_multiplier)
+            self.logger.info(f"Memory limit multiplier: {memlimit_multiplier}x, calculated limit: {memory_limit_gb}G (from {memory_gb}G base)")
+            
             # Build LSF command
             bsub_cmd = [
                 'bsub',
                 '-q', queue,
                 '-n', str(num_cores),
                 '-R', resource_req,
-                '-M', f'{memory_gb}G',
+                '-M', f'{memory_limit_gb}G',
                 '-J', job_name
             ]
             
