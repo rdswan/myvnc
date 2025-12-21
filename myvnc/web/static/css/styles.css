@@ -3,6 +3,8 @@
   --primary-color: #7868B0;    /* TT Light Purple */
   --primary-dark: #6F3A7F;     /* TT Dark Purple */
   --primary-medium: #8775C5;   /* TT Medium Purple - added for header gradient */
+  --primary-light: #e2dbf5;    /* Light purple for inactive tabs */
+  --accent-color: #18C4EA;     /* TT Light Blue - for active tab gradient */
   --secondary-color: #18C4EA;  /* TT Light Blue */
   --secondary-dark: #058DAC;   /* TT Dark Blue */
   --danger-color: #F04F5E;     /* TT Light Red */
@@ -24,7 +26,6 @@
   --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
   --border-radius: 6px;
   --transition: all 0.3s ease;
-  --primary-light: #e2dbf5;    /* Light purple for active tab - made more visible */
 }
 
 * {
@@ -110,7 +111,7 @@ header h1 {
 }
 
 .tab-button {
-  background-color: var(--card-color);  /* Explicitly white background for inactive tabs */
+  background-color: var(--primary-light);
   border: none;
   outline: none;
   cursor: pointer;
@@ -119,8 +120,9 @@ header h1 {
   font-weight: 500;
   transition: var(--transition);
   position: relative;
-  color: var(--text-light);
+  color: rgba(113, 47, 255, 0.6);
   border-right: 1px solid var(--border-color);
+  opacity: 0.7;
 }
 
 .tab-button:last-child {
@@ -128,27 +130,49 @@ header h1 {
 }
 
 .tab-button:hover {
-  background-color: rgba(0, 0, 0, 0.03);
+  background-color: rgba(255, 255, 255, 0.5);
   color: var(--primary-color);
+  opacity: 0.9;
 }
 
 .tab-button.active {
   color: var(--primary-color);
-  background-color: var(--primary-light);
-  font-weight: 600;
-  box-shadow: 0 -2px 5px rgba(0, 0, 0, 0.05);
+  background-color: white;
+  font-weight: 700;
+  font-size: 1.05rem;
+  box-shadow: 0 -4px 15px rgba(0, 0, 0, 0.2), 0 0 20px rgba(113, 47, 255, 0.15);
   position: relative;
   z-index: 1;
+  transform: translateY(-3px) scale(1.02);
+  border-bottom: none;
+  opacity: 1;
+  border-left: 3px solid var(--primary-color);
+  border-right: 3px solid var(--primary-color);
+  border-top: 3px solid var(--primary-color);
+  border-radius: 8px 8px 0 0;
 }
 
 .tab-button.active::after {
   content: '';
   position: absolute;
-  bottom: 0;
+  bottom: -1px;
   left: 0;
   width: 100%;
-  height: 3px;
-  background-color: var(--primary-color);
+  height: 2px;
+  background: linear-gradient(90deg, rgba(120, 104, 176, 0.6) 0%, rgba(135, 117, 197, 0.6) 50%, rgba(120, 104, 176, 0.6) 100%);
+  box-shadow: 0 3px 8px rgba(113, 47, 255, 0.3);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    box-shadow: 0 3px 8px rgba(113, 47, 255, 0.5);
+  }
+  50% {
+    opacity: 0.8;
+    box-shadow: 0 3px 12px rgba(113, 47, 255, 0.7);
+  }
 }
 
 .tab-button i {
@@ -579,11 +603,6 @@ footer {
 /* Tenstorrent branding */
 .form-title {
   color: var(--primary-color);
-}
-
-/* Update tab indicator */
-.tab-button.active::after {
-  background-color: var(--primary-color);
 }
 
 /* Empty state icon color */
