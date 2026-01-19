@@ -2748,20 +2748,8 @@ async function refreshManagerList() {
                 <td>${isTmux ? 'N/A' : (job.port || 'N/A')}</td>
                 <td>${formattedRuntime}</td>
                 <td class="actions-cell">
-                    ${isTmux ? `
-                        <button class="button secondary tmux-connect-button" data-job-id="${job.job_id}" title="tmux Connection Instructions">
-                            <i class="fas fa-terminal"></i> Connect
-                        </button>
-                    ` : `
-                        <button class="button secondary connect-button" data-job-id="${job.job_id}" title="Connect to VNC (${connectionInfo})">
-                            <i class="fas fa-plug"></i> Connect
-                        </button>
-                        <button class="button secondary vnc-viewer-button" data-job-id="${job.job_id}" title="VNC Viewer Instructions">
-                            <i class="fas fa-desktop"></i> Connect w/ vncviewer
-                        </button>
-                    `}
                     <button class="button danger kill-button" data-job-id="${job.job_id}" title="Kill ${isTmux ? 'tmux' : 'VNC'} Session">
-                        <i class="fas fa-times"></i> Kill
+                        <i class="fas fa-times"></i>
                     </button>
                 </td>
             `;
@@ -2786,36 +2774,6 @@ async function refreshManagerList() {
             button.addEventListener('click', () => {
                 const jobId = button.getAttribute('data-job-id');
                 killVNCSession(jobId);
-            });
-        });
-
-        document.querySelectorAll('#manager-mode .connect-button').forEach(button => {
-            button.addEventListener('click', () => {
-                const jobId = button.getAttribute('data-job-id');
-                const job = jobs.find(j => j.job_id === jobId);
-                if (job) {
-                    connectToVNC(job);
-                }
-            });
-        });
-
-        document.querySelectorAll('#manager-mode .vnc-viewer-button').forEach(button => {
-            button.addEventListener('click', () => {
-                const jobId = button.getAttribute('data-job-id');
-                const job = jobs.find(j => j.job_id === jobId);
-                if (job) {
-                    showVNCViewerInstructions(job);
-                }
-            });
-        });
-
-        document.querySelectorAll('#manager-mode .tmux-connect-button').forEach(button => {
-            button.addEventListener('click', () => {
-                const jobId = button.getAttribute('data-job-id');
-                const job = jobs.find(j => j.job_id === jobId);
-                if (job) {
-                    showTmuxConnectionInstructions(job);
-                }
             });
         });
     } catch (error) {

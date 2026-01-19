@@ -342,46 +342,71 @@
         
         /* Table column width constraints */
         #vnc-table th:nth-child(5),
-        #vnc-table td:nth-child(5),
-        #manager-table th:nth-child(5),
-        #manager-table td:nth-child(5) {
+        #vnc-table td:nth-child(5) {
             width: 70px;
             max-width: 70px;
             white-space: nowrap;
         }
         
         #vnc-table th:nth-child(6),
-        #vnc-table td:nth-child(6),
-        #manager-table th:nth-child(6),
-        #manager-table td:nth-child(6) {
+        #vnc-table td:nth-child(6) {
             width: 100px;
             max-width: 100px;
             white-space: nowrap;
         }
         
         #vnc-table th:nth-child(10),
-        #vnc-table td:nth-child(10),
-        #manager-table th:nth-child(10),
-        #manager-table td:nth-child(10) {
+        #vnc-table td:nth-child(10) {
             width: 80px;
             max-width: 80px;
             white-space: nowrap;
         }
         
         #vnc-table th:nth-child(11),
-        #vnc-table td:nth-child(11),
-        #manager-table th:nth-child(11),
-        #manager-table td:nth-child(11) {
+        #vnc-table td:nth-child(11) {
             width: 90px;
             max-width: 90px;
             white-space: nowrap;
             padding-right: 1.5rem;
         }
         
+        /* Remove width constraints for Manager Mode table to let columns expand */
+        
+        /* Manager Mode User column - make it wider to reduce wrapping */
+        #manager-table th:nth-child(3),
+        #manager-table td:nth-child(3) {
+            min-width: 120px;
+            width: 120px;
+        }
+        
+        /* Manager Mode Display column - make it narrow */
+        #manager-table th:nth-child(10),
+        #manager-table td:nth-child(10) {
+            width: 70px;
+            max-width: 70px;
+            white-space: nowrap;
+        }
+        
+        /* Manager Mode Runtime column - make it narrow to fit data */
+        #manager-table th:nth-child(11),
+        #manager-table td:nth-child(11) {
+            width: 85px;
+            max-width: 85px;
+            white-space: nowrap;
+        }
+        
+        /* Manager Mode Actions column - make it narrow */
+        #manager-table th:nth-child(12),
+        #manager-table td:nth-child(12) {
+            width: 110px;
+            max-width: 110px;
+            padding: 1rem;
+            vertical-align: middle;
+        }
+        
         /* Actions column spacing and styling */
-        #vnc-table .actions-cell,
-        #manager-table .actions-cell {
-            padding-left: 1rem;
+        #vnc-table .actions-cell {
+            padding-left: 0.5rem;
             padding-right: 0.5rem;
         }
         
@@ -398,6 +423,25 @@
         
         .actions-cell .button i {
             font-size: 0.8rem;
+        }
+        
+        /* Make Manager Mode kill button icon-only and extra compact */
+        #manager-table .actions-cell {
+            text-align: center;
+        }
+        
+        #manager-table .actions-cell .button.danger {
+            padding: 0.4rem;
+            font-size: 0.85rem;
+            width: 32px;
+            height: 32px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        #manager-table .actions-cell .button.danger i {
+            margin: 0;
         }
         
         /* Session summary styling */
