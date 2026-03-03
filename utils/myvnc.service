@@ -1,0 +1,16 @@
+[Unit]
+Description=MyVNC Server - VNC Session Manager
+After=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=bswan
+WorkingDirectory=/tools_vendor/FOSS/myvnc/latest
+ExecStart=/tools_vendor/FOSS/myvnc/latest/.venv/bin/python3 /tools_vendor/FOSS/myvnc/latest/manage.py --config_dir=/localdev/myvnc/config start
+ExecStop=/tools_vendor/FOSS/myvnc/latest/.venv/bin/python3 /tools_vendor/FOSS/myvnc/latest/manage.py --config_dir=/localdev/myvnc/config stop
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
