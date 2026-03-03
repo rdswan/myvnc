@@ -426,9 +426,9 @@ async function testUserSettings() {
                 siteSelect.value = userSettings.vnc_settings.site;
             }
             
-            if (resolutionSelect && userSettings.vnc_settings.resolution) {
+            if (userSettings.vnc_settings.resolution) {
                 console.log(`Setting resolution to ${userSettings.vnc_settings.resolution}`);
-                resolutionSelect.value = userSettings.vnc_settings.resolution;
+                setResolutionValue('vnc-resolution', userSettings.vnc_settings.resolution);
             }
             
             if (windowManagerSelect && userSettings.vnc_settings.window_manager) {
@@ -509,6 +509,8 @@ async function loadVNCConfig() {
         clearAndPopulateDropdown(siteSelect, vncConfig.sites);
         clearAndPopulateDropdown(resolutionSelect, vncConfig.resolutions);
         clearAndPopulateDropdown(windowManagerSelect, availableWindowManagers);
+
+        initCustomResolution('vnc-resolution', 'vnc-custom-resolution');
         
         // Validate user settings against available options (respect manager overrides)
         if (userVncSettings) {
@@ -551,15 +553,10 @@ async function loadVNCConfig() {
                     }
                 }
                 
-                // Set resolution
+                // Set resolution (supports custom resolutions)
                 if (userVncSettings.resolution) {
                     console.log(`Setting resolution dropdown to: ${userVncSettings.resolution}`);
-                    setDropdownValue(resolutionSelect, userVncSettings.resolution);
-                    // Force the value directly after setting it through the function
-                    if (resolutionSelect.value !== userVncSettings.resolution) {
-                        console.log(`Direct force setting resolution to: ${userVncSettings.resolution}`);
-                        resolutionSelect.value = userVncSettings.resolution;
-                    }
+                    setResolutionValue('vnc-resolution', userVncSettings.resolution);
                 }
                 
                 // Set window manager
@@ -600,7 +597,7 @@ async function loadVNCConfig() {
             // Also use the increased setTimeout for consistency
             setTimeout(() => {
                 setDropdownValue(siteSelect, vncConfig.defaults.site);
-                setDropdownValue(resolutionSelect, vncConfig.defaults.resolution);
+                setResolutionValue('vnc-resolution', vncConfig.defaults.resolution);
                 setDropdownValue(windowManagerSelect, vncConfig.defaults.window_manager);
                 
                 // VERIFICATION for defaults as well
@@ -639,6 +636,90 @@ function clearAndPopulateDropdown(selectElement, options) {
         optionElement.textContent = option;
         selectElement.appendChild(optionElement);
     });
+
+    // Add "Custom..." option for resolution dropdowns
+    if (selectElement.id === 'vnc-resolution' || selectElement.id === 'settings-resolution') {
+        const customOption = document.createElement('option');
+        customOption.value = 'custom';
+        customOption.textContent = 'Custom...';
+        selectElement.appendChild(customOption);
+    }
+}
+
+// Validate a resolution string matches the WIDTHxHEIGHT format
+function isValidResolution(value) {
+    return /^\d+x\d+$/.test(value);
+}
+
+// Get the effective resolution value from a dropdown, accounting for "Custom..."
+function getEffectiveResolution(selectId) {
+    const select = document.getElementById(selectId);
+    if (!select) return null;
+    if (select.value === 'custom') {
+        const customInputId = selectId === 'vnc-resolution' ? 'vnc-custom-resolution' : 'settings-custom-resolution';
+        const customInput = document.getElementById(customInputId);
+        return customInput ? customInput.value.trim() : null;
+    }
+    return select.value;
+}
+
+// Toggle visibility of custom resolution input based on dropdown selection
+function handleResolutionChange(selectId) {
+    const select = document.getElementById(selectId);
+    if (!select) return;
+    const groupId = selectId === 'vnc-resolution' ? 'vnc-custom-resolution-group' : 'settings-custom-resolution-group';
+    const group = document.getElementById(groupId);
+    if (group) {
+        group.style.display = select.value === 'custom' ? 'block' : 'none';
+    }
+}
+
+// Set a resolution dropdown to a specific value, activating custom input if needed
+function setResolutionValue(selectId, value) {
+    const select = document.getElementById(selectId);
+    if (!select || !value) return;
+
+    const predefined = Array.from(select.options).some(o => o.value === value && o.value !== 'custom');
+    if (predefined) {
+        select.value = value;
+    } else if (isValidResolution(value)) {
+        select.value = 'custom';
+        const customInputId = selectId === 'vnc-resolution' ? 'vnc-custom-resolution' : 'settings-custom-resolution';
+        const customInput = document.getElementById(customInputId);
+        if (customInput) {
+            customInput.value = value;
+        }
+    }
+    handleResolutionChange(selectId);
+}
+
+// Attach change listener and validation to a resolution dropdown + custom input pair
+function initCustomResolution(selectId, customInputId) {
+    const select = document.getElementById(selectId);
+    const customInput = document.getElementById(customInputId);
+    if (!select) return;
+
+    select.addEventListener('change', () => handleResolutionChange(selectId));
+
+    if (customInput) {
+        customInput.addEventListener('input', () => {
+            const val = customInput.value.trim();
+            const hint = customInput.parentElement.querySelector('.custom-resolution-hint');
+            if (val === '' || isValidResolution(val)) {
+                customInput.classList.remove('invalid');
+                if (hint) {
+                    hint.textContent = 'Format: WIDTHxHEIGHT (e.g. 2560x1600)';
+                    hint.classList.remove('error');
+                }
+            } else {
+                customInput.classList.add('invalid');
+                if (hint) {
+                    hint.textContent = 'Invalid format. Use WIDTHxHEIGHT (e.g. 2560x1600)';
+                    hint.classList.add('error');
+                }
+            }
+        });
+    }
 }
 
 // Helper function to set dropdown value and ensure it's visible
@@ -1497,9 +1578,16 @@ async function createVNCSession(event) {
         
         // Add VNC-specific fields only for VNC sessions
         if (!isTmux) {
-            // Add resolution if available and valid
-            if (resolutionSelect && resolutionSelect.value) {
-                data.resolution = resolutionSelect.value;
+            // Add resolution if available and valid (supports custom resolution)
+            const effectiveResolution = getEffectiveResolution('vnc-resolution');
+            if (effectiveResolution) {
+                if (!isValidResolution(effectiveResolution)) {
+                    showMessage('Invalid resolution format. Use WIDTHxHEIGHT (e.g. 2560x1600).', 'error');
+                    submitButton.innerHTML = originalText;
+                    submitButton.disabled = false;
+                    return;
+                }
+                data.resolution = effectiveResolution;
             }
             
             // Add window manager if available and valid

@@ -235,6 +235,11 @@ function updateUserInfo(userData) {
                                 option.textContent = resolution;
                                 resolutionSelect.appendChild(option);
                             });
+                            const customOpt = document.createElement('option');
+                            customOpt.value = 'custom';
+                            customOpt.textContent = 'Custom...';
+                            resolutionSelect.appendChild(customOpt);
+                            initCustomResolution('settings-resolution', 'settings-custom-resolution');
                         }
                         
                         // Populate window manager options

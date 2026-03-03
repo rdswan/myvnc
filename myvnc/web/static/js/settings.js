@@ -268,8 +268,8 @@ function populateSettingsForm(settings) {
     populateSelectOptions(windowManagerSelect, vncSettingsOptions.windowManagers);
     populateSelectOptions(siteSelect, vncSettingsOptions.sites);
     
-    // Set selected values based on settings
-    setSelectValue(resolutionSelect, vncSettings.resolution);
+    // Set selected values based on settings (resolution supports custom values)
+    setResolutionValue('settings-resolution', vncSettings.resolution);
     setSelectValue(windowManagerSelect, vncSettings.window_manager);
     setSelectValue(siteSelect, vncSettings.site);
     
@@ -294,6 +294,15 @@ function populateSelectOptions(selectElement, options) {
             optionElement.textContent = option;
             selectElement.appendChild(optionElement);
         });
+
+        // Add "Custom..." option for resolution dropdowns
+        if (selectElement.id === 'settings-resolution') {
+            const customOpt = document.createElement('option');
+            customOpt.value = 'custom';
+            customOpt.textContent = 'Custom...';
+            selectElement.appendChild(customOpt);
+            initCustomResolution('settings-resolution', 'settings-custom-resolution');
+        }
     }
 }
 
@@ -404,9 +413,10 @@ function getFormSettings() {
         siteSelect ? 'Site select found' : 'Site select missing'
     );
     
+    const effectiveResolution = getEffectiveResolution('settings-resolution');
     const settings = {
         vnc_settings: {
-            resolution: resolutionSelect ? resolutionSelect.value : undefined,
+            resolution: effectiveResolution || undefined,
             window_manager: windowManagerSelect ? windowManagerSelect.value : undefined,
             site: siteSelect ? siteSelect.value : undefined
         }
