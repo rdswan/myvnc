@@ -702,14 +702,15 @@ class LSFManager:
                 # This keeps the container alive after vncserver starts
                 # vncserver daemonizes immediately, so without sleep the container would exit
                 vncserver_cmd_str = ' '.join(str(arg) for arg in vncserver_cmd)
-                container_cmd.extend(['/usr/bin/bash', '-c', f'{vncserver_cmd_str} && sleep infinity'])
+                container_cmd.extend(['/usr/bin/bash', '-c', f'unset LSB_QUEUE && {vncserver_cmd_str} && sleep infinity'])
                 
                 self.logger.info(f"Container command will keep alive with 'sleep infinity'")
                 
                 bsub_cmd.extend(container_cmd)
             else:
-                # No container, just add the vncserver command directly
-                bsub_cmd.extend(vncserver_cmd)
+                # No container, prepend unset LSB_QUEUE before the vncserver command
+                vncserver_cmd_str = ' '.join(str(arg) for arg in vncserver_cmd)
+                bsub_cmd.extend(['/usr/bin/bash', '-c', f'unset LSB_QUEUE && {vncserver_cmd_str}'])
             
             # Convert command list to string for logging
             cmd_str = ' '.join(str(arg) for arg in bsub_cmd)
@@ -943,7 +944,7 @@ class LSFManager:
             # Start a new tmux session in detached mode, then monitor it
             # The while loop keeps the job alive while tmux session exists
             # When the session is closed/exited, the loop exits and the job terminates
-            tmux_cmd = f'/usr/bin/tmux new-session -d -s {safe_session_name} && while /usr/bin/tmux has-session -t {safe_session_name} 2>/dev/null; do sleep 5; done'
+            tmux_cmd = f'unset LSB_QUEUE && /usr/bin/tmux new-session -d -s {safe_session_name} && while /usr/bin/tmux has-session -t {safe_session_name} 2>/dev/null; do sleep 5; done'
             
             # Check if a container is specified
             if using_container:
