@@ -65,12 +65,14 @@ class VNCreatorTab(QWidget):
             return
         
         # Prepare VNC configuration
+        vnc_defaults = self.config_manager.get_vnc_defaults()
         vnc_config = {
             'name': self.name_input.text().strip(),
             'resolution': self.resolution_combo.currentText(),
             'window_manager': self.wm_combo.currentText(),
-            'color_depth': 24,  # Default color depth
-            'vncserver_path': self.config_manager.get_vnc_defaults().get('vncserver_path', '/usr/bin/vncserver')
+            'color_depth': 24,
+            'vncserver_path': vnc_defaults.get('vncserver_path', '/usr/bin/vncserver'),
+            'vncserver_wrapper_path': vnc_defaults.get('vncserver_wrapper_path')
         }
         
         # Prepare LSF configuration

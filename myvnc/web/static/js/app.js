@@ -1427,19 +1427,13 @@ function copyToClipboard(text) {
 
 // Connect to VNC
 function connectToVNC(job) {
-    // Check if we have both host and display information
-    if (!job.host || !job.display) {
-        showMessage(`Connection details unavailable for ${job.name || 'VNC session'}. Host or display number missing.`, 'error');
+    if (!job.host || !job.port) {
+        showMessage(`Connection details unavailable for ${job.name || 'VNC session'}. Host or port missing.`, 'error');
         return;
     }
     
-    // Calculate the VNC port (5900 + display number)
-    const vncPort = 5900 + parseInt(job.display);
+    const connectionString = `${job.host}:${job.port}`;
     
-    // Format the connection string using port instead of display
-    const connectionString = `${job.host}:${vncPort}`;
-    
-    // Launch VNC viewer using the vnc:// protocol with port
     console.log(`Connecting to VNC using vnc://${connectionString}`);
     window.location.href = `vnc://${connectionString}`;
 }
@@ -1448,8 +1442,8 @@ function connectToVNC(job) {
 function showDetailedInstructions(job) {
     const hostname = job.host;
     const displayNum = job.display;
+    const rfbPort = job.port;
     const connectionString = `${hostname}:${displayNum}`;
-    const rfbPort = 5900 + parseInt(displayNum);
     
     const messageContent = `
         <div class="connection-info">
@@ -2943,14 +2937,14 @@ function enableTableSorting(tableId) {
 // Show VNC Viewer connection instructions
 function showVNCViewerInstructions(job) {
     // Check if we have both host and display information
-    if (!job.host || !job.display) {
-        showMessage(`Connection details unavailable for ${job.name || 'VNC session'}. Host or display number missing.`, 'error');
+    if (!job.host || !job.port) {
+        showMessage(`Connection details unavailable for ${job.name || 'VNC session'}. Host or port missing.`, 'error');
         return;
     }
     
     const hostname = job.host;
     const displayNum = job.display;
-    const vncPort = 5900 + parseInt(displayNum);
+    const vncPort = job.port;
     const hostPortString = `${hostname}:${vncPort}`;
     
     // Create persistent dialog
@@ -3014,7 +3008,7 @@ function showVNCViewerInstructions(job) {
             </div>
             
             <div class="instruction-note">
-                <p><strong>Note:</strong> The server address format <code>${hostPortString}</code> uses the actual TCP port number (5900 + display number).</p>
+                <p><strong>Note:</strong> The server address format <code>${hostPortString}</code> uses the actual TCP port number for the VNC session.</p>
             </div>
         </div>
     `);

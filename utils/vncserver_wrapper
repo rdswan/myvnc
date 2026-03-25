@@ -1,0 +1,32 @@
+#!/usr/bin/bash
+#
+# vncserver_wrapper - Drop-in replacement for vncserver that captures the
+# actual display number and posts it to the LSF job via bpost.
+#
+# When vncserver is started with -fallbacktofreeport, it may bind to a
+# different display than requested.  This wrapper parses the "New '...:N'"
+# line from vncserver's output and runs:
+#     bpost -d "VNC_DISPLAY=:N" $LSB_JOBID
+#
+# All arguments are passed through to the real vncserver unchanged.
+#
+# The real vncserver path can be overridden via VNCSERVER_PATH env var.
+
+VNCSERVER_PATH="${VNCSERVER_PATH:-/usr/bin/vncserver}"
+
+VNC_OUTPUT=$("$VNCSERVER_PATH" "$@" 2>&1)
+VNC_EXIT=$?
+
+echo "$VNC_OUTPUT"
+
+if [ $VNC_EXIT -ne 0 ]; then
+    exit $VNC_EXIT
+fi
+
+VNC_DISPLAY=$(echo "$VNC_OUTPUT" | sed -n "s/.*New '[^:]*:\([0-9]*\).*/\1/p" | head -1)
+
+if [ -n "$VNC_DISPLAY" ] && [ -n "$LSB_JOBID" ]; then
+    bpost -d "VNC_DISPLAY=:$VNC_DISPLAY" "$LSB_JOBID"
+fi
+
+exit $VNC_EXIT

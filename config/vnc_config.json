@@ -6,6 +6,7 @@
         "name_prefix": "vnc_session",
         "site": "Austin",
         "vncserver_path": "/usr/bin/vncserver",
+        "vncserver_wrapper_path": "/proj_risc/user_dev/bswan/tools_src/myvnc/utils/vncserver_wrapper",
         "xstartup_path": "/proj_risc/user_dev/bswan/tools_src/myvnc/config/vnc/xstartup.sh",
         "use_custom_xstartup": true
     },

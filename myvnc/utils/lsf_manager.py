@@ -16,7 +16,7 @@ from datetime import datetime
 import json
 from pathlib import Path
 import signal
-import random
+
 
 from myvnc.utils.config_manager import ConfigManager
 from myvnc.utils.config_loader import load_server_config
@@ -223,7 +223,7 @@ class LSFManager:
         self.lsf_cmd_paths = {}
         
         # List of LSF commands to check
-        lsf_commands = ['bjobs', 'bsub', 'bkill']
+        lsf_commands = ['bjobs', 'bsub', 'bkill', 'bpost', 'bread']
         
         # Check each LSF command
         for cmd in lsf_commands:
@@ -369,7 +369,30 @@ class LSFManager:
             })
             
             raise LSFError(stderr.strip(), stderr=stderr, stdout=stdout)
-    
+
+    def _get_bpost_display(self, job_id: str) -> Optional[str]:
+        """Retrieve the VNC display number posted by the job via bpost/bread.
+
+        Runs bread without the setuid binary since any user can read
+        bpost messages — no need to impersonate the job owner.
+
+        Returns the display number as a string (e.g. "6") or None if not available.
+        """
+        try:
+            job_id_str = str(job_id).strip()
+            output = self._run_command(['bread', job_id_str])
+            if output:
+                match = re.search(r'VNC_DISPLAY=:(\d+)', output)
+                if match:
+                    display = match.group(1)
+                    self.logger.info(f"Found bpost VNC display for job {job_id_str}: :{display}")
+                    return display
+                else:
+                    self.logger.warning(f"bread returned data for job {job_id_str} but no VNC_DISPLAY found: {output.strip()}")
+        except Exception as e:
+            self.logger.warning(f"Could not read bpost data for job {job_id}: {e}")
+        return None
+
     def submit_vnc_job(self, vnc_config: Dict, lsf_config: Dict, authenticated_user: str = None, fake_no_home: bool = False, server_hostname: str = None) -> str:
         """Submit a VNC job using bsub
         
@@ -551,15 +574,16 @@ class LSFManager:
             self.logger.info(f"Setting LSF stderr log file: {stderr_log_path}")
             
             # Add the VNC server command
+            # Prefer the wrapper script which captures the actual display number
+            # and posts it to the LSF job via bpost.
+            # Fall back to plain vncserver if no wrapper is configured.
             vncserver_path = vnc_config.get('vncserver_path', '/usr/bin/vncserver')
-            
-            # Randomly pick a display number between 500 and 999
-            display_num = random.randint(500, 999)
-            self.logger.info(f"Assigning random display number: {display_num}")
+            vncserver_wrapper_path = vnc_config.get('vncserver_wrapper_path')
+            vncserver_executable = vncserver_wrapper_path or vncserver_path
+            self.logger.info(f"Using VNC server executable: {vncserver_executable}")
             
             vncserver_cmd = [
-                vncserver_path,
-                f":{display_num}",
+                vncserver_executable,
                 '-geometry', resolution,
                 '-depth', str(color_depth),
             ]
@@ -632,8 +656,6 @@ class LSFManager:
                 bsub_cmd.extend(['-E', loginctl_cmd])
                 self.logger.info(f"Adding pre-execution command to enable user lingering: {loginctl_cmd}")
             
-            # Add fallbacktofreeport switch to ensure the server falls back to a free port if the specified one is in use
-            vncserver_cmd.append('-fallbacktofreeport')
             
             # Check if a container is specified for this OS (already retrieved earlier)
             if using_container:
@@ -1408,59 +1430,28 @@ class LSFManager:
                                 display_name = name_match.group(1)
                             self.logger.debug(f"Found VNC display name: {display_name}")
                     
-                    # Try to extract the display number from the command
-                    display_match = re.search(r':(\d+)', command)
-                    if display_match:
-                        display_num = int(display_match.group(1))
-                        self.logger.info(f"Found display number from command: {display_num}")
-                        
-                        # VNC uses port 5900+display number
-                        vnc_port = 5900 + display_num
-                        display = display_num
-                        port = vnc_port
-                    
-                    # Only SSH to the remote host to determine the display if we couldn't get it from the command
-                    if (host and host != "N/A" and status == "RUN" and display is None):
-                        try:
-                            self.logger.info(f"Attempting to query VNC information on host: {host} for user: {user}")
-                            # Use SSH to run a command on the remote host to find the Xvnc process
-                            ssh_cmd = ['ssh', 
-                                      '-o', 'StrictHostKeyChecking=no', 
-                                      '-o', 'UserKnownHostsFile=/dev/null',
-                                      host, 
-                                      f"ps -u {user} -o pid,command | grep Xvnc"]
-                            self.logger.debug(f"Running SSH command: {' '.join(ssh_cmd)}")
-                            
-                            # Run ssh command with sudo if authenticated user is provided
-                            vnc_process_output = self._run_command(ssh_cmd, authenticated_user)
-                            self.logger.debug(f"SSH command output: {vnc_process_output}")
-                            
-                            # Look for the display number in the Xvnc process command line
-                            # Format will be something like: Xvnc :1 
-                            display_match = re.search(r'Xvnc\s+:(\d+)', vnc_process_output)
-                            
-                            if display_match:
-                                display_num = int(display_match.group(1))
-                                self.logger.info(f"Found display number from Xvnc pattern: {display_num}")
-                                
-                                # VNC uses port 5900+display number
-                                vnc_port = 5900 + display_num
-                                display = display_num
-                                port = vnc_port
-                            else:
-                                # Fallback to scanning through all command line arguments
-                                args_match = re.search(r'Xvnc.*?:(\d+)', vnc_process_output)
-                                if args_match:
-                                    display_num = int(args_match.group(1))
-                                    self.logger.info(f"Found display number from args pattern: {display_num}")
-                                    
-                                    # VNC uses port 5900+display number
-                                    vnc_port = 5900 + display_num
-                                    display = display_num
-                                    port = vnc_port
-                        except Exception as e:
-                            self.logger.error(f"Error querying remote host for VNC process: {str(e)}")
-                    
+                    # For running VNC jobs, first try bpost data which has the
+                    # actual display posted by vncserver_wrapper.
+                    # bpost gives a low display number (e.g. :2) used directly.
+                    if session_type == "VNC" and status == "RUN":
+                        bpost_display = self._get_bpost_display(job_id)
+                        if bpost_display:
+                            display_num = int(bpost_display)
+                            display = display_num
+                            port = display_num
+                            self.logger.info(f"Using bpost display for job {job_id}: :{display_num}")
+
+                    # Fallback: extract display from the command string (for older jobs
+                    # that were submitted with an explicit :N display argument).
+                    # Old jobs used high display numbers where the VNC port is 5900+N.
+                    if display is None and command:
+                        display_match = re.search(r':(\d+)', command)
+                        if display_match:
+                            display_num = int(display_match.group(1))
+                            display = display_num
+                            port = 5900 + display_num
+                            self.logger.info(f"Found display number from command for job {job_id}: :{display_num}")
+
                     # Create job entry with all required fields
                     job = {
                         'job_id': job_id,
@@ -1839,6 +1830,30 @@ class LSFManager:
                     # Log the final core count and memory values
                     self.logger.debug(f"Job {job_id} final values - cores: {num_cores}, memory_gb: {memory_gb}")
                     
+                    # Try to determine VNC display/port for VNC sessions
+                    if session_type == "VNC":
+                        display = None
+                        port = None
+                        job_status = fields[1].strip()
+
+                        if job_status == "RUN":
+                            bpost_display = self._get_bpost_display(job_id)
+                            if bpost_display:
+                                display = int(bpost_display)
+                                port = display
+                                self.logger.info(f"Using bpost display for job {job_id}: :{display}")
+
+                        if display is None and command:
+                            display_match = re.search(r':(\d+)', command)
+                            if display_match:
+                                display = int(display_match.group(1))
+                                port = 5900 + display
+
+                        if display is not None:
+                            job['display'] = display
+                        if port is not None:
+                            job['port'] = port
+
                     # Add to jobs list
                     jobs.append(job)
                 except Exception as e:
@@ -1985,22 +2000,29 @@ class LSFManager:
                 if ':' in host:
                     host = host.split(':')[0]
             
-            # Extract the display value from command output if possible
-            if command:
-                # Extract display number from vnc command string
+            # First try bpost data which has the actual display.
+            # bpost gives a low display number (e.g. :2) used directly.
+            from_bpost = False
+            if status == "RUN":
+                bpost_display = self._get_bpost_display(job_id)
+                if bpost_display:
+                    display_num = bpost_display
+                    from_bpost = True
+                    self.logger.info(f"Using bpost display for job {job_id}: :{display_num}")
+
+            # Fallback: extract display from the command string (for older jobs)
+            if not display_num and command:
                 try:
-                    # Look for :N in the command string (VNC display number)
                     display_match = re.search(r':(\d+)', command)
                     if display_match:
                         display_num = display_match.group(1)
                         self.logger.debug(f"Found display number from command: {display_num}")
                 except Exception as e:
                     self.logger.warning(f"Error extracting display number from command: {str(e)}")
-            
-            # If display number is still not found, try to find it in output_info
+
+            # Try to find it in bjobs output_info
             if not display_num and comprehensive_output:
                 try:
-                    # Look for VNC display pattern in output_info
                     display_match = re.search(r'New \'[^:]+:(\d+)', comprehensive_output)
                     if display_match:
                         display_num = display_match.group(1)
@@ -2013,47 +2035,18 @@ class LSFManager:
                 except Exception as e:
                     self.logger.warning(f"Error extracting display number from output info: {str(e)}")
             
-            # If display number is still not found and job is running, try SSH to the host
-            if not display_num and status == "RUN" and host:
-                try:
-                    self.logger.info(f"Display number not found in command, attempting to query via SSH on host: {host} for user: {user}")
-                    # Use SSH to run a command on the remote host to find the Xvnc process
-                    ssh_cmd = ['ssh', 
-                              '-o', 'StrictHostKeyChecking=no', 
-                              '-o', 'UserKnownHostsFile=/dev/null',
-                              host, 
-                              f"ps -u {user} -o pid,command | grep Xvnc"]
-                    self.logger.debug(f"Running SSH command: {' '.join(ssh_cmd)}")
-                    
-                    # Run ssh command with sudo if authenticated user is provided
-                    vnc_process_output = self._run_command(ssh_cmd, authenticated_user)
-                    self.logger.debug(f"SSH command output: {vnc_process_output}")
-                    
-                    # Look for the display number in the Xvnc process command line
-                    # Format will be something like: Xvnc :1 
-                    display_match = re.search(r'Xvnc\s+:(\d+)', vnc_process_output)
-                    
-                    if display_match:
-                        display_num = display_match.group(1)
-                        self.logger.info(f"Found display number from Xvnc pattern via SSH: {display_num}")
-                    else:
-                        # Fallback to scanning through all command line arguments
-                        args_match = re.search(r'Xvnc.*?:(\d+)', vnc_process_output)
-                        if args_match:
-                            display_num = args_match.group(1)
-                            self.logger.info(f"Found display number from args pattern via SSH: {display_num}")
-                except Exception as e:
-                    self.logger.error(f"Error querying remote host for VNC process: {str(e)}")
-            
-            # Last resort - use default display number
             if not display_num:
-                self.logger.debug(f"No display number found, using default (1)")
-                display_num = "1"  # Default value
+                self.logger.warning(f"Could not determine VNC display for job {job_id}")
             
-            # Calculate VNC port from display number
+            # Calculate VNC port from display number.
+            # bpost display numbers are low (e.g. :2) and used directly.
+            # Old command-string display numbers are high and need 5900 added.
             try:
                 if display_num:
-                    port = 5900 + int(display_num)
+                    if from_bpost:
+                        port = int(display_num)
+                    else:
+                        port = 5900 + int(display_num)
                     self.logger.debug(f"Calculated VNC port: {port}")
                 else:
                     port = None

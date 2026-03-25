@@ -1430,8 +1430,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                     "color_depth": vnc_defaults.get("color_depth", 24),
                     "site": data.get("site", vnc_defaults.get("site")),
                     "vncserver_path": vnc_defaults.get("vncserver_path", "/usr/bin/vncserver"),
+                    "vncserver_wrapper_path": vnc_defaults.get("vncserver_wrapper_path"),
                     "name": data.get("name", vnc_defaults.get("name_prefix", "vnc_session")),
-                    # Add xstartup configuration
                     "xstartup_path": vnc_defaults.get("xstartup_path", ""),
                     "use_custom_xstartup": vnc_defaults.get("use_custom_xstartup", False)
                 }
@@ -1644,8 +1644,8 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 "color_depth": vnc_defaults.get("color_depth", 24),
                 "site": session_to_copy.get("site", vnc_defaults.get("site")),
                 "vncserver_path": vnc_defaults.get("vncserver_path", "/usr/bin/vncserver"),
+                "vncserver_wrapper_path": vnc_defaults.get("vncserver_wrapper_path"),
                 "name": f"Copy of {session_to_copy.get('name', vnc_defaults.get('name_prefix', 'vnc_session'))}",
-                # Add xstartup configuration
                 "xstartup_path": vnc_defaults.get("xstartup_path", ""),
                 "use_custom_xstartup": vnc_defaults.get("use_custom_xstartup", False)
             }

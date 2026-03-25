@@ -54,16 +54,15 @@ def create(name, resolution, wm, queue, cores, memory, vncserver_path, user):
         config_manager = ConfigManager()
         lsf_manager = LSFManager()
         
-        # Get default vncserver path from config
-        default_vncserver_path = config_manager.get_vnc_defaults().get('vncserver_path', '/usr/bin/vncserver')
+        vnc_defaults = config_manager.get_vnc_defaults()
         
-        # Prepare configurations
         vnc_config = {
             'name': name,
             'resolution': resolution,
             'window_manager': wm,
             'color_depth': 24,
-            'vncserver_path': vncserver_path or default_vncserver_path
+            'vncserver_path': vncserver_path or vnc_defaults.get('vncserver_path', '/usr/bin/vncserver'),
+            'vncserver_wrapper_path': vnc_defaults.get('vncserver_wrapper_path')
         }
         
         lsf_defaults = config_manager.get_lsf_defaults()
