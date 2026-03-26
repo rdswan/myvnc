@@ -38,6 +38,19 @@ xrdb $HOME/.Xresources
 xsetroot -solid grey
 vncconfig -iconic &
 
+# Preserve SSH agent forwarding inside the VNC desktop.
+if [ -n "$SSH_AUTH_SOCK" ] && [ -S "$SSH_AUTH_SOCK" ]; then
+    export SSH_AUTH_SOCK
+else
+    for sock in /tmp/ssh-*/agent.*; do
+        if [ -S "$sock" ]; then
+            SSH_AUTH_SOCK="$sock"
+            export SSH_AUTH_SOCK
+            break
+        fi
+    done
+fi
+
 # Get window manager from the command line or use default
 WM="${WINDOW_MANAGER:-xfce}"
 echo "Using window manager: $WM"
