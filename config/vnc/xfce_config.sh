@@ -51,5 +51,33 @@ cat > $HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfwm4.xml << EOF
 </channel>
 EOF
 
+
+## Time to disable a ton of start that xfce autostarts and its total crap for us...
+# Define the target directory
+AUTOSTART_DIR="$HOME/.config/autostart"
+mkdir -p "$AUTOSTART_DIR"
+
+DISABLE_LIST=(
+    "geoclue-demo-agent.desktop"
+    "tracker-extract.desktop"
+    "tracker-miner-apps.desktop"
+    "tracker-miner-fs.desktop"
+    "tracker-store.desktop"
+    "xdg-user-dirs.desktop"
+    "xfce4-power-manager.desktop"
+    "xfce4-screensaver.desktop"
+    "xfce-polkit.desktop"
+)
+
+for file in "${DISABLE_LIST[@]}"; do
+    cat > "$AUTOSTART_DIR/$file" << EOF
+[Desktop Entry]
+Hidden=true
+EOF
+    echo "Disabled: $file"
+done
+
+echo "All specified autostart entries have been disabled."
+
 # Start XFCE session
 exec startxfce4 
