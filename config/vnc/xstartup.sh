@@ -20,8 +20,17 @@ unset DBUS_SESSION_BUS_ADDRESS
 
 # Uncomment to enable debug output
 # set -x
-exec >> "$HOME/.vnc/xstartup.log" 2>&1
+exec >> "$HOME/.vnc/xstartup.${HOSTNAME}${DISPLAY}.log" 2>&1
 echo "Starting VNC session at $(date)"
+
+## disable screensaver and any lockscreen
+xset -dpms
+xset s off
+xset s 0 0
+xset s noblank
+## print out verification that these settings are in place
+echo "These are the screen saver settings which should be all off: "
+xset q
 
 # Set basic X settings
 touch $HOME/.Xresources
