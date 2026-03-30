@@ -1316,7 +1316,7 @@ async function refreshVNCList(withRetries = false) {
                 <td>${job.resources_unknown ? 'Unknown' : `${job.num_cores || '-'} cores, ${job.memory_gb || '-'} GB`}</td>
                 <td>${job.os || 'N/A'}</td>
                 <td title="${isTmux ? 'Host: ' + (job.host || 'N/A') : 'VNC Connection: ' + connectionInfo}">${job.host || 'N/A'}</td>
-                <td>${isTmux ? 'N/A' : (job.port || 'N/A')}</td>
+                <td>${isTmux ? 'N/A' : (job.port != null ? ':' + job.port : 'N/A')}</td>
                 <td>${formattedRuntime}</td>
                 <td class="actions-cell">
                     ${isTmux ? `
@@ -2827,7 +2827,7 @@ async function refreshManagerList() {
                 <td>${job.resources_unknown ? 'Unknown' : `${job.num_cores || '-'} cores, ${job.memory_gb || '-'} GB`}</td>
                 <td>${job.os || 'N/A'}</td>
                 <td title="${isTmux ? 'Host: ' + (job.host || 'N/A') : 'VNC Connection: ' + connectionInfo}">${job.host || 'N/A'}</td>
-                <td>${isTmux ? 'N/A' : (job.port || 'N/A')}</td>
+                <td>${isTmux ? 'N/A' : (job.port != null ? ':' + job.port : 'N/A')}</td>
                 <td>${formattedRuntime}</td>
                 <td class="actions-cell">
                     <button class="button danger kill-button" data-job-id="${job.job_id}" title="Kill ${isTmux ? 'tmux' : 'VNC'} Session">
