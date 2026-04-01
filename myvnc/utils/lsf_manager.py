@@ -23,6 +23,17 @@ from myvnc.utils.config_loader import load_server_config
 from myvnc.utils.log_manager import get_logger
 
 
+def _capture_jobid_script_path(vnc_config: Dict) -> str:
+    """Path to utils/capture_jobid.sh for LSF -E. Override with vnc_config capture_jobid_path."""
+    p = (vnc_config.get('capture_jobid_path') or '').strip()
+    if p:
+        return p
+    wp = vnc_config.get('vncserver_wrapper_path')
+    if wp:
+        return os.path.normpath(os.path.join(os.path.dirname(wp), 'capture_jobid.sh'))
+    return os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', 'utils', 'capture_jobid.sh'))
+
+
 class LSFError(Exception):
     """Custom exception for LSF-related errors that preserves the original error message"""
     def __init__(self, message, stderr=None, stdout=None):
@@ -649,12 +660,34 @@ class LSFManager:
                 bsub_cmd.extend(['-env', env_string])
                 self.logger.info(f"Setting LSF environment variables: {env_string}")
             
-            # Add loginctl enable-linger command for all jobs
-            # This ensures /run/user/$UID exists on the destination machine even though LSF doesn't actually login
+            # Pre-exec (-E): loginctl for linger; for container jobs also capture_jobid.sh.
+            # Output path uses $$ (shell PID) so it is explicit digits at runtime — do not use %J and
+            # do not shlex.quote the path or $$ will not expand. vncserver_wrapper uses pointer file.
+            capture_jobid_target = f'{user_home}/.vnc/myvnc_lsb_jobid.$$'
             if authenticated_user:
                 loginctl_cmd = f'/usr/bin/loginctl enable-linger {authenticated_user}'
-                bsub_cmd.extend(['-E', loginctl_cmd])
-                self.logger.info(f"Adding pre-execution command to enable user lingering: {loginctl_cmd}")
+                if using_container:
+                    capture_script = _capture_jobid_script_path(vnc_config)
+                    pre_exec = (
+                        f'{loginctl_cmd} && '
+                        f'{shlex.quote(capture_script)} {capture_jobid_target}'
+                    )
+                    bsub_cmd.extend(['-E', pre_exec])
+                    self.logger.info(
+                        "Adding pre-exec: loginctl and capture_jobid.sh -> %s (PID suffix at -E)",
+                        capture_jobid_target.replace('$$', '<PID>'),
+                    )
+                else:
+                    bsub_cmd.extend(['-E', loginctl_cmd])
+                    self.logger.info(f"Adding pre-execution command to enable user lingering: {loginctl_cmd}")
+            elif using_container:
+                capture_script = _capture_jobid_script_path(vnc_config)
+                pre_exec = f'{shlex.quote(capture_script)} {capture_jobid_target}'
+                bsub_cmd.extend(['-E', pre_exec])
+                self.logger.info(
+                    "Adding pre-exec: capture_jobid.sh -> %s (PID suffix at -E)",
+                    capture_jobid_target.replace('$$', '<PID>'),
+                )
             
             
             # Check if a container is specified for this OS (already retrieved earlier)
@@ -718,12 +751,8 @@ class LSFManager:
                     self.logger.warning("No bindpaths specified in configuration")
                     self.logger.warning("No bind mounts will be added - container may not have access to shared filesystems")
                 
-                # Pass LSB_JOBID into the container so vncserver_wrapper can call bpost.
-                # --cleanenv strips all env vars, so we must pass it explicitly.
-                # This must come before the container path.
-                container_cmd.extend(['--env', 'LSB_JOBID=$LSB_JOBID'])
-                
-                # Add the container path
+                # Add the container path and inner shell (same argv layout as submit_tmux_job:
+                # bsub ... singularity exec ... image.sif /usr/bin/bash -c '...')
                 container_cmd.append(container_path)
                 
                 # Wrap the vncserver command in bash with sleep infinity
@@ -734,14 +763,8 @@ class LSFManager:
                 
                 self.logger.info(f"Container command will keep alive with 'sleep infinity'")
                 
-                # Build the singularity part (without the inner bash -c argument)
-                container_cmd_str = ' '.join(str(arg) for arg in container_cmd)
-                
-                # Wrap everything in an outer bash -c so the LSF job shell
-                # expands $LSB_JOBID before singularity sees it.
-                # Use single quotes around the inner bash -c argument to protect
-                # it from the outer shell.
-                bsub_cmd.extend(['/usr/bin/bash', '-c', f"{container_cmd_str} /usr/bin/bash -c '{inner_bash_cmd}'"])
+                container_cmd.extend(['/usr/bin/bash', '-c', inner_bash_cmd])
+                bsub_cmd.extend(container_cmd)
             else:
                 # No container, prepend unset LSB_QUEUE before the vncserver command
                 vncserver_cmd_str = ' '.join(str(arg) for arg in vncserver_cmd)

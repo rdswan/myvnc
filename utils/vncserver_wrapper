@@ -12,6 +12,22 @@
 #
 # The real vncserver path can be overridden via VNCSERVER_PATH env var.
 
+# If LSB_JOBID is already set (bare metal), use it directly.
+# Otherwise (e.g. singularity --cleanenv), read it from the pointer file
+# written by capture_jobid.sh during LSF pre-exec (-E).
+if [ -z "${LSB_JOBID:-}" ]; then
+    MYVNC_LSB_JOBID_POINTER="${HOME}/.vnc/myvnc_lsb_jobid_pointer"
+    if [ -r "$MYVNC_LSB_JOBID_POINTER" ]; then
+        _datafile=$(tr -d '\n\r' < "$MYVNC_LSB_JOBID_POINTER")
+        if [ -n "$_datafile" ] && [ -r "$_datafile" ]; then
+            LSB_JOBID=$(tr -d '\n\r' < "$_datafile")
+            export LSB_JOBID
+            rm -f -- "$_datafile" "$MYVNC_LSB_JOBID_POINTER" 2>/dev/null
+        fi
+        unset _datafile
+    fi
+fi
+
 VNCSERVER_PATH="${VNCSERVER_PATH:-/usr/bin/vncserver}"
 
 # Export the LSF job ID so it's available inside the VNC desktop session
@@ -29,6 +45,19 @@ fi
 VNC_DISPLAY=$(echo "$VNC_OUTPUT" | sed -n "s/.*New '[^:]*:\([0-9]*\).*/\1/p" | head -1)
 
 if [ -n "$VNC_DISPLAY" ] && [ -n "$LSB_JOBID" ]; then
+    # Source LSF profile if bpost is not on PATH (e.g. inside a --cleanenv container)
+    if ! command -v bpost >/dev/null 2>&1; then
+        for _lsf_profile in \
+            /site/lsf/aus-hw/conf/profile.lsf \
+            /etc/lsf/conf/profile.lsf \
+            /opt/lsf/conf/profile.lsf; do
+            if [ -r "$_lsf_profile" ]; then
+                . "$_lsf_profile"
+                break
+            fi
+        done
+        unset _lsf_profile
+    fi
     bpost -d "VNC_DISPLAY=:$VNC_DISPLAY" "$LSB_JOBID"
 fi
 
