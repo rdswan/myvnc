@@ -14,6 +14,9 @@ elif [ -f "$HOME/.bash_profile" ]; then
     source "$HOME/.bash_profile"
 fi
 
+## Capture the LSF job ID so it's available in the desktop session
+export MYVNC_JOBID="${LSB_JOBID}"
+
 ## Need to unset these if theyre defined so that we can start a new session up
 unset SESSION_MANAGER
 unset DBUS_SESSION_BUS_ADDRESS

@@ -14,6 +14,9 @@
 
 VNCSERVER_PATH="${VNCSERVER_PATH:-/usr/bin/vncserver}"
 
+# Export the LSF job ID so it's available inside the VNC desktop session
+export MYVNC_JOBID="${LSB_JOBID}"
+
 VNC_OUTPUT=$("$VNCSERVER_PATH" "$@" 2>&1)
 VNC_EXIT=$?
 
