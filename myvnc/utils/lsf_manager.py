@@ -718,12 +718,13 @@ class LSFManager:
                     self.logger.warning("No bindpaths specified in configuration")
                     self.logger.warning("No bind mounts will be added - container may not have access to shared filesystems")
                 
-                # Add the container path
-                container_cmd.append(container_path)
-                
                 # Pass LSB_JOBID into the container so vncserver_wrapper can call bpost.
                 # --cleanenv strips all env vars, so we must pass it explicitly.
+                # This must come before the container path.
                 container_cmd.extend(['--env', 'LSB_JOBID=$LSB_JOBID'])
+                
+                # Add the container path
+                container_cmd.append(container_path)
                 
                 # Wrap the vncserver command in bash with sleep infinity
                 # This keeps the container alive after vncserver starts
