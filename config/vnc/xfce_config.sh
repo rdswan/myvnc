@@ -26,6 +26,7 @@ cat > $HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml << 'E
   </property>
   <property name="saver" type="empty">
     <property name="mode" type="int" value="0"/>
+    <property name="enabled" type="bool" value="false"/>
   </property>
 </channel>
 EOF
