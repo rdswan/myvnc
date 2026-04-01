@@ -673,6 +673,7 @@ class LSFManager:
                     container_cmd.extend(['--env', f'USER={authenticated_user}'])
                     self.logger.info(f"Passing USER={authenticated_user} to container")
                 
+                
                 if use_custom_xstartup and xstartup_path:
                     container_cmd.extend(['--env', f'WINDOW_MANAGER={window_manager}'])
                     self.logger.info(f"Passing WINDOW_MANAGER={window_manager} to container")
@@ -724,7 +725,7 @@ class LSFManager:
                 # This keeps the container alive after vncserver starts
                 # vncserver daemonizes immediately, so without sleep the container would exit
                 vncserver_cmd_str = ' '.join(str(arg) for arg in vncserver_cmd)
-                container_cmd.extend(['/usr/bin/bash', '-c', f'unset LSB_QUEUE && {vncserver_cmd_str} && sleep infinity'])
+                container_cmd.extend(['/usr/bin/bash', '-c', f'export LSB_JOBID=$LSB_JOBID && unset LSB_QUEUE && {vncserver_cmd_str} && sleep infinity'])
                 
                 self.logger.info(f"Container command will keep alive with 'sleep infinity'")
                 
