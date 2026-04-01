@@ -721,15 +721,26 @@ class LSFManager:
                 # Add the container path
                 container_cmd.append(container_path)
                 
+                # Pass LSB_JOBID into the container so vncserver_wrapper can call bpost.
+                # --cleanenv strips all env vars, so we must pass it explicitly.
+                container_cmd.extend(['--env', 'LSB_JOBID=$LSB_JOBID'])
+                
                 # Wrap the vncserver command in bash with sleep infinity
                 # This keeps the container alive after vncserver starts
                 # vncserver daemonizes immediately, so without sleep the container would exit
                 vncserver_cmd_str = ' '.join(str(arg) for arg in vncserver_cmd)
-                container_cmd.extend(['/usr/bin/bash', '-c', f'export LSB_JOBID=$LSB_JOBID && unset LSB_QUEUE && {vncserver_cmd_str} && sleep infinity'])
+                inner_bash_cmd = f'unset LSB_QUEUE && {vncserver_cmd_str} && sleep infinity'
                 
                 self.logger.info(f"Container command will keep alive with 'sleep infinity'")
                 
-                bsub_cmd.extend(container_cmd)
+                # Build the singularity part (without the inner bash -c argument)
+                container_cmd_str = ' '.join(str(arg) for arg in container_cmd)
+                
+                # Wrap everything in an outer bash -c so the LSF job shell
+                # expands $LSB_JOBID before singularity sees it.
+                # Use single quotes around the inner bash -c argument to protect
+                # it from the outer shell.
+                bsub_cmd.extend(['/usr/bin/bash', '-c', f"{container_cmd_str} /usr/bin/bash -c '{inner_bash_cmd}'"])
             else:
                 # No container, prepend unset LSB_QUEUE before the vncserver command
                 vncserver_cmd_str = ' '.join(str(arg) for arg in vncserver_cmd)
