@@ -5,8 +5,32 @@
 export XDG_CURRENT_DESKTOP=XFCE
 export DESKTOP_SESSION=xfce
 
-# Disable screen locking and power management
+# Disable screensaver and all lock screen features
 mkdir -p $HOME/.config/xfce4/xfconf/xfce-perchannel-xml/
+cat > $HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-screensaver.xml << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+
+<channel name="xfce4-screensaver" version="1.0">
+  <property name="lock" type="empty">
+    <property name="sleep-activation" type="bool" value="false"/>
+    <property name="enabled" type="bool" value="false"/>
+    <property name="saver-activation" type="empty">
+      <property name="enabled" type="bool" value="false"/>
+    </property>
+    <property name="user-switching" type="empty">
+      <property name="enabled" type="bool" value="false"/>
+    </property>
+    <property name="status-messages" type="empty">
+      <property name="enabled" type="bool" value="false"/>
+    </property>
+  </property>
+  <property name="saver" type="empty">
+    <property name="mode" type="int" value="0"/>
+  </property>
+</channel>
+EOF
+
+# Disable power management
 cat > $HOME/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-power-manager.xml << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <channel name="xfce4-power-manager" version="1.0">
@@ -78,6 +102,13 @@ EOF
 done
 
 echo "All specified autostart entries have been disabled."
+
+# Disable screensaver and lock screen via xfconf-query after the session starts
+# (needs a running xfconf daemon, so we background it with a delay)
+(sleep 5 && \
+ xfconf-query -c xfce4-screensaver -p /lock/enabled -s false 2>/dev/null; \
+ xfconf-query -c xfce4-screensaver -p /screensaver/enabled -s false 2>/dev/null; \
+ echo "Screensaver and lock screen disabled via xfconf-query") &
 
 # Start XFCE session
 exec startxfce4 
