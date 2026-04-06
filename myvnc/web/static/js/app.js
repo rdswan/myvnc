@@ -2862,6 +2862,23 @@ async function refreshManagerList() {
     }
 }
 
+// Column title div lives before .table-filter-dropdown; only that text may be replaced for sort UI
+function getTableHeaderTitleElement(th) {
+    const dropdown = th.querySelector('.table-filter-dropdown');
+    if (!dropdown) return null;
+    const prev = dropdown.previousElementSibling;
+    return prev && prev.tagName === 'DIV' ? prev : null;
+}
+
+function setTableHeaderLabelText(th, text) {
+    const titleEl = getTableHeaderTitleElement(th);
+    if (titleEl) {
+        titleEl.textContent = text;
+    } else {
+        th.textContent = text;
+    }
+}
+
 // Enable sortable columns by clicking table headers
 function enableTableSorting(tableId) {
     const table = document.getElementById(tableId);
@@ -2869,9 +2886,10 @@ function enableTableSorting(tableId) {
 
     const thElements = table.querySelectorAll('thead th');
     thElements.forEach((th, index) => {
-        // Preserve original label
+        // Preserve original label (header row only; exclude filter control text)
         if (!th.dataset.label) {
-            th.dataset.label = th.textContent.trim();
+            const titleEl = getTableHeaderTitleElement(th);
+            th.dataset.label = titleEl ? titleEl.textContent.trim() : th.textContent.trim();
         }
 
         // Skip if listener already attached
@@ -2886,13 +2904,13 @@ function enableTableSorting(tableId) {
             // Reset order for all headers
             thElements.forEach(other => {
                 other.dataset.order = '';
-                other.innerHTML = other.dataset.label;
+                setTableHeaderLabelText(other, other.dataset.label);
             });
 
             // Set current header order and arrow
             th.dataset.order = order;
             const arrow = order === 'asc' ? ' ▲' : ' ▼';
-            th.innerHTML = `${th.dataset.label}${arrow}`;
+            setTableHeaderLabelText(th, `${th.dataset.label}${arrow}`);
 
             // Sort rows
             const tbody = table.tBodies[0];
