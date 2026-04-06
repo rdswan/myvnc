@@ -75,14 +75,12 @@ document.addEventListener('DOMContentLoaded', function() {
     // Set up other event listeners
     if (refreshButton) {
         refreshButton.addEventListener('click', () => {
-            refreshButton.classList.add('rotating');
             refreshButton.classList.add('refreshing');
             const originalText = '<i class="fas fa-sync-alt"></i> Refresh';
             refreshButton.innerHTML = '<i class="fas fa-sync-alt"></i> Refreshing...';
             
             refreshVNCList().finally(() => {
                 setTimeout(() => {
-                    refreshButton.classList.remove('rotating');
                     refreshButton.classList.remove('refreshing');
                     refreshButton.innerHTML = originalText;
                 }, 500);
@@ -93,14 +91,12 @@ document.addEventListener('DOMContentLoaded', function() {
     // Manager refresh button handler
     if (managerRefreshButton) {
         managerRefreshButton.addEventListener('click', () => {
-            managerRefreshButton.classList.add('rotating');
             managerRefreshButton.classList.add('refreshing');
             const originalText = '<i class="fas fa-sync-alt"></i> Refresh';
             managerRefreshButton.innerHTML = '<i class="fas fa-sync-alt"></i> Refreshing...';
 
             refreshManagerList().finally(() => {
                 setTimeout(() => {
-                    managerRefreshButton.classList.remove('rotating');
                     managerRefreshButton.classList.remove('refreshing');
                     managerRefreshButton.innerHTML = originalText;
                 }, 500);
@@ -1260,7 +1256,6 @@ async function refreshVNCList(withRetries = false) {
     // Only modify the button if this is a direct call
     if (directCall) {
         originalText = refreshButton.innerHTML;
-        refreshButton.classList.add('rotating');
         refreshButton.classList.add('refreshing');
         refreshButton.innerHTML = '<i class="fas fa-sync-alt"></i> Refreshing...';
     }
@@ -1399,7 +1394,6 @@ async function refreshVNCList(withRetries = false) {
         // Only reset the button if we set it in this function
         if (directCall) {
             setTimeout(() => {
-                refreshButton.classList.remove('rotating');
                 refreshButton.classList.remove('refreshing');
                 refreshButton.innerHTML = originalText || '<i class="fas fa-sync-alt"></i> Refresh';
             }, 500);
@@ -1765,7 +1759,6 @@ async function killVNCSession(jobId) {
             // Reset refresh button if it was in refreshing state
             if (refreshButton.classList.contains('refreshing')) {
                 refreshButton.classList.remove('refreshing');
-                refreshButton.classList.remove('rotating');
                 refreshButton.innerHTML = '<i class="fas fa-sync-alt"></i> Refresh';
             }
             
@@ -1960,11 +1953,13 @@ document.addEventListener('DOMContentLoaded', () => {
             to { opacity: 1; }
         }
         
-        .rotating {
-            animation: rotate 0.8s linear infinite;
+        /* Spin only the sync icon while refreshing, not the whole button */
+        .button.refreshing > i.fa-sync-alt {
+            display: inline-block;
+            animation: refresh-icon-spin 0.8s linear infinite;
         }
         
-        @keyframes rotate {
+        @keyframes refresh-icon-spin {
             from { transform: rotate(0deg); }
             to { transform: rotate(360deg); }
         }
@@ -2775,7 +2770,6 @@ async function refreshManagerList() {
 
     if (directCall && managerRefreshButton) {
         originalText = managerRefreshButton.innerHTML;
-        managerRefreshButton.classList.add('rotating');
         managerRefreshButton.classList.add('refreshing');
         managerRefreshButton.innerHTML = '<i class="fas fa-sync-alt"></i> Refreshing...';
     }
@@ -2865,7 +2859,6 @@ async function refreshManagerList() {
     } finally {
         if (directCall && managerRefreshButton) {
             setTimeout(() => {
-                managerRefreshButton.classList.remove('rotating');
                 managerRefreshButton.classList.remove('refreshing');
                 managerRefreshButton.innerHTML = originalText || '<i class="fas fa-sync-alt"></i> Refresh';
             }, 500);
