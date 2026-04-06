@@ -1490,6 +1490,12 @@ class LSFManager:
                             port = 5900 + display_num
                             self.logger.info(f"Found display number from command for job {job_id}: :{display_num}")
 
+                    # tmux: no execution host until dispatched — LSF may still fill first_host with
+                    # placeholders or submission metadata; clear so clients don't enable SSH/Connect.
+                    if session_type == "tmux" and status == "PEND":
+                        host = None
+                        exec_host = None
+
                     # Create job entry with all required fields
                     job = {
                         'job_id': job_id,
@@ -1702,15 +1708,21 @@ class LSFManager:
                                 if name_match:
                                     display_name_early = name_match.group(2) if name_match.group(2) else name_match.group(1)
                         
+                        job_status_early = fields[1].strip()
+                        host_early = fields[5].strip()
+                        exec_early = fields[5].strip()
+                        if session_type == "tmux" and job_status_early == "PEND":
+                            host_early = None
+                            exec_early = None
                         job = {
                             'job_id': fields[0].strip(),
                             'name': display_name_early,
                             'user': fields[2].strip(),
-                            'status': fields[1].strip(),
+                            'status': job_status_early,
                             'queue': fields[3].strip(),
                             'from_host': fields[4].strip(),
-                            'exec_host': fields[5].strip(),
-                            'host': fields[5].strip(),
+                            'exec_host': exec_early,
+                            'host': host_early,
                             'runtime': 'N/A',
                             'runtime_display': 'N/A',
                             'submit_time': submit_time,
@@ -1834,15 +1846,21 @@ class LSFManager:
                         self.logger.info(f"[OS_EXTRACT_STD] Job {fields[0].strip()}: combined_resreq is empty")
                     
                     # Create basic job info
+                    job_status_std = fields[1].strip()
+                    host_std = fields[5].strip()
+                    exec_std = fields[5].strip()
+                    if session_type == "tmux" and job_status_std == "PEND":
+                        host_std = None
+                        exec_std = None
                     job = {
                         'job_id': fields[0].strip(),
                         'name': display_name,
                         'user': fields[2].strip(),
-                        'status': fields[1].strip(),
+                        'status': job_status_std,
                         'queue': fields[3].strip(),
                         'from_host': fields[4].strip(),
-                        'exec_host': fields[5].strip(),
-                        'host': fields[5].strip(),
+                        'exec_host': exec_std,
+                        'host': host_std,
                         'runtime': 'N/A',  # Default runtime
                         'runtime_display': 'N/A',  # Add runtime_display for consistency with client
                         'submit_time': submit_time,

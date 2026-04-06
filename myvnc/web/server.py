@@ -1019,6 +1019,11 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                             self.logger.warning(f"Job {job_id} has no exec_host specified")
                         else:
                             job['host'] = job['exec_host']  # Duplicate for backward compatibility
+
+                        # tmux: execution host is unknown until the job leaves PEND; do not expose SSH host yet.
+                        if job.get('session_type') == 'tmux' and job.get('status') == 'PEND':
+                            job['host'] = None
+                            job['exec_host'] = None
                                                 
                         # Get connection details if needed
                         if ('display' not in job or 'port' not in job) and job.get('host') and job.get('host') != 'N/A':
