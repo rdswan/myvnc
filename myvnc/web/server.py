@@ -112,10 +112,114 @@ class LoggingHTTPServer(http.server.HTTPServer):
     def __init__(self, *args, **kwargs):
         self.logger = get_logger()
         super().__init__(*args, **kwargs)
+        self._ssl_config = None
+        self._ssl_cert_fingerprint = {}
+        self._ssl_last_check = 0
+        self._ssl_reload_interval = 3600
     
+    def configure_ssl_reload(self, ssl_cert, ssl_key, ssl_ca_chain=None, reload_interval=3600):
+        """Enable automatic SSL certificate reload when cert files change on disk.
+        
+        Call after initial SSL setup. The server will periodically check cert file
+        modification times and reload the SSL context if any have changed.
+        """
+        self._ssl_config = {
+            "ssl_cert": ssl_cert,
+            "ssl_key": ssl_key,
+            "ssl_ca_chain": ssl_ca_chain,
+        }
+        self._ssl_reload_interval = reload_interval
+        self._ssl_cert_fingerprint = self._get_cert_fingerprint()
+        self._ssl_last_check = time.time()
+        self.logger.info(
+            f"SSL auto-reload enabled (checking every {reload_interval}s) "
+            f"for cert={ssl_cert}, key={ssl_key}"
+            + (f", ca_chain={ssl_ca_chain}" if ssl_ca_chain else "")
+        )
+
+    def _get_cert_fingerprint(self):
+        """Return a dict capturing the current state of all configured cert files.
+        
+        Detects changes from symlink retargeting (certbot-style renewals),
+        target file content changes, and direct file modifications.
+        """
+        fingerprint = {}
+        if not self._ssl_config:
+            return fingerprint
+        for key in ("ssl_cert", "ssl_key", "ssl_ca_chain"):
+            path = self._ssl_config.get(key)
+            if not path or not os.path.exists(path):
+                continue
+            try:
+                real_target = os.path.realpath(path)
+                target_mtime = os.path.getmtime(real_target)
+                link_mtime = os.lstat(path).st_mtime if os.path.islink(path) else None
+                fingerprint[path] = (real_target, target_mtime, link_mtime)
+            except OSError:
+                pass
+        return fingerprint
+
+    def _reload_ssl_context(self):
+        """Build a new SSLContext from the cert files and re-wrap the server socket."""
+        cfg = self._ssl_config
+        ssl_cert = cfg["ssl_cert"]
+        ssl_key = cfg["ssl_key"]
+        ssl_ca_chain = cfg.get("ssl_ca_chain")
+
+        ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+        ctx.load_cert_chain(certfile=ssl_cert, keyfile=ssl_key)
+
+        if ssl_ca_chain and os.path.exists(ssl_ca_chain):
+            try:
+                ctx.load_verify_locations(cafile=ssl_ca_chain)
+            except Exception as e:
+                self.logger.warning(f"SSL reload: failed to load CA chain: {e}")
+
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+
+        # Detach the fd from the old SSL socket (prevents it from being closed)
+        # then build a plain socket from the fd so we can re-wrap it.
+        fd = self.socket.detach()
+        raw_socket = socket.socket(fileno=fd)
+        self.socket = ctx.wrap_socket(raw_socket, server_side=True)
+        self._ssl_cert_fingerprint = self._get_cert_fingerprint()
+        self.logger.info("SSL certificates reloaded successfully")
+
+    def _check_ssl_certs(self):
+        """Check if SSL cert files have changed and reload if needed."""
+        current = self._get_cert_fingerprint()
+        if current != self._ssl_cert_fingerprint:
+            changed = []
+            for path in current:
+                old = self._ssl_cert_fingerprint.get(path)
+                new = current[path]
+                if old != new:
+                    old_target = old[0] if old else "(none)"
+                    changed.append(f"{path}: {old_target} -> {new[0]}")
+            self.logger.info(f"SSL certificate change detected: {'; '.join(changed)}")
+            try:
+                self._reload_ssl_context()
+            except Exception as e:
+                self.logger.error(f"Failed to reload SSL certificates: {e}")
+                self.logger.error("Server will continue with previous certificates")
+        else:
+            targets = {p: fp[0] for p, fp in current.items()}
+            self.logger.info(f"SSL reload check: certificates unchanged (targets: {targets})")
+
     def service_actions(self):
-        """Called once per handle_request() cycle to perform any periodic tasks"""
+        """Called once per serve_forever() poll cycle to perform periodic tasks."""
         super().service_actions()
+        if self._ssl_config is None:
+            return
+        now = time.time()
+        if now - self._ssl_last_check < self._ssl_reload_interval:
+            return
+        self._ssl_last_check = now
+        try:
+            self._check_ssl_certs()
+        except Exception as e:
+            self.logger.error(f"SSL reload check failed unexpectedly: {e}")
     
     def process_request(self, request, client_address):
         """Log each incoming request"""
@@ -2516,6 +2620,26 @@ def run_server(host=None, port=None, directory=None, config=None):
         
         # Wrap the socket with SSL if HTTPS is enabled
         if use_https:
+            # Verify cert files are readable before attempting to load them
+            for label, path in [("SSL certificate", ssl_cert), ("SSL private key", ssl_key)]:
+                if not os.access(path, os.R_OK):
+                    logger.error(f"{label} file is not readable: {path}")
+                    logger.error(f"       Check file permissions (current user: {os.getenv('USER', 'unknown')})")
+                    try:
+                        import stat
+                        st = os.stat(path)
+                        mode = stat.filemode(st.st_mode)
+                        import pwd, grp
+                        owner = pwd.getpwuid(st.st_uid).pw_name
+                        group = grp.getgrgid(st.st_gid).gr_name
+                        logger.error(f"       File permissions: {mode}  owner: {owner}  group: {group}")
+                    except Exception:
+                        pass
+                    return
+            if ssl_ca_chain and os.path.exists(ssl_ca_chain) and not os.access(ssl_ca_chain, os.R_OK):
+                logger.warning(f"SSL CA chain file is not readable: {ssl_ca_chain} (will be skipped)")
+                ssl_ca_chain = None
+
             # Create SSL context with more permissive settings
             ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
             
@@ -2561,6 +2685,16 @@ def run_server(host=None, port=None, directory=None, config=None):
             # Wrap the socket with SSL
             httpd.socket = ssl_context.wrap_socket(httpd.socket, server_side=True)
             
+            # Enable automatic cert reload so renewed certs are picked up without restart
+            ssl_reload_interval = config.get("ssl_reload_interval", 3600)
+            if ssl_reload_interval > 0:
+                httpd.configure_ssl_reload(
+                    ssl_cert=ssl_cert,
+                    ssl_key=ssl_key,
+                    ssl_ca_chain=ssl_ca_chain,
+                    reload_interval=ssl_reload_interval,
+                )
+            
             # Log server startup with HTTPS
             logger.info(f"Server started - accessible at https://{fqdn_host}:{port}")
         else:
@@ -2587,6 +2721,7 @@ def run_server(host=None, port=None, directory=None, config=None):
             logger.error(f"Error in server loop: {str(e)}")
     except Exception as e:
         logger.error(f"Error creating server: {str(e)}")
+        logger.error(traceback.format_exc())
         return
     
     logger.info("Server has been shutdown")
