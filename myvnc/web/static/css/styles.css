@@ -281,6 +281,44 @@ tr:hover {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
+.button:disabled,
+.button:disabled:hover,
+.button:disabled:focus {
+  cursor: not-allowed;
+  box-shadow: none;
+  opacity: 1;
+  pointer-events: none;
+}
+
+/* Disabled: use explicit gray + !important so .secondary cyan never wins (incl. shorthand/gradient). */
+button.button.secondary:disabled,
+button.button.secondary:disabled:hover,
+button.button.secondary:disabled:focus,
+.button.secondary:disabled,
+.button.secondary:disabled:hover,
+.button.secondary:disabled:focus {
+  background: #6f7780 !important;
+  background-color: #6f7780 !important;
+  background-image: none !important;
+  color: #eceff1 !important;
+  border: 1px solid #5c636a !important;
+  -webkit-text-fill-color: #eceff1 !important;
+}
+
+.button.primary:disabled,
+.button.primary:disabled:hover,
+.button.primary:disabled:focus {
+  background-color: #a396b8;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.button.danger:disabled,
+.button.danger:disabled:hover,
+.button.danger:disabled:focus {
+  background-color: #c9a5a9;
+  color: rgba(255, 255, 255, 0.9);
+}
+
 .danger {
   background-color: #F04F5E; /* TT Light Red */
   color: white;

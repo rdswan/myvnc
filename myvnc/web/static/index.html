@@ -426,6 +426,20 @@
             font-size: 0.8rem;
         }
         
+        /* Disabled Connect: force neutral gray (cyan .secondary otherwise wins in some browsers). */
+        #vnc-table .actions-cell button.button.secondary:disabled,
+        #vnc-table .actions-cell button.button.secondary:disabled:hover,
+        #vnc-table .actions-cell button.button.secondary:disabled:focus {
+            background: #6f7780 !important;
+            background-color: #6f7780 !important;
+            background-image: none !important;
+            color: #eceff1 !important;
+            border: 1px solid #5c636a !important;
+            -webkit-text-fill-color: #eceff1 !important;
+            opacity: 1 !important;
+            box-shadow: none !important;
+        }
+        
         /* Make Manager Mode kill button icon-only and extra compact */
         #manager-table .actions-cell {
             text-align: center;

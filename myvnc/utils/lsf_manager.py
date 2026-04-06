@@ -1480,7 +1480,9 @@ class LSFManager:
                     # Fallback: extract display from the command string (for older jobs
                     # that were submitted with an explicit :N display argument).
                     # Old jobs used high display numbers where the VNC port is 5900+N.
-                    if display is None and command:
+                    # Only when RUN: submission commands always include a requested :N, which
+                    # must not be treated as the live VNC port while the job is still PEND.
+                    if display is None and command and status == "RUN":
                         display_match = re.search(r':(\d+)', command)
                         if display_match:
                             display_num = int(display_match.group(1))
@@ -1879,7 +1881,7 @@ class LSFManager:
                                 port = display
                                 self.logger.info(f"Using bpost display for job {job_id}: :{display}")
 
-                        if display is None and command:
+                        if display is None and command and job_status == "RUN":
                             display_match = re.search(r':(\d+)', command)
                             if display_match:
                                 display = int(display_match.group(1))
@@ -2046,8 +2048,9 @@ class LSFManager:
                     from_bpost = True
                     self.logger.info(f"Using bpost display for job {job_id}: :{display_num}")
 
-            # Fallback: extract display from the command string (for older jobs)
-            if not display_num and command:
+            # Fallback: extract display from the command string (for older jobs).
+            # Same as list parsing: only treat command :N as live once the job is RUN.
+            if not display_num and command and status == "RUN":
                 try:
                     display_match = re.search(r':(\d+)', command)
                     if display_match:

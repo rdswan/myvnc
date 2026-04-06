@@ -22,6 +22,16 @@ const messageBox = document.getElementById('message-box');
 const messageText = document.getElementById('message-text');
 const messageClose = document.getElementById('message-close');
 
+/** True when LSF has assigned a real execution host (not "-", "N/A", etc.). */
+function isConnectHostReady(host) {
+    if (host == null || host === '') return false;
+    const h = String(host).trim();
+    if (!h) return false;
+    const lower = h.toLowerCase();
+    if (lower === '-' || lower === 'n/a' || lower === 'na') return false;
+    return true;
+}
+
 // Initialize application
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Application initialization started');
@@ -1296,6 +1306,19 @@ async function refreshVNCList(withRetries = false) {
             
             // Determine if this is a tmux session
             const isTmux = job.session_type === 'tmux';
+            const connectReady = isTmux
+                ? isConnectHostReady(job.host)
+                : (isConnectHostReady(job.host) &&
+                    job.port != null &&
+                    job.port !== '');
+            const connectDisabledAttr = connectReady ? '' : ' disabled';
+            const connectTitle = isTmux
+                ? (connectReady
+                    ? 'tmux connection instructions'
+                    : 'Host not available yet — connection details unavailable')
+                : (connectReady
+                    ? 'VNC connection instructions'
+                    : 'Host and port required — connection details unavailable');
             
             // Create cells
             row.innerHTML = `
@@ -1315,15 +1338,12 @@ async function refreshVNCList(withRetries = false) {
                 <td>${formattedRuntime}</td>
                 <td class="actions-cell">
                     ${isTmux ? `
-                        <button class="button secondary tmux-connect-button" data-job-id="${job.job_id}" title="tmux Connection Instructions">
+                        <button class="button secondary tmux-connect-button" data-job-id="${job.job_id}" title="${connectTitle}"${connectDisabledAttr}>
                             <i class="fas fa-terminal"></i> Connect
                         </button>
                     ` : `
-                        <button class="button secondary connect-button" data-job-id="${job.job_id}" title="Connect to VNC (${connectionInfo})">
-                            <i class="fas fa-plug"></i> Connect
-                        </button>
-                        <button class="button secondary vnc-viewer-button" data-job-id="${job.job_id}" title="VNC Viewer Instructions">
-                            <i class="fas fa-desktop"></i> Connect w/ vncviewer
+                        <button class="button secondary vnc-viewer-button" data-job-id="${job.job_id}" title="${connectTitle}"${connectDisabledAttr}>
+                            <i class="fas fa-desktop"></i> Connect
                         </button>
                     `}
                     <button class="button danger kill-button" data-job-id="${job.job_id}" title="Kill ${isTmux ? 'tmux' : 'VNC'} Session">
@@ -1347,17 +1367,6 @@ async function refreshVNCList(withRetries = false) {
             });
         });
         
-        document.querySelectorAll('.connect-button').forEach(button => {
-            button.addEventListener('click', () => {
-                const jobId = button.getAttribute('data-job-id');
-                // Find job info
-                const job = jobs.find(j => j.job_id === jobId);
-                if (job) {
-                    connectToVNC(job);
-                }
-            });
-        });
-
         document.querySelectorAll('.vnc-viewer-button').forEach(button => {
             button.addEventListener('click', () => {
                 const jobId = button.getAttribute('data-job-id');
@@ -1417,19 +1426,6 @@ function copyToClipboard(text) {
     
     // Show feedback
     showMessage(`Copied to clipboard: ${text}`, 'success');
-}
-
-// Connect to VNC
-function connectToVNC(job) {
-    if (!job.host || !job.port) {
-        showMessage(`Connection details unavailable for ${job.name || 'VNC session'}. Host or port missing.`, 'error');
-        return;
-    }
-    
-    const connectionString = `${job.host}:${job.port}`;
-    
-    console.log(`Connecting to VNC using vnc://${connectionString}`);
-    window.location.href = `vnc://${connectionString}`;
 }
 
 // Show detailed VNC connection instructions with application-specific info
