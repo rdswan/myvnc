@@ -26,6 +26,19 @@ unset DBUS_SESSION_BUS_ADDRESS
 exec >> "$HOME/.vnc/xstartup.${HOSTNAME}${DISPLAY}.log" 2>&1
 echo "Starting VNC session at $(date)"
 
+# Per-cgroup early-OOM watcher: kills the largest non-protected child before
+# LSF's OOM killer takes down the whole job (and Xvnc with it).
+# To arm it for real: drop the --pretend flag below.
+EARLYOOM_SH="$(dirname "$(readlink -f "$0")")/../../utils/cgroup_earlyoom.sh"
+if [ -x "$EARLYOOM_SH" ]; then
+    echo "Launching cgroup_earlyoom watcher: $EARLYOOM_SH"
+    nohup "$EARLYOOM_SH" \
+        > "$HOME/.vnc/cgroup_earlyoom.${HOSTNAME}${DISPLAY}.log" 2>&1 &
+    disown
+else
+    echo "WARNING: cgroup_earlyoom.sh not found or not executable at $EARLYOOM_SH"
+fi
+
 ## disable screensaver and any lockscreen
 xset -dpms
 xset s off
