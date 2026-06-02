@@ -33,7 +33,7 @@
 static const char* allowed_commands[] = {
     "bjobs", "bsub", "bkill", "bpost", "bread",
     "squeue", "sbatch", "srun", "scancel", "scontrol",
-    "test"
+    "test", "cat"
 };
 static const int num_allowed_commands = sizeof(allowed_commands) / sizeof(allowed_commands[0]);
 

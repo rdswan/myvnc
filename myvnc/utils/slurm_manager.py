@@ -228,29 +228,91 @@ class SLURMManager:
         self.logger.info(f"Wrote SLURM batch script to: {script_path}")
         return script_path
 
-    def _get_display_from_file(self, job_id: str, user_home: str) -> Optional[str]:
-        """Retrieve the VNC display number from the file written by vncserver_wrapper.
+    def _get_display_from_file(self, job_id: str, user_home: str, authenticated_user: str = None) -> Optional[str]:
+        """Retrieve the VNC display number from the display file written by the batch script.
 
-        In the SLURM environment, vncserver_wrapper writes VNC_DISPLAY to a file
-        instead of using bpost. This method reads that file.
+        The SLURM batch script captures vncserver output and writes the display
+        number to ~/.vnc/myvnc_slurm_display.<job_id>.
+
+        Falls back to parsing VNC stdout log if the display file doesn't exist yet.
+        If direct file reads fail (permissions), falls back to using cat via _run_command.
 
         Returns the display number as a string (e.g. "6") or None if not available.
         """
-        display_file = os.path.join(user_home, '.vnc', f'myvnc_slurm_display.{job_id}')
+        vnc_dir = os.path.join(user_home, '.vnc')
+        display_file = os.path.join(vnc_dir, f'myvnc_slurm_display.{job_id}')
+        stdout_log = os.path.join(vnc_dir, f'myvnc.{job_id}.slurm_stdout.log')
+
+        # Method 1: Direct file read of display file
         try:
             if os.path.exists(display_file):
                 with open(display_file, 'r') as f:
                     content = f.read().strip()
+                self.logger.info(f"Read display file for job {job_id}, content: '{content}'")
                 match = re.search(r'VNC_DISPLAY=:(\d+)', content)
                 if match:
-                    display = match.group(1)
-                    self.logger.info(f"Found VNC display for SLURM job {job_id}: :{display}")
-                    return display
+                    return match.group(1)
                 elif content.isdigit():
-                    self.logger.info(f"Found VNC display for SLURM job {job_id}: :{content}")
                     return content
+            else:
+                self.logger.info(f"Display file does not exist: {display_file}")
+        except PermissionError:
+            self.logger.warning(f"Permission denied reading display file: {display_file}")
         except Exception as e:
             self.logger.warning(f"Could not read display file for SLURM job {job_id}: {e}")
+
+        # Method 2: Direct file read of SLURM stdout log
+        try:
+            if os.path.exists(stdout_log):
+                with open(stdout_log, 'r') as f:
+                    for line in f:
+                        match = re.search(r"New '[^:]*:(\d+)", line)
+                        if match:
+                            self.logger.info(f"Found VNC display from stdout log for job {job_id}: :{match.group(1)}")
+                            return match.group(1)
+                        match = re.search(r"desktop is [^:]*:(\d+)", line)
+                        if match:
+                            self.logger.info(f"Found VNC display from stdout log for job {job_id}: :{match.group(1)}")
+                            return match.group(1)
+                self.logger.info(f"Stdout log exists but no display pattern found: {stdout_log}")
+            else:
+                self.logger.info(f"Stdout log does not exist: {stdout_log}")
+        except PermissionError:
+            self.logger.warning(f"Permission denied reading stdout log: {stdout_log}")
+        except Exception as e:
+            self.logger.warning(f"Could not read stdout log for SLURM job {job_id}: {e}")
+
+        # Method 3: Use cat via _run_command (goes through setuid_runner if needed)
+        if authenticated_user:
+            try:
+                output = self._run_command(['cat', display_file], authenticated_user)
+                if output:
+                    content = output.strip()
+                    self.logger.info(f"Read display file via cat for job {job_id}, content: '{content}'")
+                    if content.isdigit():
+                        return content
+                    match = re.search(r'VNC_DISPLAY=:(\d+)', content)
+                    if match:
+                        return match.group(1)
+            except Exception as e:
+                self.logger.debug(f"cat display file via _run_command failed for job {job_id}: {e}")
+
+            # Try reading stdout log via cat
+            try:
+                output = self._run_command(['cat', stdout_log], authenticated_user)
+                if output:
+                    for line in output.splitlines():
+                        match = re.search(r"New '[^:]*:(\d+)", line)
+                        if match:
+                            self.logger.info(f"Found VNC display from stdout log (via cat) for job {job_id}: :{match.group(1)}")
+                            return match.group(1)
+                        match = re.search(r"desktop is [^:]*:(\d+)", line)
+                        if match:
+                            self.logger.info(f"Found VNC display from stdout log (via cat) for job {job_id}: :{match.group(1)}")
+                            return match.group(1)
+            except Exception as e:
+                self.logger.debug(f"cat stdout log via _run_command failed for job {job_id}: {e}")
+
         return None
 
     def submit_vnc_job(self, vnc_config: Dict, slurm_config: Dict, authenticated_user: str = None, fake_no_home: bool = False, server_hostname: str = None) -> str:
@@ -482,11 +544,19 @@ class SLURMManager:
                 inner_cmd = f'{vncserver_cmd_str} && sleep infinity'
                 container_cmd_parts.extend(['/usr/bin/bash', '-c', inner_cmd])
                 exec_command = ' '.join(shlex.quote(p) if ' ' in p else p for p in container_cmd_parts)
+                using_container_exec = True
             else:
-                exec_command = f'{vncserver_cmd_str} && sleep infinity'
+                exec_command = vncserver_cmd_str
+                using_container_exec = False
 
+            display_file_path = f'{user_home}/.vnc/myvnc_slurm_display.$SLURM_JOB_ID'
             env_exports_str = '\n'.join(env_exports)
-            script_content = f"""#!/bin/bash
+
+            if using_container_exec:
+                # Container case: vncserver runs inside singularity, so we cannot easily
+                # capture its stdout. Instead, use a background loop that watches for
+                # the VNC log file to appear and extracts the display from it.
+                script_content = f"""#!/bin/bash
 #SBATCH --partition={partition}
 #SBATCH --cpus-per-task={num_cores}
 #SBATCH --mem={memory_gb}G
@@ -508,8 +578,116 @@ class SLURMManager:
 # Write the SLURM job ID for reference
 echo "$SLURM_JOB_ID" > {user_home}/.vnc/myvnc_slurm_jobid.$$
 
-# Execute the VNC server
+# Background watcher: detect VNC display from log files
+(
+    for i in $(seq 1 60); do
+        sleep 2
+        # Look for the newest VNC log that appeared after job start
+        VNC_LOG=$(ls -t {user_home}/.vnc/*.log 2>/dev/null | head -1)
+        if [ -n "$VNC_LOG" ]; then
+            VNC_DISPLAY=$(grep -oP "desktop is [^:]*:\\K[0-9]+" "$VNC_LOG" 2>/dev/null | head -1)
+            if [ -z "$VNC_DISPLAY" ]; then
+                VNC_DISPLAY=$(sed -n "s/.*New '[^:]*:\\([0-9]*\\).*/\\1/p" "$VNC_LOG" 2>/dev/null | head -1)
+            fi
+            if [ -n "$VNC_DISPLAY" ]; then
+                echo "$VNC_DISPLAY" > {display_file_path}
+                chmod 644 {display_file_path}
+                break
+            fi
+        fi
+    done
+) &
+
+# Execute the containerized VNC server (includes sleep infinity inside)
 {exec_command}
+"""
+            else:
+                # Non-container case: capture vncserver output directly
+                script_content = f"""#!/bin/bash
+#SBATCH --partition={partition}
+#SBATCH --cpus-per-task={num_cores}
+#SBATCH --mem={memory_gb}G
+#SBATCH --job-name={job_name}
+#SBATCH --ntasks=1
+#SBATCH --output={stdout_log_path}
+#SBATCH --error={stderr_log_path}
+#SBATCH --chdir={user_home}
+{f'#SBATCH --constraint={chr(38).join(constraints)}' if constraints else ''}
+{f'#SBATCH --time={time_limit}' if time_limit and time_limit.strip() else ''}
+{f'#SBATCH --nodelist={host_filter}' if host_filter and host_filter.strip() else ''}
+
+# Enable user lingering for systemd user sessions
+/usr/bin/loginctl enable-linger {user} 2>/dev/null || true
+
+# Set environment variables
+{env_exports_str}
+
+# Write the SLURM job ID for reference
+echo "$SLURM_JOB_ID" > {user_home}/.vnc/myvnc_slurm_jobid.$$
+
+# Execute the VNC server and capture the display number
+VNC_OUTPUT=$({exec_command} 2>&1)
+VNC_EXIT=$?
+echo "$VNC_OUTPUT"
+echo "MYVNC_DEBUG: VNC output was: $VNC_OUTPUT" >&2
+
+if [ $VNC_EXIT -ne 0 ]; then
+    echo "MYVNC_DEBUG: VNC exited with code $VNC_EXIT" >&2
+    exit $VNC_EXIT
+fi
+
+# Parse the display number from vncserver output using multiple patterns
+# Pattern 1: "New 'hostname:N (user)'" (classic VNC)
+VNC_DISPLAY=$(echo "$VNC_OUTPUT" | sed -n "s/.*New '[^:]*:\\([0-9]*\\).*/\\1/p" | head -1)
+
+# Pattern 2: "desktop is hostname:N" (TigerVNC)
+if [ -z "$VNC_DISPLAY" ]; then
+    VNC_DISPLAY=$(echo "$VNC_OUTPUT" | grep -oP "desktop is [^:]*:\\K[0-9]+" | head -1)
+fi
+
+# Pattern 3: "for display :N" (TigerVNC 1.10+)
+if [ -z "$VNC_DISPLAY" ]; then
+    VNC_DISPLAY=$(echo "$VNC_OUTPUT" | grep -oP "for display :\\K[0-9]+" | head -1)
+fi
+
+# Pattern 4: "started on display hostname:N" (TurboVNC)
+if [ -z "$VNC_DISPLAY" ]; then
+    VNC_DISPLAY=$(echo "$VNC_OUTPUT" | grep -oP "started on display [^:]*:\\K[0-9]+" | head -1)
+fi
+
+# Pattern 5: generic ":N" after "display" keyword
+if [ -z "$VNC_DISPLAY" ]; then
+    VNC_DISPLAY=$(echo "$VNC_OUTPUT" | grep -ioP "display[^:]*:\\K[0-9]+" | head -1)
+fi
+
+# Fallback: scan VNC log files for the display number
+if [ -z "$VNC_DISPLAY" ]; then
+    for logfile in {user_home}/.vnc/*.log; do
+        [ -f "$logfile" ] || continue
+        VNC_DISPLAY=$(grep -oP "desktop is [^:]*:\\K[0-9]+" "$logfile" 2>/dev/null | tail -1)
+        if [ -z "$VNC_DISPLAY" ]; then
+            VNC_DISPLAY=$(sed -n "s/.*New '[^:]*:\\([0-9]*\\).*/\\1/p" "$logfile" 2>/dev/null | tail -1)
+        fi
+        [ -n "$VNC_DISPLAY" ] && break
+    done
+fi
+
+# Fallback: check for .pid files (format: hostname:N.pid)
+if [ -z "$VNC_DISPLAY" ]; then
+    NEWEST_PID=$(ls -t {user_home}/.vnc/*.pid 2>/dev/null | head -1)
+    if [ -n "$NEWEST_PID" ]; then
+        VNC_DISPLAY=$(basename "$NEWEST_PID" | grep -oP ":\\K[0-9]+(?=\\.pid)")
+    fi
+fi
+
+# Write display number to file so the web UI can find it
+if [ -n "$VNC_DISPLAY" ]; then
+    echo "$VNC_DISPLAY" > {display_file_path}
+    chmod 644 {display_file_path}
+fi
+
+# Keep the job alive (vncserver daemonizes immediately)
+sleep infinity
 """
             # Write batch script to user's .vnc directory
             script_path = os.path.join(vnc_log_dir, f'myvnc_vnc_submit.sh')
@@ -1020,7 +1198,7 @@ echo "$SLURM_JOB_ID" > {user_home}/.vnc/myvnc_slurm_jobid.$$
                     port = None
                     if session_type == "VNC" and status == "RUN" and user:
                         user_home_for_display = os.path.expanduser(f'~{job_user}')
-                        display_str = self._get_display_from_file(job_id, user_home_for_display)
+                        display_str = self._get_display_from_file(job_id, user_home_for_display, authenticated_user)
                         if display_str:
                             display = int(display_str)
                             port = display
@@ -1124,7 +1302,7 @@ echo "$SLURM_JOB_ID" > {user_home}/.vnc/myvnc_slurm_jobid.$$
             display_num = None
             if status == "RUN" and user:
                 user_home = os.path.expanduser(f'~{user}')
-                display_num = self._get_display_from_file(job_id, user_home)
+                display_num = self._get_display_from_file(job_id, user_home, authenticated_user)
 
             # Fallback: extract from command
             if not display_num and command and status == "RUN":
