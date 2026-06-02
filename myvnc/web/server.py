@@ -36,11 +36,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from myvnc.utils.auth_manager import AuthManager
 from myvnc.utils.lsf_manager import LSFManager
+from myvnc.utils.slurm_manager import SLURMManager, SLURMError
 from myvnc.utils.config_manager import ConfigManager
 from myvnc.utils.vnc_manager import VNCManager
 from myvnc.utils.db_manager import DatabaseManager
 from myvnc.utils.log_manager import setup_logging, get_logger, get_current_log_file
-from myvnc.utils.config_loader import load_server_config, load_lsf_config, load_vnc_config, get_logger
+from myvnc.utils.config_loader import load_server_config, load_lsf_config, load_vnc_config, get_logger, get_scheduler_type
 
 def setup_logger():
     """Set up detailed logging configuration"""
@@ -251,7 +252,13 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
     
     def __init__(self, *args, **kwargs):
         self.config_manager = ConfigManager()
-        self.lsf_manager = LSFManager()
+        self.scheduler_type = self.config_manager.get_scheduler_type()
+
+        if self.scheduler_type == 'slurm':
+            self.lsf_manager = SLURMManager()
+        else:
+            self.lsf_manager = LSFManager()
+
         self.auth_manager = AuthManager()
         self.vnc_manager = VNCManager()
         
@@ -1052,9 +1059,9 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.send_json_response({"error": str(e)}, status=500)
     
     def handle_lsf_config(self):
-        """Handle LSF configuration request"""
+        """Handle scheduler configuration request (LSF or SLURM)"""
         try:
-            self.logger.info("Handling LSF configuration request")
+            self.logger.info("Handling scheduler configuration request")
             
             # Get authenticated user
             username = None
@@ -1070,41 +1077,65 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             if username:
                 user_override = self.db_manager.get_manager_override(username)
             
-            # Get base LSF configuration
-            config = {
-                'defaults': self.config_manager.get_lsf_defaults(),
-                'queues': self.config_manager.get_available_queues(),
-                'memory_options': self.config_manager.get_memory_options(),
-                'memory_options_gb': self.config_manager.get_memory_options(),  # For consistency
-                'core_options': self.config_manager.get_core_options(),
-                'sites': self.config_manager.get_available_sites(),
-                'os_options': self.config_manager.lsf_config.get('os_options', [])
-            }
-            
-            # Add enabled/user-specific options
-            if user_override:
-                # User has override - return their specific options
-                config["enabled_cores"] = user_override.get('cores') if user_override.get('cores') is not None else self.config_manager.get_enabled_core_options()
-                config["enabled_memory"] = user_override.get('memory') if user_override.get('memory') is not None else self.config_manager.get_enabled_memory_options()
-                config["enabled_queues"] = user_override.get('queues') if user_override.get('queues') is not None else self.config_manager.get_available_queues()
-                
-                # For OS options, we need to filter the full os_options list
-                if user_override.get('os_options') is not None:
-                    os_names = user_override.get('os_options')
-                    config["enabled_os_options"] = [os_opt for os_opt in config['os_options'] if os_opt.get("name") in os_names]
+            if self.scheduler_type == 'slurm':
+                slurm_cfg = self.config_manager.slurm_config
+                config = {
+                    'scheduler': 'slurm',
+                    'defaults': self.config_manager.get_scheduler_defaults(),
+                    'queues': slurm_cfg.get('available_partitions', []),
+                    'memory_options': slurm_cfg.get('memory_options_gb', []),
+                    'memory_options_gb': slurm_cfg.get('memory_options_gb', []),
+                    'core_options': slurm_cfg.get('cpus_per_task_options', []),
+                    'sites': self.config_manager.get_available_sites(),
+                    'os_options': slurm_cfg.get('os_options', []),
+                }
+                # For SLURM, use the same enabled options structure
+                if user_override:
+                    config["enabled_cores"] = user_override.get('cores') if user_override.get('cores') is not None else slurm_cfg.get('cpus_per_task_options', [])
+                    config["enabled_memory"] = user_override.get('memory') if user_override.get('memory') is not None else slurm_cfg.get('memory_options_gb', [])
+                    config["enabled_queues"] = user_override.get('queues') if user_override.get('queues') is not None else slurm_cfg.get('available_partitions', [])
+                    if user_override.get('os_options') is not None:
+                        os_names = user_override.get('os_options')
+                        config["enabled_os_options"] = [os_opt for os_opt in config['os_options'] if os_opt.get("name") in os_names]
+                    else:
+                        config["enabled_os_options"] = slurm_cfg.get('os_options', [])
                 else:
-                    config["enabled_os_options"] = self.config_manager.get_enabled_os_options()
+                    config["enabled_cores"] = slurm_cfg.get('cpus_per_task_options', [])
+                    config["enabled_memory"] = slurm_cfg.get('memory_options_gb', [])
+                    config["enabled_queues"] = slurm_cfg.get('available_partitions', [])
+                    config["enabled_os_options"] = slurm_cfg.get('os_options', [])
             else:
-                # Return globally enabled options
-                config["enabled_cores"] = self.config_manager.get_enabled_core_options()
-                config["enabled_memory"] = self.config_manager.get_enabled_memory_options()
-                config["enabled_queues"] = self.config_manager.get_available_queues()
-                config["enabled_os_options"] = self.config_manager.get_enabled_os_options()
+                # LSF mode (default)
+                config = {
+                    'scheduler': 'lsf',
+                    'defaults': self.config_manager.get_lsf_defaults(),
+                    'queues': self.config_manager.get_available_queues(),
+                    'memory_options': self.config_manager.get_memory_options(),
+                    'memory_options_gb': self.config_manager.get_memory_options(),
+                    'core_options': self.config_manager.get_core_options(),
+                    'sites': self.config_manager.get_available_sites(),
+                    'os_options': self.config_manager.lsf_config.get('os_options', [])
+                }
+                
+                if user_override:
+                    config["enabled_cores"] = user_override.get('cores') if user_override.get('cores') is not None else self.config_manager.get_enabled_core_options()
+                    config["enabled_memory"] = user_override.get('memory') if user_override.get('memory') is not None else self.config_manager.get_enabled_memory_options()
+                    config["enabled_queues"] = user_override.get('queues') if user_override.get('queues') is not None else self.config_manager.get_available_queues()
+                    if user_override.get('os_options') is not None:
+                        os_names = user_override.get('os_options')
+                        config["enabled_os_options"] = [os_opt for os_opt in config['os_options'] if os_opt.get("name") in os_names]
+                    else:
+                        config["enabled_os_options"] = self.config_manager.get_enabled_os_options()
+                else:
+                    config["enabled_cores"] = self.config_manager.get_enabled_core_options()
+                    config["enabled_memory"] = self.config_manager.get_enabled_memory_options()
+                    config["enabled_queues"] = self.config_manager.get_available_queues()
+                    config["enabled_os_options"] = self.config_manager.get_enabled_os_options()
             
-            self.logger.debug(f"Sending LSF config: {config}")
+            self.logger.debug(f"Sending scheduler config: {config}")
             self.send_json_response(config)
         except Exception as e:
-            self.logger.error(f"Error handling LSF config request: {str(e)}")
+            self.logger.error(f"Error handling scheduler config request: {str(e)}")
             self.send_error_response(str(e))
             
     def handle_server_config(self):
@@ -1522,7 +1553,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             
             # Get default settings from config
             vnc_defaults = self.config_manager.get_vnc_defaults()
-            lsf_defaults = self.config_manager.get_lsf_defaults()
+            lsf_defaults = self.config_manager.get_scheduler_defaults()
             
             # Extract session settings based on type
             if session_type == "tmux":
@@ -1545,10 +1576,12 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                     "use_custom_xstartup": vnc_defaults.get("use_custom_xstartup", False)
                 }
             
-            # Extract LSF settings from request
+            # Extract scheduler settings from request (works for both LSF and SLURM)
             lsf_settings = {
                 "queue": data.get("queue", lsf_defaults.get("queue")),
-                "num_cores": int(data.get("num_cores", lsf_defaults.get("num_cores"))),
+                "partition": data.get("queue", lsf_defaults.get("queue", lsf_defaults.get("partition"))),
+                "num_cores": int(data.get("num_cores", lsf_defaults.get("num_cores", 2))),
+                "cpus_per_task": int(data.get("num_cores", lsf_defaults.get("num_cores", lsf_defaults.get("cpus_per_task", 2)))),
                 "memory_gb": int(data.get("memory_gb", lsf_defaults.get("memory_gb"))),
                 "job_name": lsf_defaults.get("job_name", "myvnc_vncserver"),
                 "memlimit_multiplier": lsf_defaults.get("memlimit_multiplier", 1.0)
@@ -1558,22 +1591,37 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             host_filter = data.get("host_filter", "").strip()
             if host_filter:
                 lsf_settings["host_filter"] = host_filter
+                lsf_settings["nodelist"] = host_filter
                 self.logger.info(f"Using host filter: {host_filter}")
             
-            # Convert OS name to os_select and get container path if applicable
+            # Convert OS name to os_select/constraint and get container path if applicable
             os_name = data.get("os", lsf_defaults.get("os", "Any"))
-            os_config = self.config_manager.get_os_config_by_name(os_name)
-            if os_config:
-                lsf_settings["os_select"] = os_config.get("select", "any")
-                if "container" in os_config:
-                    lsf_settings["container"] = os_config.get("container")
-                    self.logger.info(f"Using container for OS '{os_name}': {os_config.get('container')}")
-                if "bindpaths" in os_config:
-                    lsf_settings["bindpaths"] = os_config.get("bindpaths")
-                    self.logger.info(f"Using bindpaths for OS '{os_name}': {os_config.get('bindpaths')}")
+            if self.scheduler_type == 'slurm':
+                os_config = self.config_manager.get_slurm_os_config_by_name(os_name)
+                if os_config:
+                    lsf_settings["constraint"] = os_config.get("constraint", "")
+                    if "container" in os_config:
+                        lsf_settings["container"] = os_config.get("container")
+                        self.logger.info(f"Using container for OS '{os_name}': {os_config.get('container')}")
+                    if "bindpaths" in os_config:
+                        lsf_settings["bindpaths"] = os_config.get("bindpaths")
+                        self.logger.info(f"Using bindpaths for OS '{os_name}': {os_config.get('bindpaths')}")
+                else:
+                    self.logger.warning(f"OS '{os_name}' not found in SLURM configuration, using default")
+                    lsf_settings["constraint"] = ""
             else:
-                self.logger.warning(f"OS '{os_name}' not found in configuration, using default")
-                lsf_settings["os_select"] = "any"
+                os_config = self.config_manager.get_os_config_by_name(os_name)
+                if os_config:
+                    lsf_settings["os_select"] = os_config.get("select", "any")
+                    if "container" in os_config:
+                        lsf_settings["container"] = os_config.get("container")
+                        self.logger.info(f"Using container for OS '{os_name}': {os_config.get('container')}")
+                    if "bindpaths" in os_config:
+                        lsf_settings["bindpaths"] = os_config.get("bindpaths")
+                        self.logger.info(f"Using bindpaths for OS '{os_name}': {os_config.get('bindpaths')}")
+                else:
+                    self.logger.warning(f"OS '{os_name}' not found in configuration, using default")
+                    lsf_settings["os_select"] = "any"
             
             # Log the settings that will be used
             self.logger.info(f"Using session settings: {json.dumps(session_settings)}")
@@ -1613,11 +1661,10 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 "job_id": job_id,
                 "status": "pending"
             })
-        except LSFError as e:
-            # LSF errors have clean error messages that should be shown to the user
+        except (LSFError, SLURMError) as e:
+            # Scheduler errors have clean error messages that should be shown to the user
             error_msg = str(e)
-            self.logger.error(f"LSF error creating session: {error_msg}")
-            # Don't print stack trace for LSF errors as they are expected user errors
+            self.logger.error(f"Scheduler error creating session: {error_msg}")
             self.send_json_response({
                 "success": False,
                 "message": error_msg
@@ -1744,7 +1791,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             
             # Get default settings from config
             vnc_defaults = self.config_manager.get_vnc_defaults()
-            lsf_defaults = self.config_manager.get_lsf_defaults()
+            lsf_defaults = self.config_manager.get_scheduler_defaults()
             
             # Extract and prepare settings for new session
             vnc_settings = {
@@ -1761,7 +1808,9 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             
             lsf_settings = {
                 "queue": session_to_copy.get("queue", lsf_defaults.get("queue")),
-                "num_cores": int(session_to_copy.get("num_cores", lsf_defaults.get("num_cores"))),
+                "partition": session_to_copy.get("queue", lsf_defaults.get("queue", lsf_defaults.get("partition"))),
+                "num_cores": int(session_to_copy.get("num_cores", lsf_defaults.get("num_cores", 2))),
+                "cpus_per_task": int(session_to_copy.get("num_cores", lsf_defaults.get("num_cores", lsf_defaults.get("cpus_per_task", 2)))),
                 "memory_gb": int(session_to_copy.get("memory_gb", lsf_defaults.get("memory_gb"))),
                 "job_name": lsf_defaults.get("job_name", "myvnc_vncserver"),
                 "memlimit_multiplier": lsf_defaults.get("memlimit_multiplier", 1.0)
@@ -2310,6 +2359,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 "host": host,
                 "port": port,
                 "url": url,
+                "scheduler": self.scheduler_type,
                 "ssl_enabled": ssl_enabled,
                 "ssl_cert": ssl_cert if ssl_enabled else "",
                 "ssl_key": ssl_key if ssl_enabled else "",
@@ -2455,48 +2505,104 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.logger.error(traceback.format_exc())
             self.send_json_response({"error": str(e)}, status=500)
 
-def source_lsf_environment():
-    """Source the LSF environment file"""
+def source_scheduler_environment():
+    """Source the environment file for the active scheduler (LSF or SLURM)"""
     logger = get_logger()
+    scheduler_type = get_scheduler_type()
+
+    if scheduler_type == 'slurm':
+        return _source_slurm_environment(logger)
+    else:
+        return _source_lsf_environment(logger)
+
+
+def _source_slurm_environment(logger):
+    """Source the SLURM environment file"""
+    from myvnc.utils.config_loader import load_slurm_config
+    slurm_config = load_slurm_config()
+
+    if not slurm_config:
+        logger.warning("No SLURM configuration found")
+        return False
+
+    env_file = slurm_config.get("env_file")
+
+    if not env_file or not os.path.exists(env_file):
+        common_locations = [
+            "/etc/profile.d/slurm.sh",
+            "/opt/slurm/etc/slurm-env.sh",
+            "/usr/local/etc/slurm.sh",
+        ]
+
+        for location in common_locations:
+            if os.path.exists(location):
+                env_file = location
+                logger.info(f"Using SLURM environment file: {env_file}")
+                break
+        else:
+            logger.info("No SLURM environment file found (SLURM may already be in PATH)")
+            return True
+    else:
+        logger.info(f"Using SLURM environment file: {env_file}")
+
+    try:
+        command = f"source {env_file} && env"
+        proc = subprocess.Popen(['/bin/bash', '-c', command], stdout=subprocess.PIPE)
+        for line in proc.stdout:
+            line = line.decode('utf-8').strip()
+            if line and '=' in line:
+                key, value = line.split('=', 1)
+                os.environ[key] = value
+        proc.communicate()
+        logger.info(f"Successfully sourced SLURM environment from {env_file}")
+        return True
+    except Exception as e:
+        logger.error(f"Error sourcing SLURM environment: {str(e)}")
+        return False
+
+
+def _source_lsf_environment(logger):
+    """Source the LSF environment file"""
     lsf_config = load_lsf_config()
     env_file = lsf_config.get("env_file")
-    
+
     if not env_file or not os.path.exists(env_file):
-        # Try common LSF environment file locations
         common_locations = [
             "/site/lsf/aus-hw/conf/profile.lsf",
             "/etc/lsf/conf/profile.lsf",
             "/opt/lsf/conf/profile.lsf"
         ]
-        
+
         for location in common_locations:
             if os.path.exists(location):
                 env_file = location
                 logger.info(f"Using LSF environment file: {env_file}")
                 break
         else:
-            # No LSF environment file found
             logger.warning("No LSF environment file found")
             return False
     else:
         logger.info(f"Using LSF environment file: {env_file}")
-    
+
     try:
-        # Source the environment file and capture the environment variables
         command = f"source {env_file} && env"
         proc = subprocess.Popen(['/bin/bash', '-c', command], stdout=subprocess.PIPE)
         for line in proc.stdout:
-            # Fix for Python 3.6: Decode bytes to string
             line = line.decode('utf-8').strip()
             if line and '=' in line:
                 key, value = line.split('=', 1)
                 os.environ[key] = value
-        proc.communicate()  # Ensure process completes
+        proc.communicate()
         logger.info(f"Successfully sourced LSF environment from {env_file}")
         return True
     except Exception as e:
         logger.error(f"Error sourcing LSF environment: {str(e)}")
         return False
+
+
+def source_lsf_environment():
+    """Source the LSF environment file (backward-compatible wrapper)"""
+    return source_scheduler_environment()
 
 def run_server(host=None, port=None, directory=None, config=None):
     """Run the web server"""

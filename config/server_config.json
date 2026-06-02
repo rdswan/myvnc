@@ -15,5 +15,7 @@
     "ssl_ca_chain": "",
     "ssl_reload_interval": 3600,
     "setuid_runner": "/localdev/myvnc/bin/setuid_runner",
-    "managers": ["shuffman", "jbell", "bswan"]
+    "managers": ["shuffman", "jbell", "bswan"],
+    "scheduler": "lsf",
+    "scheduler_notes": "Set 'scheduler' to 'lsf' or 'slurm'. Defaults to 'lsf' if not specified."
 }

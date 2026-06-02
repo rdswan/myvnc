@@ -44,6 +44,13 @@ class ConfigManager:
         # Load configurations - use the default_prefix in filenames
         self.vnc_config = self._load_config("vnc_config.json", os.environ.get("MYVNC_VNC_CONFIG_FILE"))
         self.lsf_config = self._load_config("lsf_config.json", os.environ.get("MYVNC_LSF_CONFIG_FILE"))
+
+        # Load SLURM config if it exists (non-fatal if missing)
+        try:
+            self.slurm_config = self._load_config("slurm_config.json", os.environ.get("MYVNC_SLURM_CONFIG_FILE"))
+        except RuntimeError:
+            self.slurm_config = None
+            self.logger.info("ConfigManager: slurm_config.json not found, SLURM support unavailable")
     
     def _load_config(self, filename, env_path=None):
         """
@@ -291,6 +298,87 @@ class ConfigManager:
                 'os_options': self.get_enabled_os_options()
             }
     
+    def get_scheduler_type(self):
+        """Get the configured scheduler type from server_config.json.
+        
+        Returns 'lsf' or 'slurm'. Defaults to 'lsf' if not specified.
+        """
+        from myvnc.utils.config_loader import load_server_config
+        server_config = load_server_config()
+        return server_config.get('scheduler', 'lsf').lower()
+
+    def get_scheduler_config(self):
+        """Get the configuration for the active scheduler.
+        
+        Returns the lsf_config or slurm_config based on the scheduler setting.
+        """
+        scheduler = self.get_scheduler_type()
+        if scheduler == 'slurm':
+            if self.slurm_config is None:
+                raise RuntimeError("Scheduler is set to 'slurm' but slurm_config.json was not found")
+            return self.slurm_config
+        return self.lsf_config
+
+    def get_scheduler_defaults(self):
+        """Get the default settings for the active scheduler.
+        
+        Returns a normalized dict with keys: queue/partition, num_cores/cpus_per_task,
+        memory_gb, job_name, and scheduler-specific extras.
+        """
+        scheduler = self.get_scheduler_type()
+        if scheduler == 'slurm':
+            if self.slurm_config is None:
+                raise RuntimeError("Scheduler is set to 'slurm' but slurm_config.json was not found")
+            defaults = self.slurm_config["default_settings"].copy()
+            # Normalize keys for compatibility with existing code
+            if "partition" in defaults and "queue" not in defaults:
+                defaults["queue"] = defaults["partition"]
+            if "cpus_per_task" in defaults and "num_cores" not in defaults:
+                defaults["num_cores"] = defaults["cpus_per_task"]
+            if "memory_gb" not in defaults:
+                defaults["memory_gb"] = 16
+            return defaults
+        return self.get_lsf_defaults()
+
+    def get_available_partitions(self):
+        """Get the list of available SLURM partitions"""
+        if self.slurm_config:
+            return self.slurm_config.get("available_partitions", [])
+        return []
+
+    def get_slurm_cpus_per_task_options(self):
+        """Get the list of available CPU options for SLURM"""
+        if self.slurm_config:
+            return self.slurm_config.get("cpus_per_task_options", [])
+        return []
+
+    def get_slurm_memory_options(self):
+        """Get the list of available memory options for SLURM in GB"""
+        if self.slurm_config:
+            return self.slurm_config.get("memory_options_gb", [])
+        return []
+
+    def get_slurm_os_options(self):
+        """Get the list of available OS options for SLURM"""
+        if self.slurm_config:
+            return self.slurm_config.get("os_options", [])
+        return []
+
+    def get_slurm_os_config_by_name(self, os_name):
+        """Get the SLURM OS configuration by OS name.
+        
+        Args:
+            os_name: Name of the OS
+            
+        Returns:
+            Dictionary with 'constraint' and optionally 'container' keys, or None
+        """
+        os_options = self.get_slurm_os_options()
+        for os_option in os_options:
+            if os_option.get("name") == os_name:
+                return os_option
+        return None
+
     def _filter_os_options_by_names(self, os_names):
         """
         Filter OS options to only include those with specified names

@@ -5,12 +5,21 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QFormLayout, QMessageBox)
 from PyQt6.QtCore import Qt
 from ..utils.lsf_manager import LSFManager
+from ..utils.slurm_manager import SLURMManager
+
+
+def _get_job_manager(config_manager):
+    """Get the appropriate job manager based on scheduler configuration"""
+    if config_manager.get_scheduler_type() == 'slurm':
+        return SLURMManager()
+    return LSFManager()
+
 
 class VNCreatorTab(QWidget):
     def __init__(self, config_manager):
         super().__init__()
         self.config_manager = config_manager
-        self.lsf_manager = LSFManager()
+        self.lsf_manager = _get_job_manager(config_manager)
         
         self.init_ui()
     
@@ -28,22 +37,31 @@ class VNCreatorTab(QWidget):
         self.wm_combo = QComboBox()
         self.wm_combo.addItems(self.config_manager.get_available_window_managers())
         
-        # LSF Settings
+        # Scheduler Settings (queues/partitions)
+        scheduler_type = self.config_manager.get_scheduler_type()
         self.queue_combo = QComboBox()
-        self.queue_combo.addItems(self.config_manager.get_available_queues())
+        if scheduler_type == 'slurm':
+            self.queue_combo.addItems(self.config_manager.get_available_partitions())
+        else:
+            self.queue_combo.addItems(self.config_manager.get_available_queues())
         
+        scheduler_defaults = self.config_manager.get_scheduler_defaults()
         self.cores_spin = QSpinBox()
         self.cores_spin.setRange(1, 32)
-        self.cores_spin.setValue(self.config_manager.get_lsf_defaults()['num_cores'])
+        self.cores_spin.setValue(scheduler_defaults.get('num_cores', 2))
         
         self.memory_combo = QComboBox()
-        self.memory_combo.addItems([str(x) for x in self.config_manager.get_memory_options()])
+        if scheduler_type == 'slurm':
+            self.memory_combo.addItems([str(x) for x in self.config_manager.get_slurm_memory_options()])
+        else:
+            self.memory_combo.addItems([str(x) for x in self.config_manager.get_memory_options()])
         
         # Add fields to form
+        queue_label = "SLURM Partition:" if scheduler_type == 'slurm' else "LSF Queue:"
         form_layout.addRow("Session Name:", self.name_input)
         form_layout.addRow("Resolution:", self.resolution_combo)
         form_layout.addRow("Window Manager:", self.wm_combo)
-        form_layout.addRow("LSF Queue:", self.queue_combo)
+        form_layout.addRow(queue_label, self.queue_combo)
         form_layout.addRow("Number of Cores:", self.cores_spin)
         form_layout.addRow("Memory (GB):", self.memory_combo)
         
@@ -75,13 +93,15 @@ class VNCreatorTab(QWidget):
             'vncserver_wrapper_path': vnc_defaults.get('vncserver_wrapper_path')
         }
         
-        # Prepare LSF configuration
-        lsf_defaults = self.config_manager.get_lsf_defaults()
+        # Prepare scheduler configuration
+        scheduler_defaults = self.config_manager.get_scheduler_defaults()
         lsf_config = {
             'queue': self.queue_combo.currentText(),
+            'partition': self.queue_combo.currentText(),
             'num_cores': self.cores_spin.value(),
+            'cpus_per_task': self.cores_spin.value(),
             'memory_gb': int(self.memory_combo.currentText()),
-            'memlimit_multiplier': lsf_defaults.get('memlimit_multiplier', 1.0)
+            'memlimit_multiplier': scheduler_defaults.get('memlimit_multiplier', 1.0)
         }
         
         try:

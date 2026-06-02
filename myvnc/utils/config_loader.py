@@ -80,6 +80,45 @@ def load_lsf_config(config_dir=None):
     cm = get_config_manager(config_dir)
     return cm.lsf_config
 
+def load_slurm_config(config_dir=None):
+    """
+    Load SLURM configuration
+    
+    Args:
+        config_dir: Optional directory containing configuration files
+        
+    Returns:
+        Dictionary with SLURM configuration, or None if not available
+    """
+    cm = get_config_manager(config_dir)
+    return cm.slurm_config
+
+def load_scheduler_config(config_dir=None):
+    """
+    Load the active scheduler configuration based on server_config.json scheduler setting.
+    
+    Args:
+        config_dir: Optional directory containing configuration files
+        
+    Returns:
+        Dictionary with the active scheduler configuration
+    """
+    cm = get_config_manager(config_dir)
+    return cm.get_scheduler_config()
+
+def get_scheduler_type(config_dir=None):
+    """
+    Get the configured scheduler type.
+    
+    Args:
+        config_dir: Optional directory containing configuration files
+        
+    Returns:
+        'lsf' or 'slurm'
+    """
+    cm = get_config_manager(config_dir)
+    return cm.get_scheduler_type()
+
 def load_vnc_config(config_dir=None):
     """
     Load VNC configuration

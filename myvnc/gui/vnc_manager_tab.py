@@ -4,12 +4,16 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QTableWidget, QTableWidgetIte
                              QPushButton, QHBoxLayout, QHeaderView)
 from PyQt6.QtCore import QTimer, Qt
 from ..utils.lsf_manager import LSFManager
+from ..utils.slurm_manager import SLURMManager
 
 class VNCManagerTab(QWidget):
     def __init__(self, config_manager, authenticated_user=None):
         super().__init__()
         self.config_manager = config_manager
-        self.lsf_manager = LSFManager()
+        if config_manager.get_scheduler_type() == 'slurm':
+            self.lsf_manager = SLURMManager()
+        else:
+            self.lsf_manager = LSFManager()
         self.authenticated_user = authenticated_user
         
         self.init_ui()

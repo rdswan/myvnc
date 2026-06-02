@@ -1,0 +1,70 @@
+{
+    "default_settings": {
+        "partition": "interactive",
+        "cpus_per_task": 2,
+        "memory_gb": 16,
+        "job_name": "myvnc_vncserver",
+        "default_site": "Austin",
+        "os": "Any"
+    },
+    "available_partitions": [
+        "interactive",
+        "vnc_queue",
+        "gpu_queue"
+    ],
+    "memory_options_gb": [
+        2,
+        4,
+        8,
+        16,
+        32,
+        64,
+        128
+    ],
+    "cpus_per_task_options": [
+        1,
+        2,
+        4,
+        8
+    ],
+    "available_sites": [
+        {
+            "name": "Toronto",
+            "domain": "yyz"
+        },
+        {
+            "name": "Austin",
+            "domain": "aus"
+        },
+        {
+            "name": "Bangalore",
+            "domain": "bglr"
+        }
+    ],
+    "os_options": [
+        {
+            "name": "RedHat 8.10",
+            "constraint": "rh810"
+        },
+        {
+            "name": "RedHat 9.6",
+            "constraint": "rh96",
+            "container": "containers/rh9_6.sif"
+        },
+        {
+            "name": "CentOS 7",
+            "constraint": "c7"
+        },
+        {
+            "name": "Any",
+            "constraint": ""
+        }
+    ],
+    "env_file": "/etc/profile.d/slurm.sh",
+    "notes": {
+        "partition": "SLURM partition is equivalent to LSF queue",
+        "cpus_per_task": "Number of CPUs allocated per task (equivalent to LSF -n)",
+        "memory_gb": "Memory allocation in GB (equivalent to LSF -R rusage[mem=] and -M combined, since SLURM --mem is a hard limit)",
+        "constraint": "SLURM --constraint is equivalent to LSF -R select[] for OS/feature selection"
+    }
+}

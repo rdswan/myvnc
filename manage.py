@@ -666,6 +666,7 @@ def server_status():
             logger.info(f"  Host: {status.get('host', 'Unknown')}")
             logger.info(f"  Port: {status.get('port', 'Unknown')}")
             logger.info(f"  URL: {status.get('url', 'Unknown')}")
+            logger.info(f"  Scheduler: {status.get('scheduler', 'lsf').upper()}")
             logger.info(f"  SSL: {'Enabled' if status.get('ssl_enabled', False) else 'Disabled'}")
             
             # Report SSL details if enabled
@@ -835,6 +836,7 @@ def _server_status_fallback(pid, prod_config_path=None):
     logger.info(f"  Host: {host}")
     logger.info(f"  Port: {port}")
     logger.info(f"  URL: {protocol}://{fqdn_host}:{port}")
+    logger.info(f"  Scheduler: {config.get('scheduler', 'lsf').upper()}")
     logger.info(f"  SSL: {'Enabled' if use_https else 'Disabled'}")
     if use_https:
         logger.info(f"  SSL Certificate: {ssl_cert}")

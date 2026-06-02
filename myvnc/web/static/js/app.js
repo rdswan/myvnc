@@ -987,12 +987,23 @@ async function apiRequest(endpoint, method = 'GET', data = null) {
     }
 }
 
-// Load LSF Configuration
+// Load Scheduler Configuration (LSF or SLURM)
 async function loadLSFConfig() {
     try {
         lsfConfig = await apiRequest('config/lsf');
-        console.log("LSF config received:", lsfConfig);
+        console.log("Scheduler config received:", lsfConfig);
         
+        // Update UI labels based on scheduler type
+        const schedulerType = (lsfConfig.scheduler || 'lsf').toUpperCase();
+        const titleEl = document.getElementById('scheduler-settings-title');
+        if (titleEl) {
+            titleEl.textContent = `${schedulerType} Settings`;
+        }
+        const queueLabelEl = document.getElementById('lsf-queue-label');
+        if (queueLabelEl) {
+            queueLabelEl.textContent = schedulerType === 'SLURM' ? 'Partition' : 'Queue';
+        }
+
         // Try to load user LSF settings
         let userLsfSettings = null;
         try {

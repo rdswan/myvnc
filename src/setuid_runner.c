@@ -29,14 +29,17 @@
 #define MAX_ENV_VARS 100
 #define MAX_ENV_VAR_LEN 1024
 
-/* List of allowed LSF commands - security whitelist */
+/* List of allowed commands - security whitelist (LSF + SLURM) */
 static const char* allowed_commands[] = {
-    "bjobs", "bsub", "bkill", "bpost", "bread", "test"
+    "bjobs", "bsub", "bkill", "bpost", "bread",
+    "squeue", "sbatch", "srun", "scancel", "scontrol",
+    "test"
 };
 static const int num_allowed_commands = sizeof(allowed_commands) / sizeof(allowed_commands[0]);
 
-/* List of LSF environment variables to preserve */
+/* List of scheduler environment variables to preserve (LSF + SLURM) */
 static const char* lsf_env_vars[] = {
+    /* LSF environment variables */
     "LSF_BINDIR", "LSF_LIBDIR", "LSF_SERVERDIR", "LSF_ENVDIR", 
     "LSF_CONFDIR", "LSF_INCLUDEDIR", "LSF_MISC", "LSF_TOP",
     "LSF_VERSION", "LSF_LIM_PORT", "LSF_RES_PORT", "LSF_MBD_PORT",
@@ -57,7 +60,15 @@ static const char* lsf_env_vars[] = {
     "LSB_CHKFILENAME", "LSB_RESTART", "LSB_RESTART_CMD", "LSB_CHKPNT_METHOD",
     "LSB_CHKPNT_DIR", "LSB_CHKPNT_PERIOD", "LSB_JOBPGIDS", "LSB_JOBPIDS",
     "LSB_BIND_JOB", "LSB_BIND_CPU_LIST", "LSB_BIND_MEM_LIST",
-    "LSB_AFFINITY_HOSTFILE", "LSB_PJL_TASK_GEOMETRY"
+    "LSB_AFFINITY_HOSTFILE", "LSB_PJL_TASK_GEOMETRY",
+    /* SLURM environment variables */
+    "SLURM_CONF", "SLURM_CONF_SERVER", "SLURM_CLUSTER_NAME",
+    "SLURM_WORKING_CLUSTER", "SLURMCTLD_PORT", "SLURMD_PORT",
+    "SLURM_JOB_ID", "SLURM_JOBID", "SLURM_JOB_NAME",
+    "SLURM_JOB_NODELIST", "SLURM_JOB_NUM_NODES", "SLURM_JOB_CPUS_PER_NODE",
+    "SLURM_JOB_PARTITION", "SLURM_SUBMIT_DIR", "SLURM_SUBMIT_HOST",
+    "SLURM_NODELIST", "SLURM_NNODES", "SLURM_NTASKS", "SLURM_NPROCS",
+    "SLURM_CPUS_PER_TASK", "SLURM_MEM_PER_NODE", "SLURM_MEM_PER_CPU"
 };
 static const int num_lsf_env_vars = sizeof(lsf_env_vars) / sizeof(lsf_env_vars[0]);
 

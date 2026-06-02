@@ -7,10 +7,20 @@ from pathlib import Path
 from tabulate import tabulate
 from .utils.config_manager import ConfigManager
 from .utils.lsf_manager import LSFManager
+from .utils.slurm_manager import SLURMManager
+
+
+def _get_job_manager():
+    """Get the appropriate job manager based on scheduler configuration"""
+    config_manager = ConfigManager()
+    if config_manager.get_scheduler_type() == 'slurm':
+        return SLURMManager()
+    return LSFManager()
+
 
 @click.group()
 def cli():
-    """MyVNC - A CLI application to manage VNC sessions through LSF"""
+    """MyVNC - A CLI application to manage VNC sessions through LSF or SLURM"""
     pass
 
 @cli.command()
@@ -18,7 +28,7 @@ def cli():
 def list(user):
     """List all active VNC sessions"""
     try:
-        lsf_manager = LSFManager()
+        lsf_manager = _get_job_manager()
         jobs = lsf_manager.get_active_vnc_jobs(authenticated_user=user)
         
         if not jobs:
@@ -52,7 +62,7 @@ def create(name, resolution, wm, queue, cores, memory, vncserver_path, user):
     """Create a new VNC session"""
     try:
         config_manager = ConfigManager()
-        lsf_manager = LSFManager()
+        job_manager = _get_job_manager()
         
         vnc_defaults = config_manager.get_vnc_defaults()
         
@@ -65,16 +75,18 @@ def create(name, resolution, wm, queue, cores, memory, vncserver_path, user):
             'vncserver_wrapper_path': vnc_defaults.get('vncserver_wrapper_path')
         }
         
-        lsf_defaults = config_manager.get_lsf_defaults()
-        lsf_config = {
+        scheduler_defaults = config_manager.get_scheduler_defaults()
+        scheduler_config = {
             'queue': queue,
+            'partition': queue,
             'num_cores': cores,
-            'memory_mb': memory,
-            'memlimit_multiplier': lsf_defaults.get('memlimit_multiplier', 1.0)
+            'cpus_per_task': cores,
+            'memory_gb': max(1, memory // 1024) if memory > 128 else memory,
+            'memlimit_multiplier': scheduler_defaults.get('memlimit_multiplier', 1.0)
         }
         
         # Submit job
-        job_id = lsf_manager.submit_vnc_job(vnc_config, lsf_config, authenticated_user=user)
+        job_id = job_manager.submit_vnc_job(vnc_config, scheduler_config, authenticated_user=user)
         click.echo(f"VNC session created successfully! Job ID: {job_id}")
         
     except Exception as e:
@@ -87,7 +99,7 @@ def create(name, resolution, wm, queue, cores, memory, vncserver_path, user):
 def kill(job_id, user):
     """Kill a VNC session by job ID"""
     try:
-        lsf_manager = LSFManager()
+        lsf_manager = _get_job_manager()
         
         if lsf_manager.kill_vnc_job(job_id, authenticated_user=user):
             click.echo(f"VNC session {job_id} killed successfully.")

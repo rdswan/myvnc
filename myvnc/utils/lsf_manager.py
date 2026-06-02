@@ -597,6 +597,7 @@ class LSFManager:
                 vncserver_executable,
                 '-geometry', resolution,
                 '-depth', str(color_depth),
+                '-localhost', 'no',
             ]
             
             # Add display name parameter to vncserver command only if specified
