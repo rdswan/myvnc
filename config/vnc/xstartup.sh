@@ -28,15 +28,56 @@ echo "Starting VNC session at $(date)"
 
 # Per-cgroup early-OOM watcher: kills the largest non-protected child before
 # LSF's OOM killer takes down the whole job (and Xvnc with it).
-# To arm it for real: drop the --pretend flag below.
-EARLYOOM_SH="$(dirname "$(readlink -f "$0")")/../../utils/cgroup_earlyoom.sh"
-if [ -x "$EARLYOOM_SH" ]; then
-    echo "Launching cgroup_earlyoom watcher: $EARLYOOM_SH"
-    nohup "$EARLYOOM_SH" \
-        > "$HOME/.vnc/cgroup_earlyoom.${HOSTNAME}${DISPLAY}.log" 2>&1 &
-    disown
+# Controlled by the "cgroup_earlyoom" block in server_config.json:
+#   "enabled": true/false   -- launch the watcher (default: false)
+#   "pretend": true/false   -- dry-run mode, log but don't kill (default: false)
+SCRIPT_ROOT="$(dirname "$(readlink -f "$0")")"
+EARLYOOM_SH="${SCRIPT_ROOT}/../../utils/cgroup_earlyoom.sh"
+SERVER_CFG="${SCRIPT_ROOT}/../../config/server_config.json"
+
+# Read earlyoom settings from server_config.json (default: disabled).
+EARLYOOM_ENABLED=false
+EARLYOOM_PRETEND_CFG=false
+if [ -r "$SERVER_CFG" ]; then
+    if command -v python3 >/dev/null 2>&1; then
+        EARLYOOM_ENABLED=$(python3 -c "
+import json, sys
+try:
+    cfg = json.load(open('$SERVER_CFG'))
+    print(str(cfg.get('cgroup_earlyoom', {}).get('enabled', False)).lower())
+except Exception:
+    print('false')
+" 2>/dev/null)
+        EARLYOOM_PRETEND_CFG=$(python3 -c "
+import json, sys
+try:
+    cfg = json.load(open('$SERVER_CFG'))
+    print(str(cfg.get('cgroup_earlyoom', {}).get('pretend', False)).lower())
+except Exception:
+    print('false')
+" 2>/dev/null)
+    else
+        echo "WARNING: python3 not found; cannot read cgroup_earlyoom config"
+    fi
+fi
+
+if [ "$EARLYOOM_ENABLED" = "true" ]; then
+    if [ -x "$EARLYOOM_SH" ]; then
+        EARLYOOM_ARGS=""
+        if [ "$EARLYOOM_PRETEND_CFG" = "true" ]; then
+            EARLYOOM_ARGS="--pretend"
+            echo "Launching cgroup_earlyoom watcher in PRETEND mode: $EARLYOOM_SH"
+        else
+            echo "Launching cgroup_earlyoom watcher: $EARLYOOM_SH"
+        fi
+        nohup "$EARLYOOM_SH" $EARLYOOM_ARGS \
+            > "$HOME/.vnc/cgroup_earlyoom.${HOSTNAME}${DISPLAY}.log" 2>&1 &
+        disown
+    else
+        echo "WARNING: cgroup_earlyoom.sh not found or not executable at $EARLYOOM_SH"
+    fi
 else
-    echo "WARNING: cgroup_earlyoom.sh not found or not executable at $EARLYOOM_SH"
+    echo "cgroup_earlyoom watcher is disabled in server_config.json (cgroup_earlyoom.enabled=false)"
 fi
 
 ## disable screensaver and any lockscreen

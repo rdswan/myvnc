@@ -111,6 +111,16 @@ class ConfigLinter:
         if "port" in config:
             if not isinstance(config["port"], int):
                 self.errors.append(f"  ❌ {filename}: 'port' must be integer, got {type(config['port']).__name__}")
+        
+        # Check cgroup_earlyoom if present
+        if "cgroup_earlyoom" in config:
+            eo = config["cgroup_earlyoom"]
+            if not isinstance(eo, dict):
+                self.errors.append(f"  ❌ {filename}: 'cgroup_earlyoom' must be a dict")
+            else:
+                for key in ("enabled", "pretend"):
+                    if key in eo and not isinstance(eo[key], bool):
+                        self.errors.append(f"  ❌ {filename}: 'cgroup_earlyoom.{key}' must be boolean")
     
     def _check_lsf_config(self, config, filename):
         """Validate lsf_config.json"""

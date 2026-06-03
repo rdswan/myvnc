@@ -17,5 +17,10 @@
     "setuid_runner": "/localdev/myvnc/bin/setuid_runner",
     "managers": ["shuffman", "jbell", "bswan"],
     "scheduler": "lsf",
-    "scheduler_notes": "Set 'scheduler' to 'lsf' or 'slurm'. Defaults to 'lsf' if not specified."
+    "scheduler_notes": "Set 'scheduler' to 'lsf' or 'slurm'. Defaults to 'lsf' if not specified.",
+    "cgroup_earlyoom": {
+        "enabled": false,
+        "pretend": false
+    },
+    "cgroup_earlyoom_notes": "Set 'enabled' to true to launch the cgroup early-OOM watcher in VNC sessions. Set 'pretend' to true for dry-run mode (log what would be killed without actually killing)."
 }
