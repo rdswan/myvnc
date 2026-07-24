@@ -210,6 +210,88 @@ class ConfigLinter:
                 if "queue" in defaults and "available_queues" in config:
                     if defaults["queue"] not in config["available_queues"]:
                         self.warnings.append(f"  ⚠ {filename}: default 'queue' '{defaults['queue']}' not in available_queues")
+
+        # Check queue_settings (per-queue overrides) if present
+        self._check_queue_settings(config, filename)
+
+    def _check_queue_settings(self, config, filename):
+        """Validate the optional per-queue 'queue_settings' block.
+
+        queue_settings maps a queue name to a dict of settings that override the
+        global defaults for that queue. This validates structure, types, and
+        cross-consistency (e.g. enabled_* subsets of their available lists).
+        """
+        if "queue_settings" not in config:
+            return
+
+        queue_settings = config["queue_settings"]
+        if not isinstance(queue_settings, dict):
+            self.errors.append(f"  ❌ {filename}: 'queue_settings' must be a dict")
+            return
+
+        available_queues = config.get("available_queues", [])
+        global_os_names = {
+            os_opt["name"] for os_opt in config.get("os_options", [])
+            if isinstance(os_opt, dict) and "name" in os_opt
+        }
+
+        for queue_name, settings in queue_settings.items():
+            prefix = f"queue_settings.{queue_name}"
+
+            # Warn if the queue is not in available_queues
+            if available_queues and queue_name not in available_queues:
+                self.warnings.append(f"  ⚠ {filename}: '{prefix}' is not listed in available_queues")
+
+            if not isinstance(settings, dict):
+                self.errors.append(f"  ❌ {filename}: '{prefix}' must be a dict")
+                continue
+
+            # Scalar default overrides
+            for int_key in ("num_cores", "memory_gb"):
+                if int_key in settings and not isinstance(settings[int_key], int):
+                    self.errors.append(f"  ❌ {filename}: '{prefix}.{int_key}' must be an integer")
+
+            if "memlimit_multiplier" in settings and not isinstance(settings["memlimit_multiplier"], (int, float)):
+                self.errors.append(f"  ❌ {filename}: '{prefix}.memlimit_multiplier' must be a number")
+
+            if "os" in settings and not isinstance(settings["os"], str):
+                self.errors.append(f"  ❌ {filename}: '{prefix}.os' must be a string")
+
+            # List option overrides (must be lists of integers)
+            for list_key in ("memory_options_gb", "enabled_memory_options_gb", "core_options", "enabled_core_options"):
+                if list_key in settings:
+                    if not isinstance(settings[list_key], list):
+                        self.errors.append(f"  ❌ {filename}: '{prefix}.{list_key}' must be a list")
+                    elif not all(isinstance(x, int) for x in settings[list_key]):
+                        self.errors.append(f"  ❌ {filename}: '{prefix}.{list_key}' must contain only integers")
+
+            # enabled_memory_options_gb must be a subset of the effective memory options
+            effective_memory = settings.get("memory_options_gb", config.get("memory_options_gb", []))
+            if "enabled_memory_options_gb" in settings and isinstance(settings["enabled_memory_options_gb"], list):
+                invalid = set(settings["enabled_memory_options_gb"]) - set(effective_memory)
+                if invalid:
+                    self.errors.append(f"  ❌ {filename}: '{prefix}.enabled_memory_options_gb' contains values not in memory_options_gb: {invalid}")
+
+            # enabled_core_options must be a subset of the effective core options
+            effective_cores = settings.get("core_options", config.get("core_options", []))
+            if "enabled_core_options" in settings and isinstance(settings["enabled_core_options"], list):
+                invalid = set(settings["enabled_core_options"]) - set(effective_cores)
+                if invalid:
+                    self.errors.append(f"  ❌ {filename}: '{prefix}.enabled_core_options' contains values not in core_options: {invalid}")
+
+            # enabled_os_options must reference names defined in global os_options
+            if "enabled_os_options" in settings:
+                if not isinstance(settings["enabled_os_options"], list):
+                    self.errors.append(f"  ❌ {filename}: '{prefix}.enabled_os_options' must be a list")
+                elif global_os_names:
+                    invalid = set(settings["enabled_os_options"]) - global_os_names
+                    if invalid:
+                        self.errors.append(f"  ❌ {filename}: '{prefix}.enabled_os_options' contains names not in os_options: {invalid}")
+
+            # Validate the per-queue default os is available (if os_options defined)
+            if "os" in settings and isinstance(settings["os"], str) and global_os_names:
+                if settings["os"] not in global_os_names:
+                    self.warnings.append(f"  ⚠ {filename}: '{prefix}.os' '{settings['os']}' not in os_options")
     
     def _check_vnc_config(self, config, filename):
         """Validate vnc_config.json"""

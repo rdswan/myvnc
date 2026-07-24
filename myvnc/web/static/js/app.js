@@ -1019,148 +1019,217 @@ async function loadLSFConfig() {
             console.warn('Error fetching user LSF settings:', e);
         }
         
-        // Use enabled options if available, otherwise fall back to all options
-        const availableCores = lsfConfig.enabled_cores || lsfConfig.core_options;
+        // Determine the available queues (respecting manager overrides)
         const availableQueues = lsfConfig.enabled_queues || lsfConfig.queues;
-        const availableOsOptions = lsfConfig.enabled_os_options || lsfConfig.os_options;
-        
-        // Use user settings if available, otherwise use defaults
-        // But ensure the default is in the available options (respect manager overrides)
+
+        // Use the user setting if available, otherwise the global default queue.
+        // Validate against the available list (important for manager overrides).
         let defaultQueue = userLsfSettings?.queue || lsfConfig.defaults.queue;
-        let defaultCores = userLsfSettings?.num_cores || lsfConfig.defaults.num_cores;
-        
-        // Validate that defaults are in the available options
-        // If not, use the first available option (important for manager overrides)
         if (availableQueues && !availableQueues.includes(defaultQueue)) {
             console.warn(`Default queue "${defaultQueue}" not in available queues, using first available: ${availableQueues[0]}`);
             defaultQueue = availableQueues[0];
         }
-        if (availableCores && !availableCores.includes(defaultCores)) {
-            console.warn(`Default cores "${defaultCores}" not in available cores, using first available: ${availableCores[0]}`);
-            defaultCores = availableCores[0];
-        }
-        
+
         console.log("Using queue default:", defaultQueue);
-        console.log("Using cores default:", defaultCores);
-        
-        // Populate select fields
+
+        // Populate the queue select
         populateSelect('lsf-queue', availableQueues, defaultQueue);
-        populateSelect('lsf-cores', availableCores, defaultCores);
-        
-        // Populate OS options if available
-        if (availableOsOptions && Array.isArray(availableOsOptions)) {
-            const osElement = document.getElementById('lsf-os');
-            if (osElement) {
-                // Clear existing options
-                osElement.innerHTML = '';
-                
-                // Get default OS from user settings or config
-                let defaultOs = userLsfSettings?.os || lsfConfig.defaults.os || "Any";
-                
-                // Validate that default is in available options (respect manager overrides)
-                // If not, use the first available option
-                const availableOsNames = availableOsOptions.map(os => os.name);
-                if (!availableOsNames.includes(defaultOs)) {
-                    console.warn(`Default OS "${defaultOs}" not in available OS options, using first available: ${availableOsNames[0]}`);
-                    defaultOs = availableOsNames[0] || "Any";
-                }
-                
-                // Add each OS option
-                availableOsOptions.forEach(os => {
-                    const optionElement = document.createElement('option');
-                    optionElement.value = os.name;
-                    optionElement.textContent = os.name;
-                    
-                    if (os.name === defaultOs) {
-                        optionElement.selected = true;
-                        optionElement.defaultSelected = true; // Set default for form.reset()
-                    }
-                    
-                    osElement.appendChild(optionElement);
-                });
-            }
-        }
-        
-        // Set memory slider based on memory options from config
-        const memorySlider = document.getElementById('lsf-memory');
-        const memoryValue = document.getElementById('memory-value');
-        
-        // Get memory options from config (could be memory_options or memory_options_gb)
-        // Use enabled memory options if available, otherwise fall back to all options
-        const memoryOptionsData = lsfConfig.enabled_memory || lsfConfig.memory_options_gb || lsfConfig.memory_options;
-        
-        if (memorySlider && memoryValue && memoryOptionsData) {
-            // Sort memory options to ensure they're in ascending order
-            const memoryOptions = [...memoryOptionsData].sort((a, b) => a - b);
-            
-            // Only update if we have memory options
-            if (memoryOptions.length > 0) {
-                // Use indices (0, 1, 2, 3...) instead of actual GB values for the slider
-                // This ensures even spacing regardless of the actual memory values
-                memorySlider.min = 0;
-                memorySlider.max = memoryOptions.length - 1;
-                memorySlider.step = 1;
-                
-                // Get default memory in GB from user settings or config
-                const defaultMemoryGB = userLsfSettings?.memory_gb || lsfConfig.defaults.memory_gb;
-                console.log("Default memory from config:", defaultMemoryGB);
-                
-                // Get slider labels for min and max display
-                const sliderLabels = document.querySelector('.slider-labels');
-                if (sliderLabels) {
-                    const labelSpans = sliderLabels.querySelectorAll('span');
-                    if (labelSpans.length >= 2) {
-                        labelSpans[0].textContent = `${memoryOptions[0]}GB`;
-                        labelSpans[1].textContent = `${memoryOptions[memoryOptions.length - 1]}GB`;
-                    }
-                }
-                
-                // Find the closest memory option to default and get its index
-                let closestOption = memoryOptions[0];
-                let closestIndex = 0;
-                let minDiff = Math.abs(defaultMemoryGB - memoryOptions[0]);
-                
-                for (let i = 1; i < memoryOptions.length; i++) {
-                    const diff = Math.abs(defaultMemoryGB - memoryOptions[i]);
-                    if (diff < minDiff) {
-                        minDiff = diff;
-                        closestOption = memoryOptions[i];
-                        closestIndex = i;
-                    }
-                }
-                
-                // Set the slider to the index (not the GB value)
-                memorySlider.value = closestIndex;
-                memoryValue.textContent = closestOption;
-                
-                console.log("Memory slider initialization:", {
-                    min: memorySlider.min,
-                    max: memorySlider.max,
-                    value: memorySlider.value,
-                    step: memorySlider.step,
-                    defaultMemoryGB,
-                    closestIndex,
-                    closestOption,
-                    memoryOptions
-                });
-                
-                // Store memory options as a data attribute for later use
-                memorySlider.dataset.memoryOptions = JSON.stringify(memoryOptions);
-                
-                // Clear existing event listeners (to avoid duplicates)
-                memorySlider.removeEventListener('input', handleMemorySliderInput);
-                memorySlider.removeEventListener('change', handleMemorySliderChange);
-                
-                // Add input event listener to snap to valid options during sliding
-                memorySlider.addEventListener('input', handleMemorySliderInput);
-                
-                // Add change event to snap to valid value when done sliding
-                memorySlider.addEventListener('change', handleMemorySliderChange);
-            }
+
+        // Apply the cores/memory/OS option sets and defaults for the initially
+        // selected queue. These may be overridden per-queue via
+        // lsfConfig.queue_settings; when that is absent this falls back to the
+        // global enabled options (fully backward compatible).
+        applyQueueSettings(defaultQueue, userLsfSettings);
+
+        // Re-apply the option sets whenever the user changes the queue so that
+        // per-queue cores/memory/OS options and defaults take effect live.
+        const queueSelectEl = document.getElementById('lsf-queue');
+        if (queueSelectEl && queueSelectEl.dataset.queueListenerAttached !== 'true') {
+            queueSelectEl.addEventListener('change', () => {
+                applyQueueSettings(queueSelectEl.value, null);
+            });
+            queueSelectEl.dataset.queueListenerAttached = 'true';
         }
     } catch (error) {
         console.error('Failed to load LSF configuration:', error);
     }
+}
+
+// Apply per-queue option sets and defaults to the create-session form.
+//
+// When the server provides lsfConfig.queue_settings[queue], its enabled
+// cores/memory/OS options and per-queue defaults are used. Otherwise this
+// falls back to the global enabled options, preserving the original behavior
+// for configs that do not define queue_settings.
+//
+// userLsfSettings (the user's saved preferences) takes precedence for default
+// selection on initial load; pass null when reacting to a queue change so the
+// per-queue default is applied.
+function applyQueueSettings(queue, userLsfSettings) {
+    if (!lsfConfig) {
+        return;
+    }
+
+    const queueConfig = (lsfConfig.queue_settings && lsfConfig.queue_settings[queue]) || {};
+    const queueDefaults = queueConfig.defaults || {};
+
+    // --- Cores ---
+    const availableCores = firstNonEmptyList(
+        queueConfig.enabled_cores,
+        lsfConfig.enabled_cores,
+        lsfConfig.core_options
+    );
+    let defaultCores = userLsfSettings?.num_cores
+        || queueDefaults.num_cores
+        || lsfConfig.defaults.num_cores;
+    if (availableCores.length && !availableCores.includes(defaultCores)) {
+        console.warn(`Default cores "${defaultCores}" not available for queue "${queue}", using first available: ${availableCores[0]}`);
+        defaultCores = availableCores[0];
+    }
+    console.log(`Applying queue "${queue}" cores:`, availableCores, "default:", defaultCores);
+    populateSelect('lsf-cores', availableCores, defaultCores);
+
+    // --- OS options ---
+    // Warn if the queue explicitly restricted OS options but the restriction
+    // resolved to an empty list (usually a name mismatch between the queue's
+    // enabled_os_options and the global os_options[].name values).
+    if (Array.isArray(queueConfig.enabled_os_options) && queueConfig.enabled_os_options.length === 0) {
+        console.warn(`Queue "${queue}" resolved to an empty OS list (check that its enabled_os_options names exactly match os_options[].name); falling back to the global OS list.`);
+    }
+    const availableOsOptions = firstNonEmptyList(
+        queueConfig.enabled_os_options,
+        lsfConfig.enabled_os_options,
+        lsfConfig.os_options
+    );
+    const defaultOs = userLsfSettings?.os || queueDefaults.os || lsfConfig.defaults.os || "Any";
+    populateOsSelect(availableOsOptions, defaultOs);
+
+    // --- Memory ---
+    const memoryOptionsData = firstNonEmptyList(
+        queueConfig.enabled_memory,
+        lsfConfig.enabled_memory,
+        lsfConfig.memory_options_gb,
+        lsfConfig.memory_options
+    );
+    const defaultMemoryGB = userLsfSettings?.memory_gb
+        || queueDefaults.memory_gb
+        || lsfConfig.defaults.memory_gb;
+    setupMemorySlider(memoryOptionsData, defaultMemoryGB);
+}
+
+// Return the first candidate that is a non-empty array, or [] if none.
+// This is used so that an empty per-queue option set (e.g. a misconfigured
+// enabled_os_options that filtered to nothing) falls through to the global
+// list instead of leaving a dropdown empty.
+function firstNonEmptyList(...candidates) {
+    for (const candidate of candidates) {
+        if (Array.isArray(candidate) && candidate.length > 0) {
+            return candidate;
+        }
+    }
+    return [];
+}
+
+// Populate the OS <select> with the given option list, selecting defaultOs
+// (or the first available option when the default is not present).
+function populateOsSelect(availableOsOptions, defaultOs) {
+    if (!(availableOsOptions && Array.isArray(availableOsOptions))) {
+        return;
+    }
+    const osElement = document.getElementById('lsf-os');
+    if (!osElement) {
+        return;
+    }
+
+    // Clear existing options
+    osElement.innerHTML = '';
+
+    // Validate that the default is available; otherwise use the first option
+    const availableOsNames = availableOsOptions.map(os => os.name);
+    if (!availableOsNames.includes(defaultOs)) {
+        console.warn(`Default OS "${defaultOs}" not in available OS options, using first available: ${availableOsNames[0]}`);
+        defaultOs = availableOsNames[0] || "Any";
+    }
+
+    availableOsOptions.forEach(os => {
+        const optionElement = document.createElement('option');
+        optionElement.value = os.name;
+        optionElement.textContent = os.name;
+
+        if (os.name === defaultOs) {
+            optionElement.selected = true;
+            optionElement.defaultSelected = true; // Set default for form.reset()
+        }
+
+        osElement.appendChild(optionElement);
+    });
+}
+
+// Configure the memory slider for the given options and default value.
+function setupMemorySlider(memoryOptionsData, defaultMemoryGB) {
+    const memorySlider = document.getElementById('lsf-memory');
+    const memoryValue = document.getElementById('memory-value');
+
+    if (!(memorySlider && memoryValue && memoryOptionsData)) {
+        return;
+    }
+
+    // Sort memory options to ensure they're in ascending order
+    const memoryOptions = [...memoryOptionsData].sort((a, b) => a - b);
+
+    // Only update if we have memory options
+    if (memoryOptions.length === 0) {
+        return;
+    }
+
+    // Use indices (0, 1, 2, 3...) instead of actual GB values for the slider
+    // This ensures even spacing regardless of the actual memory values
+    memorySlider.min = 0;
+    memorySlider.max = memoryOptions.length - 1;
+    memorySlider.step = 1;
+
+    console.log("Default memory from config:", defaultMemoryGB);
+
+    // Get slider labels for min and max display
+    const sliderLabels = document.querySelector('.slider-labels');
+    if (sliderLabels) {
+        const labelSpans = sliderLabels.querySelectorAll('span');
+        if (labelSpans.length >= 2) {
+            labelSpans[0].textContent = `${memoryOptions[0]}GB`;
+            labelSpans[1].textContent = `${memoryOptions[memoryOptions.length - 1]}GB`;
+        }
+    }
+
+    // Find the closest memory option to the default and get its index
+    let closestOption = memoryOptions[0];
+    let closestIndex = 0;
+    let minDiff = Math.abs(defaultMemoryGB - memoryOptions[0]);
+
+    for (let i = 1; i < memoryOptions.length; i++) {
+        const diff = Math.abs(defaultMemoryGB - memoryOptions[i]);
+        if (diff < minDiff) {
+            minDiff = diff;
+            closestOption = memoryOptions[i];
+            closestIndex = i;
+        }
+    }
+
+    // Set the slider to the index (not the GB value)
+    memorySlider.value = closestIndex;
+    memoryValue.textContent = closestOption;
+
+    // Store memory options as a data attribute for later use
+    memorySlider.dataset.memoryOptions = JSON.stringify(memoryOptions);
+
+    // Clear existing event listeners (to avoid duplicates)
+    memorySlider.removeEventListener('input', handleMemorySliderInput);
+    memorySlider.removeEventListener('change', handleMemorySliderChange);
+
+    // Add input event listener to snap to valid options during sliding
+    memorySlider.addEventListener('input', handleMemorySliderInput);
+
+    // Add change event to snap to valid value when done sliding
+    memorySlider.addEventListener('change', handleMemorySliderChange);
 }
 
 // Handler for memory slider input events

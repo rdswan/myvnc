@@ -75,7 +75,7 @@ def create(name, resolution, wm, queue, cores, memory, vncserver_path, user):
             'vncserver_wrapper_path': vnc_defaults.get('vncserver_wrapper_path')
         }
         
-        scheduler_defaults = config_manager.get_scheduler_defaults()
+        scheduler_defaults = config_manager.get_scheduler_defaults(queue=queue)
         scheduler_config = {
             'queue': queue,
             'partition': queue,

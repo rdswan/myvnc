@@ -38,24 +38,24 @@ class VNCreatorTab(QWidget):
         self.wm_combo.addItems(self.config_manager.get_available_window_managers())
         
         # Scheduler Settings (queues/partitions)
-        scheduler_type = self.config_manager.get_scheduler_type()
+        self.scheduler_type = self.config_manager.get_scheduler_type()
         self.queue_combo = QComboBox()
-        if scheduler_type == 'slurm':
+        if self.scheduler_type == 'slurm':
             self.queue_combo.addItems(self.config_manager.get_available_partitions())
         else:
             self.queue_combo.addItems(self.config_manager.get_available_queues())
         
-        scheduler_defaults = self.config_manager.get_scheduler_defaults()
         self.cores_spin = QSpinBox()
         self.cores_spin.setRange(1, 32)
-        self.cores_spin.setValue(scheduler_defaults.get('num_cores', 2))
         
         self.memory_combo = QComboBox()
-        if scheduler_type == 'slurm':
-            self.memory_combo.addItems([str(x) for x in self.config_manager.get_slurm_memory_options()])
-        else:
-            self.memory_combo.addItems([str(x) for x in self.config_manager.get_memory_options()])
         
+        # Populate cores/memory for the initially selected queue and react to
+        # queue changes so per-queue defaults/options take effect.
+        self._apply_queue_settings(self.queue_combo.currentText())
+        self.queue_combo.currentTextChanged.connect(self._apply_queue_settings)
+        
+        scheduler_type = self.scheduler_type
         # Add fields to form
         queue_label = "SLURM Partition:" if scheduler_type == 'slurm' else "LSF Queue:"
         form_layout.addRow("Session Name:", self.name_input)
@@ -75,7 +75,39 @@ class VNCreatorTab(QWidget):
         layout.addStretch()
         
         self.setLayout(layout)
-    
+
+    def _apply_queue_settings(self, queue):
+        """Populate cores/memory options and defaults for the selected queue.
+
+        Uses per-queue overrides from queue_settings when present, otherwise the
+        global options (fully backward compatible).
+        """
+        if not queue:
+            return
+
+        scheduler_defaults = self.config_manager.get_scheduler_defaults(queue=queue)
+
+        if self.scheduler_type == 'slurm':
+            memory_options = self.config_manager.get_slurm_memory_options(queue)
+        else:
+            memory_options = self.config_manager.get_memory_options(queue)
+
+        # Repopulate the memory combo, preserving the previous selection if valid
+        previous_memory = self.memory_combo.currentText()
+        self.memory_combo.blockSignals(True)
+        self.memory_combo.clear()
+        self.memory_combo.addItems([str(x) for x in memory_options])
+        self.memory_combo.blockSignals(False)
+
+        default_memory = str(scheduler_defaults.get('memory_gb', ''))
+        target_memory = previous_memory if previous_memory in [str(x) for x in memory_options] else default_memory
+        idx = self.memory_combo.findText(target_memory)
+        if idx >= 0:
+            self.memory_combo.setCurrentIndex(idx)
+
+        # Update the default core count for this queue
+        self.cores_spin.setValue(scheduler_defaults.get('num_cores', 2))
+
     def create_vnc_session(self):
         # Validate inputs
         if not self.name_input.text().strip():
@@ -93,8 +125,9 @@ class VNCreatorTab(QWidget):
             'vncserver_wrapper_path': vnc_defaults.get('vncserver_wrapper_path')
         }
         
-        # Prepare scheduler configuration
-        scheduler_defaults = self.config_manager.get_scheduler_defaults()
+        # Prepare scheduler configuration (resolve per-queue defaults)
+        selected_queue = self.queue_combo.currentText()
+        scheduler_defaults = self.config_manager.get_scheduler_defaults(queue=selected_queue)
         lsf_config = {
             'queue': self.queue_combo.currentText(),
             'partition': self.queue_combo.currentText(),

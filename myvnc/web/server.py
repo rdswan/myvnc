@@ -1104,6 +1104,11 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                     config["enabled_memory"] = slurm_cfg.get('memory_options_gb', [])
                     config["enabled_queues"] = slurm_cfg.get('available_partitions', [])
                     config["enabled_os_options"] = slurm_cfg.get('os_options', [])
+
+                # Per-partition settings map (empty when queue_settings not configured)
+                config["queue_settings"] = self.config_manager.build_queue_settings_map(
+                    'slurm', user_override
+                )
             else:
                 # LSF mode (default)
                 config = {
@@ -1131,6 +1136,11 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                     config["enabled_memory"] = self.config_manager.get_enabled_memory_options()
                     config["enabled_queues"] = self.config_manager.get_available_queues()
                     config["enabled_os_options"] = self.config_manager.get_enabled_os_options()
+
+                # Per-queue settings map (empty when queue_settings not configured)
+                config["queue_settings"] = self.config_manager.build_queue_settings_map(
+                    'lsf', user_override
+                )
             
             self.logger.debug(f"Sending scheduler config: {config}")
             self.send_json_response(config)
@@ -1553,7 +1563,13 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             
             # Get default settings from config
             vnc_defaults = self.config_manager.get_vnc_defaults()
-            lsf_defaults = self.config_manager.get_scheduler_defaults()
+            # Resolve scheduler defaults for the queue selected in the request so
+            # that per-queue defaults (cores/memory/os/memlimit) are honored.
+            base_defaults = self.config_manager.get_scheduler_defaults()
+            selected_queue = data.get(
+                "queue", base_defaults.get("queue", base_defaults.get("partition"))
+            )
+            lsf_defaults = self.config_manager.get_scheduler_defaults(queue=selected_queue)
             
             # Extract session settings based on type
             if session_type == "tmux":
@@ -1791,7 +1807,13 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             
             # Get default settings from config
             vnc_defaults = self.config_manager.get_vnc_defaults()
-            lsf_defaults = self.config_manager.get_scheduler_defaults()
+            # Resolve scheduler defaults for the copied session's queue so that
+            # per-queue defaults (cores/memory/os/memlimit) are honored.
+            base_defaults = self.config_manager.get_scheduler_defaults()
+            copied_queue = session_to_copy.get(
+                "queue", base_defaults.get("queue", base_defaults.get("partition"))
+            )
+            lsf_defaults = self.config_manager.get_scheduler_defaults(queue=copied_queue)
             
             # Extract and prepare settings for new session
             vnc_settings = {

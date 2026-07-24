@@ -27,6 +27,18 @@
         4,
         8
     ],
+    "queue_settings": {
+        "gpu_queue": {
+            "cpus_per_task": 4,
+            "memory_gb": 64,
+            "memory_options_gb": [ 16, 32, 64, 128, 256 ],
+            "enabled_memory_options_gb": [ 32, 64, 128, 256 ],
+            "cpus_per_task_options": [ 2, 4, 8, 16 ],
+            "enabled_cpus_per_task_options": [ 4, 8, 16 ],
+            "enabled_os_options": [ "RedHat 9.6", "RedHat 8.10" ],
+            "os": "RedHat 9.6"
+        }
+    },
     "available_sites": [
         {
             "name": "Toronto",
@@ -65,6 +77,7 @@
         "partition": "SLURM partition is equivalent to LSF queue",
         "cpus_per_task": "Number of CPUs allocated per task (equivalent to LSF -n)",
         "memory_gb": "Memory allocation in GB (equivalent to LSF -R rusage[mem=] and -M combined, since SLURM --mem is a hard limit)",
-        "constraint": "SLURM --constraint is equivalent to LSF -R select[] for OS/feature selection"
+        "constraint": "SLURM --constraint is equivalent to LSF -R select[] for OS/feature selection",
+        "queue_settings": "Optional per-partition overrides. Maps a partition name (from available_partitions) to a dict that overrides the global settings for that partition only. Supported keys: cpus_per_task (or num_cores), memory_gb, os (per-partition defaults); memory_options_gb, enabled_memory_options_gb, cpus_per_task_options, enabled_cpus_per_task_options (per-partition option lists); and enabled_os_options (list of OS names, drawn from the global os_options). Any key that is omitted for a partition falls back to the global value, so configs without queue_settings behave exactly as before."
     }
 }

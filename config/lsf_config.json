@@ -28,6 +28,19 @@
         4,
         8
     ],
+    "queue_settings": {
+        "gpu_queue": {
+            "num_cores": 4,
+            "memory_gb": 64,
+            "memlimit_multiplier": 1.5,
+            "memory_options_gb": [ 16, 32, 64, 128, 256 ],
+            "enabled_memory_options_gb": [ 32, 64, 128, 256 ],
+            "core_options": [ 2, 4, 8, 16 ],
+            "enabled_core_options": [ 4, 8, 16 ],
+            "enabled_os_options": [ "RedHat 9.6", "RedHat 8.10" ],
+            "os": "RedHat 9.6"
+        }
+    },
     "available_sites": [
         {
             "name": "Toronto",
@@ -67,6 +80,7 @@
     },
     "notes": {
         "memlimit_multiplier": "Multiplier applied to memory_gb to calculate the -M (memory limit) value. The -R rusage[mem=] uses the base memory_gb value, while -M uses memory_gb * memlimit_multiplier. This allows setting a higher kill limit than the reservation. Example: memory_gb=16 with memlimit_multiplier=2.0 results in -R 'rusage[mem=16G]' -M 32G",
-        "pending_reasons": "Optional map of LSF pending reason text to a plain-language explanation of the local policy behind it. When a job is PEND, the UI hover tooltip shows the raw LSF reason plus this explanation when the LSF reason contains one of these keys (case-insensitive substring match). Reasons without a matching key show only the raw LSF text. May be given either as an object {reason: explanation} or as a list of such objects."
+        "pending_reasons": "Optional map of LSF pending reason text to a plain-language explanation of the local policy behind it. When a job is PEND, the UI hover tooltip shows the raw LSF reason plus this explanation when the LSF reason contains one of these keys (case-insensitive substring match). Reasons without a matching key show only the raw LSF text. May be given either as an object {reason: explanation} or as a list of such objects.",
+        "queue_settings": "Optional per-queue overrides. Maps a queue name (from available_queues) to a dict that overrides the global settings for that queue only. Supported keys: num_cores, memory_gb, os (per-queue defaults); memlimit_multiplier; memory_options_gb, enabled_memory_options_gb, core_options, enabled_core_options (per-queue option lists); and enabled_os_options (list of OS names, drawn from the global os_options). Any key that is omitted for a queue falls back to the global value, so configs without queue_settings behave exactly as before. enabled_* lists must be subsets of their corresponding available lists."
     }
 } 
