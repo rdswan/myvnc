@@ -404,6 +404,93 @@ class LSFManager:
             self.logger.warning(f"Could not read bpost data for job {job_id}: {e}")
         return None
 
+    def _get_pending_reason_lines(self, job_id: str, authenticated_user: str = None) -> List[str]:
+        """Retrieve the LSF pending reason lines for a job via ``bjobs -p``.
+
+        The ``bjobs -p`` output prints the job summary line followed by one or
+        more indented lines describing why the job is pending. We collect those
+        indented reason lines, stripping the trailing ';' LSF appends.
+
+        Returns a list of raw reason strings (empty if none/error).
+        """
+        reasons = []
+        try:
+            output = self._run_command(['bjobs', '-p', str(job_id).strip()], authenticated_user)
+            for line in output.splitlines():
+                # Reason lines are indented; the header and job-summary lines
+                # both start at column 0, so skip anything not indented.
+                if not line.strip():
+                    continue
+                if not (line[0] == ' ' or line[0] == '\t'):
+                    continue
+                reason = line.strip().rstrip(';').strip()
+                if reason:
+                    reasons.append(reason)
+        except Exception as e:
+            self.logger.warning(f"Could not get pending reason for job {job_id}: {e}")
+        return reasons
+
+    @staticmethod
+    def _normalize_reason(text: str) -> str:
+        """Normalize a pending reason for matching (lowercase, collapse whitespace)."""
+        return re.sub(r'\s+', ' ', (text or '').strip().lower())
+
+    def _get_pending_reason_explanations(self) -> Dict[str, str]:
+        """Return the configured map of LSF pending reason text -> explanation.
+
+        Supports both an object form ({reason: explanation}) and a list-of-objects
+        form ([{reason: explanation}, ...]) in lsf_config.json.
+        """
+        raw = {}
+        try:
+            raw = self.config_manager.lsf_config.get('pending_reasons', {})
+        except Exception:
+            raw = {}
+
+        mapping = {}
+        if isinstance(raw, dict):
+            mapping = dict(raw)
+        elif isinstance(raw, list):
+            for entry in raw:
+                if isinstance(entry, dict):
+                    mapping.update(entry)
+        return mapping
+
+    def _attach_pending_reason(self, job: Dict, authenticated_user: str = None) -> None:
+        """Attach LSF pending reason info (with config explanations) to a job dict.
+
+        Sets ``job['pending_reason']`` (the raw LSF text, joined) and
+        ``job['pending_reasons']`` (a list of {reason, explanation} entries) when
+        pending reasons are available. Explanations come from the optional
+        ``pending_reasons`` map in lsf_config.json; entries without a configured
+        explanation get a null explanation so the UI shows only the LSF text.
+        """
+        try:
+            reasons = self._get_pending_reason_lines(job.get('job_id'), authenticated_user)
+            if not reasons:
+                return
+
+            explanations = self._get_pending_reason_explanations()
+            normalized = {self._normalize_reason(k): v for k, v in explanations.items()}
+
+            detailed = []
+            for reason in reasons:
+                norm = self._normalize_reason(reason)
+                explanation = normalized.get(norm)
+                if explanation is None:
+                    # Fall back to a substring match so slightly different LSF
+                    # phrasing still resolves to a configured explanation.
+                    for key_norm, value in normalized.items():
+                        if key_norm and key_norm in norm:
+                            explanation = value
+                            break
+                detailed.append({'reason': reason, 'explanation': explanation})
+
+            job['pending_reason'] = '; '.join(reasons)
+            job['pending_reasons'] = detailed
+        except Exception as e:
+            self.logger.warning(f"Could not attach pending reason for job {job.get('job_id')}: {e}")
+
     def submit_vnc_job(self, vnc_config: Dict, lsf_config: Dict, authenticated_user: str = None, fake_no_home: bool = False, server_hostname: str = None) -> str:
         """Submit a VNC job using bsub
         
@@ -1538,6 +1625,11 @@ class LSFManager:
                     if port is not None:
                         job['port'] = port
                     
+                    # For pending jobs, attach the LSF pending reason(s) plus any
+                    # configured plain-language explanation for the UI tooltip.
+                    if status == "PEND":
+                        self._attach_pending_reason(job, authenticated_user)
+                    
                     jobs.append(job)
                     self.logger.debug(f"Added job to list: {job}")
                     
@@ -1737,6 +1829,8 @@ class LSFManager:
                             'os': 'N/A',  # Add OS field
                             'session_type': session_type  # Add session type
                         }
+                        if job_status_early == "PEND":
+                            self._attach_pending_reason(job, authenticated_user)
                         jobs.append(job)
                         continue
                     
@@ -1910,6 +2004,11 @@ class LSFManager:
                             job['display'] = display
                         if port is not None:
                             job['port'] = port
+
+                    # For pending jobs, attach the LSF pending reason(s) plus any
+                    # configured plain-language explanation for the UI tooltip.
+                    if job_status_std == "PEND":
+                        self._attach_pending_reason(job, authenticated_user)
 
                     # Add to jobs list
                     jobs.append(job)

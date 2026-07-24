@@ -663,6 +663,59 @@ footer {
   color: #33333D; /* TT Blue Grey */
 }
 
+/* Pending reason hover indicator */
+.pending-reason {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  cursor: help;
+}
+
+.pending-reason-icon {
+  color: var(--info-color); /* TT Light Blue */
+  font-size: 0.85em;
+  opacity: 0.85;
+}
+
+.pending-reason:hover .pending-reason-icon {
+  opacity: 1;
+}
+
+/* Custom, stay-open tooltip for pending reasons (selectable/copyable text) */
+.pending-tooltip {
+  position: fixed;
+  z-index: 10000;
+  max-width: 420px;
+  background: var(--card-color);
+  color: var(--text-color);
+  border: 1px solid var(--border-color);
+  border-left: 4px solid var(--info-color);
+  border-radius: 8px;
+  padding: 0.75rem 0.9rem 0.65rem;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.pending-tooltip.visible {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.pending-tooltip .pending-tooltip-body {
+  white-space: pre-wrap;
+}
+
 /* Tenstorrent branding */
 .form-title {
   color: var(--primary-color);

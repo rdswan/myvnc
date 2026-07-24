@@ -62,7 +62,11 @@
         }
     ],
     "env_file": "/site/lsf/aus-hw/conf/profile.lsf",
+    "pending_reasons": {
+        "User has reached the per-user job slot limit of the queue": "Users are allowed 4 total cores. That can either be 1 4core session, 2 2core sessions, etc..."
+    },
     "notes": {
-        "memlimit_multiplier": "Multiplier applied to memory_gb to calculate the -M (memory limit) value. The -R rusage[mem=] uses the base memory_gb value, while -M uses memory_gb * memlimit_multiplier. This allows setting a higher kill limit than the reservation. Example: memory_gb=16 with memlimit_multiplier=2.0 results in -R 'rusage[mem=16G]' -M 32G"
+        "memlimit_multiplier": "Multiplier applied to memory_gb to calculate the -M (memory limit) value. The -R rusage[mem=] uses the base memory_gb value, while -M uses memory_gb * memlimit_multiplier. This allows setting a higher kill limit than the reservation. Example: memory_gb=16 with memlimit_multiplier=2.0 results in -R 'rusage[mem=16G]' -M 32G",
+        "pending_reasons": "Optional map of LSF pending reason text to a plain-language explanation of the local policy behind it. When a job is PEND, the UI hover tooltip shows the raw LSF reason plus this explanation when the LSF reason contains one of these keys (case-insensitive substring match). Reasons without a matching key show only the raw LSF text. May be given either as an object {reason: explanation} or as a list of such objects."
     }
 } 

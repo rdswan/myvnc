@@ -1268,6 +1268,187 @@ function formatRuntime(runtime) {
     return parts.join(' ');
 }
 
+// Escape a string for safe use inside an HTML attribute value
+function escapeHtmlAttr(text) {
+    if (text == null) return '';
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+// Build the hover tooltip text for a pending job.
+// Shows the raw LSF pending reason(s) and, when configured in lsf_config.json,
+// the plain-language explanation for each reason.
+function buildPendingTooltip(job) {
+    const detailed = Array.isArray(job.pending_reasons) ? job.pending_reasons : null;
+    const blocks = [];
+
+    if (detailed && detailed.length > 0) {
+        detailed.forEach(entry => {
+            const reason = (entry && entry.reason) ? entry.reason : '';
+            if (!reason) return;
+            let block = `📋  LSF says:\n${reason}`;
+            if (entry.explanation) {
+                block += `\n\n💡  What this means:\n${entry.explanation}`;
+            }
+            blocks.push(block);
+        });
+    } else if (job.pending_reason) {
+        blocks.push(`📋  LSF says:\n${job.pending_reason}`);
+    }
+
+    if (blocks.length === 0) {
+        return '';
+    }
+
+    const divider = '\n\n– – – – – – – – – –\n\n';
+    return `⏳  Why is this job pending?\n\n${blocks.join(divider)}`;
+}
+
+// Build the status cell HTML, adding a hover tooltip for pending jobs.
+// The reason text is stored in a data attribute and rendered by a custom,
+// stay-open tooltip (see pending tooltip logic below) so users can select/copy it.
+function buildStatusCell(job, statusClass) {
+    const badge = `<span class="status-badge ${statusClass}">${job.status}</span>`;
+    if (job.status === 'PEND') {
+        const tooltip = buildPendingTooltip(job);
+        if (tooltip) {
+            return `<span class="pending-reason" tabindex="0" data-pending-tooltip="${escapeHtmlAttr(tooltip)}">${badge}<i class="fas fa-info-circle pending-reason-icon"></i></span>`;
+        }
+    }
+    return badge;
+}
+
+// ----- Custom pending-reason tooltip (stays open on hover, text is selectable) -----
+let pendingTooltipEl = null;
+let pendingTooltipHideTimer = null;
+let pendingTooltipCurrentTrigger = null;
+
+function getPendingTooltipEl() {
+    if (!pendingTooltipEl) {
+        pendingTooltipEl = document.createElement('div');
+        pendingTooltipEl.className = 'pending-tooltip';
+        pendingTooltipEl.innerHTML = '<div class="pending-tooltip-body"></div>';
+        // Keep the tooltip open while the pointer is over it so the text can be copied.
+        pendingTooltipEl.addEventListener('mouseenter', cancelPendingTooltipHide);
+        pendingTooltipEl.addEventListener('mouseleave', hidePendingTooltipSoon);
+        document.body.appendChild(pendingTooltipEl);
+    }
+    return pendingTooltipEl;
+}
+
+function cancelPendingTooltipHide() {
+    if (pendingTooltipHideTimer) {
+        clearTimeout(pendingTooltipHideTimer);
+        pendingTooltipHideTimer = null;
+    }
+}
+
+function hidePendingTooltipSoon() {
+    cancelPendingTooltipHide();
+    pendingTooltipHideTimer = setTimeout(() => {
+        if (pendingTooltipEl) {
+            pendingTooltipEl.classList.remove('visible');
+        }
+        pendingTooltipCurrentTrigger = null;
+    }, 300);
+}
+
+function positionPendingTooltip(trigger, el) {
+    const r = trigger.getBoundingClientRect();
+    const margin = 8;
+    const tipRect = el.getBoundingClientRect();
+
+    let top = r.bottom + margin;
+    // Flip above the trigger if there isn't enough room below.
+    if (top + tipRect.height > window.innerHeight - margin) {
+        const above = r.top - margin - tipRect.height;
+        top = above >= margin ? above : Math.max(margin, window.innerHeight - margin - tipRect.height);
+    }
+
+    let left = r.left;
+    if (left + tipRect.width > window.innerWidth - margin) {
+        left = window.innerWidth - margin - tipRect.width;
+    }
+    if (left < margin) left = margin;
+
+    el.style.top = `${top}px`;
+    el.style.left = `${left}px`;
+}
+
+function showPendingTooltip(trigger) {
+    cancelPendingTooltipHide();
+    const el = getPendingTooltipEl();
+
+    // Already showing for this trigger — just keep it open.
+    if (pendingTooltipCurrentTrigger === trigger && el.classList.contains('visible')) {
+        return;
+    }
+
+    const text = trigger.getAttribute('data-pending-tooltip');
+    if (!text) return;
+
+    el.querySelector('.pending-tooltip-body').textContent = text;
+    pendingTooltipCurrentTrigger = trigger;
+    el.classList.add('visible');
+    positionPendingTooltip(trigger, el);
+}
+
+function setupPendingTooltip() {
+    // Use delegated listeners so tooltips keep working after the tables re-render.
+    document.addEventListener('mouseover', (e) => {
+        const trigger = e.target.closest ? e.target.closest('.pending-reason') : null;
+        if (trigger) {
+            showPendingTooltip(trigger);
+        }
+    });
+
+    document.addEventListener('mouseout', (e) => {
+        const trigger = e.target.closest ? e.target.closest('.pending-reason') : null;
+        if (!trigger) return;
+        // Don't hide if the pointer is moving into the tooltip or staying on the trigger.
+        const to = e.relatedTarget;
+        if (to && to.closest && (to.closest('.pending-reason') === trigger || to.closest('.pending-tooltip'))) {
+            return;
+        }
+        hidePendingTooltipSoon();
+    });
+
+    // Keyboard accessibility: show on focus, hide on blur.
+    document.addEventListener('focusin', (e) => {
+        const trigger = e.target.closest ? e.target.closest('.pending-reason') : null;
+        if (trigger) showPendingTooltip(trigger);
+    });
+    document.addEventListener('focusout', (e) => {
+        const trigger = e.target.closest ? e.target.closest('.pending-reason') : null;
+        if (trigger) hidePendingTooltipSoon();
+    });
+
+    // Hide on scroll/resize since the fixed-position box would otherwise drift.
+    window.addEventListener('scroll', () => {
+        if (pendingTooltipEl && pendingTooltipEl.classList.contains('visible')) {
+            cancelPendingTooltipHide();
+            pendingTooltipEl.classList.remove('visible');
+            pendingTooltipCurrentTrigger = null;
+        }
+    }, true);
+    window.addEventListener('resize', () => {
+        if (pendingTooltipEl && pendingTooltipEl.classList.contains('visible')) {
+            pendingTooltipEl.classList.remove('visible');
+            pendingTooltipCurrentTrigger = null;
+        }
+    });
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupPendingTooltip);
+} else {
+    setupPendingTooltip();
+}
+
 // Refresh VNC List
 async function refreshVNCList(withRetries = false) {
     // Track if this function was directly called (not via click handler)
@@ -1336,10 +1517,7 @@ async function refreshVNCList(withRetries = false) {
                 <td>${job.job_id}</td>
                 <td>${job.name === "VNC Session" ? "" : job.name}</td>
                 <td>${job.user}</td>
-                <td>${job.status === "RUN" ? 
-                    `<span class="status-badge ${statusClass}">${job.status}</span>` : 
-                    `<span class="status-badge ${statusClass}">${job.status}</span>`}
-                </td>
+                <td>${buildStatusCell(job, statusClass)}</td>
                 <td>${job.session_type || 'Unknown'}</td>
                 <td>${job.queue}</td>
                 <td>${job.resources_unknown ? 'Unknown' : `${job.num_cores || '-'} cores, ${job.memory_gb || '-'} GB`}</td>
@@ -2822,7 +3000,7 @@ async function refreshManagerList() {
                 <td>${job.job_id}</td>
                 <td>${job.name === "VNC Session" ? "" : job.name}</td>
                 <td>${job.user}</td>
-                <td><span class="status-badge ${statusClass}">${job.status}</span></td>
+                <td>${buildStatusCell(job, statusClass)}</td>
                 <td>${job.session_type || 'Unknown'}</td>
                 <td>${job.queue}</td>
                 <td>${job.resources_unknown ? 'Unknown' : `${job.num_cores || '-'} cores, ${job.memory_gb || '-'} GB`}</td>
