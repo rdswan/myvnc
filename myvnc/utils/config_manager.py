@@ -46,25 +46,28 @@ class ConfigManager:
         self.lsf_config = self._load_config("lsf_config.json", os.environ.get("MYVNC_LSF_CONFIG_FILE"))
 
         # Load SLURM config if it exists (non-fatal if missing)
-        try:
-            self.slurm_config = self._load_config("slurm_config.json", os.environ.get("MYVNC_SLURM_CONFIG_FILE"))
-        except RuntimeError:
-            self.slurm_config = None
+        self.slurm_config = self._load_config(
+            "slurm_config.json", os.environ.get("MYVNC_SLURM_CONFIG_FILE"), optional=True
+        )
+        if self.slurm_config is None:
             self.logger.info("ConfigManager: slurm_config.json not found, SLURM support unavailable")
     
-    def _load_config(self, filename, env_path=None):
+    def _load_config(self, filename, env_path=None, optional=False):
         """
         Load a configuration file
         
         Args:
             filename: Name of the configuration file
             env_path: Path from environment variable if available
+            optional: If True, a missing file is not an error. Instead of logging
+                      an error and raising, this logs an informational message and
+                      returns None.
             
         Returns:
-            Dict containing the configuration
+            Dict containing the configuration, or None if optional and not found
         
         Raises:
-            RuntimeError: If the file is not found or contains invalid JSON
+            RuntimeError: If a required file is not found or contains invalid JSON
         """
         # Priority: Environment variable path, config_dir/filename
         if env_path and os.path.exists(env_path):
@@ -91,11 +94,17 @@ class ConfigManager:
                         self.logger.info(f"ConfigManager: Successfully loaded {alt_filename} from {alt_path}")
                         return config
                 except FileNotFoundError:
+                    if optional:
+                        self.logger.info(f"ConfigManager: Optional configuration file {filename} not found at {config_path} (also tried {alt_path})")
+                        return None
                     self.logger.error(f"ConfigManager: Configuration file {filename} not found at {config_path} (also tried {alt_path})")
                     raise RuntimeError(f"Configuration file {filename} not found at {config_path} (also tried {alt_path})")
                 except json.JSONDecodeError:
                     self.logger.error(f"ConfigManager: Invalid JSON in configuration file {alt_filename}")
                     raise RuntimeError(f"Invalid JSON in configuration file {alt_filename}")
+            if optional:
+                self.logger.info(f"ConfigManager: Optional configuration file {filename} not found at {config_path}")
+                return None
             self.logger.error(f"ConfigManager: Configuration file {filename} not found at {config_path}")
             raise RuntimeError(f"Configuration file {filename} not found at {config_path}")
         except json.JSONDecodeError:
