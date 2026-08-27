@@ -1657,14 +1657,17 @@ async function refreshVNCList(withRetries = false) {
         enableTableSorting('vnc-table');
         
         // Add event listeners to buttons
-        document.querySelectorAll('.kill-button').forEach(button => {
+        // Scope to #vnc-table: Manager Mode rows carry the same button classes but
+        // are rebuilt on their own schedule, so an unscoped selector would bind an
+        // extra listener to them on every periodic refresh.
+        document.querySelectorAll('#vnc-table .kill-button').forEach(button => {
             button.addEventListener('click', () => {
                 const jobId = button.getAttribute('data-job-id');
                 killVNCSession(jobId);
             });
         });
         
-        document.querySelectorAll('.vnc-viewer-button').forEach(button => {
+        document.querySelectorAll('#vnc-table .vnc-viewer-button').forEach(button => {
             button.addEventListener('click', () => {
                 const jobId = button.getAttribute('data-job-id');
                 // Find job info
@@ -1675,7 +1678,7 @@ async function refreshVNCList(withRetries = false) {
             });
         });
 
-        document.querySelectorAll('.tmux-connect-button').forEach(button => {
+        document.querySelectorAll('#vnc-table .tmux-connect-button').forEach(button => {
             button.addEventListener('click', () => {
                 const jobId = button.getAttribute('data-job-id');
                 // Find job info
@@ -1998,6 +2001,12 @@ async function createVNCSession(event) {
 
 // Kill VNC Session
 async function killVNCSession(jobId) {
+    // A second stacked dialog is visually identical to one that refuses to close,
+    // so keep this to a single dialog no matter how the click arrived.
+    if (document.querySelector('.confirm-dialog')) {
+        return;
+    }
+
     // Create a modal dialog for kill reason
     const confirmDialog = document.createElement('div');
     confirmDialog.className = 'confirm-dialog';

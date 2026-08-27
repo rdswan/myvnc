@@ -468,8 +468,22 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.handle_server_config()
         else:
             # Try to serve static file
-            super().do_GET()
-    
+            self._serving_static_asset = True
+            try:
+                super().do_GET()
+            finally:
+                self._serving_static_asset = False
+
+    def end_headers(self):
+        # index.html is always sent no-cache, but js/css/img fall through to the
+        # base handler, which sends only Last-Modified. Browsers then apply
+        # heuristic freshness and can keep running an old app.js against a new
+        # index.html after an upgrade, which silently breaks the UI. Force a
+        # revalidation so the two can never drift apart.
+        if getattr(self, '_serving_static_asset', False):
+            self.send_header('Cache-Control', 'no-cache')
+        super().end_headers()
+
     def do_DELETE(self):
         """Handle DELETE requests"""
         # Parse URL path
