@@ -246,6 +246,21 @@ class ConfigLinter:
                 self.errors.append(f"  ❌ {filename}: '{prefix}' must be a dict")
                 continue
 
+            # Detect unknown/misspelled keys (these are silently ignored at
+            # runtime and fall back to the global settings, which is a common
+            # and confusing source of "my per-queue setting isn't applying").
+            known_keys = {
+                "num_cores", "memory_gb", "os", "memlimit_multiplier",
+                "memory_options_gb", "enabled_memory_options_gb",
+                "core_options", "enabled_core_options", "enabled_os_options",
+            }
+            import difflib
+            for key in settings:
+                if key not in known_keys:
+                    suggestion = difflib.get_close_matches(key, known_keys, n=1)
+                    hint = f" (did you mean '{suggestion[0]}'?)" if suggestion else ""
+                    self.errors.append(f"  ❌ {filename}: '{prefix}' has unknown key '{key}'{hint}")
+
             # Scalar default overrides
             for int_key in ("num_cores", "memory_gb"):
                 if int_key in settings and not isinstance(settings[int_key], int):
