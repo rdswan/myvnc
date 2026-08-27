@@ -1377,6 +1377,45 @@ function buildPendingTooltip(job) {
     return `⏳  Why is this job pending?\n\n${blocks.join(divider)}`;
 }
 
+function getEntraAccountLabel(job) {
+    if (!job || !Object.prototype.hasOwnProperty.call(job, 'entra_account_enabled')) {
+        return '';
+    }
+    if (job.entra_account_enabled === true) return 'Active';
+    if (job.entra_account_enabled === false) return 'Disabled';
+    return 'Unknown';
+}
+
+function updateEntraLookupWarning(jobs) {
+    const warning = document.getElementById('entra-lookup-warning');
+    if (!warning) return;
+    const error = (jobs || []).find(job => job.entra_lookup_error)?.entra_lookup_error;
+    if (error) {
+        warning.textContent = error;
+        warning.style.display = 'block';
+    } else {
+        warning.textContent = '';
+        warning.style.display = 'none';
+    }
+}
+
+function buildAccountCell(job) {
+    const label = getEntraAccountLabel(job);
+    if (!label) {
+        return '—';
+    }
+    let cls = 'account-unknown';
+    let title = job.entra_lookup_error || 'User was not found in Entra or lookup is unavailable';
+    if (label === 'Active') {
+        cls = 'account-active';
+        title = 'Entra account is enabled';
+    } else if (label === 'Disabled') {
+        cls = 'account-disabled';
+        title = 'Entra account is disabled (accountEnabled=false)';
+    }
+    return `<span class="account-badge ${cls}" title="${title}">${label}</span>`;
+}
+
 // Build the status cell HTML, adding a hover tooltip for pending jobs.
 // The reason text is stored in a data attribute and rendered by a custom,
 // stay-open tooltip (see pending tooltip logic below) so users can select/copy it.
@@ -3044,11 +3083,13 @@ async function refreshManagerList() {
         if (jobs.length === 0) {
             managerNoVNCMessage.style.display = 'block';
             document.querySelector('#manager-mode .table-container').style.display = 'none';
+            updateEntraLookupWarning([]);
             return;
         }
 
         managerNoVNCMessage.style.display = 'none';
         document.querySelector('#manager-mode .table-container').style.display = 'block';
+        updateEntraLookupWarning(jobs);
 
         jobs.forEach(job => {
             const row = document.createElement('tr');
@@ -3065,10 +3106,15 @@ async function refreshManagerList() {
             // Determine if this is a tmux session
             const isTmux = job.session_type === 'tmux';
 
+            if (job.entra_account_enabled === false) {
+                row.classList.add('former-employee-row');
+            }
+
             row.innerHTML = `
                 <td>${job.job_id}</td>
                 <td>${job.name === "VNC Session" ? "" : job.name}</td>
                 <td>${job.user}</td>
+                <td>${buildAccountCell(job)}</td>
                 <td>${buildStatusCell(job, statusClass)}</td>
                 <td>${job.session_type || 'Unknown'}</td>
                 <td>${job.queue}</td>
@@ -3110,6 +3156,7 @@ async function refreshManagerList() {
         console.error('Failed to refresh Manager Mode VNC list:', error);
         managerNoVNCMessage.style.display = 'block';
         document.querySelector('#manager-mode .table-container').style.display = 'none';
+        updateEntraLookupWarning([]);
     } finally {
         if (directCall && managerRefreshButton) {
             setTimeout(() => {
@@ -3436,6 +3483,7 @@ function closePersistentDialog() {
 let managerTableFilters = {
     name: [],
     user: [],
+    account: [],
     status: [],
     type: [],
     queue: [],
@@ -3455,6 +3503,7 @@ function setupManagerTableFilters(jobs) {
     const filterColumns = {
         name: { id: 'filter-name-dropdown', values: new Set() },
         user: { id: 'filter-user-dropdown', values: new Set() },
+        account: { id: 'filter-account-dropdown', values: new Set() },
         status: { id: 'filter-status-dropdown', values: new Set() },
         type: { id: 'filter-type-dropdown', values: new Set() },
         queue: { id: 'filter-queue-dropdown', values: new Set() },
@@ -3466,6 +3515,10 @@ function setupManagerTableFilters(jobs) {
     jobs.forEach(job => {
         filterColumns.name.values.add(job.name || '');
         filterColumns.user.values.add(job.user || '');
+        const accountLabel = getEntraAccountLabel(job);
+        if (accountLabel) {
+            filterColumns.account.values.add(accountLabel);
+        }
         filterColumns.status.values.add(job.status || '');
         filterColumns.type.values.add(job.session_type || 'Unknown');
         filterColumns.queue.values.add(job.queue || '');
@@ -3622,42 +3675,50 @@ function applyManagerTableFilters() {
                 shouldShow = false;
             }
         }
+
+        // Account filter (column 3)
+        if (managerTableFilters.account.length > 0) {
+            const accountCell = cells[3]?.textContent.trim();
+            if (!managerTableFilters.account.includes(accountCell)) {
+                shouldShow = false;
+            }
+        }
         
-        // Status filter (column 3)
+        // Status filter (column 4)
         if (managerTableFilters.status.length > 0) {
-            const statusCell = cells[3]?.textContent.trim();
+            const statusCell = cells[4]?.textContent.trim();
             if (!managerTableFilters.status.includes(statusCell)) {
                 shouldShow = false;
             }
         }
         
-        // Type filter (column 4)
+        // Type filter (column 5)
         if (managerTableFilters.type.length > 0) {
-            const typeCell = cells[4]?.textContent.trim();
+            const typeCell = cells[5]?.textContent.trim();
             if (!managerTableFilters.type.includes(typeCell)) {
                 shouldShow = false;
             }
         }
         
-        // Queue filter (column 5)
+        // Queue filter (column 6)
         if (managerTableFilters.queue.length > 0) {
-            const queueCell = cells[5]?.textContent.trim();
+            const queueCell = cells[6]?.textContent.trim();
             if (!managerTableFilters.queue.includes(queueCell)) {
                 shouldShow = false;
             }
         }
         
-        // OS filter (column 7)
+        // OS filter (column 8)
         if (managerTableFilters.os.length > 0) {
-            const osCell = cells[7]?.textContent.trim();
+            const osCell = cells[8]?.textContent.trim();
             if (!managerTableFilters.os.includes(osCell)) {
                 shouldShow = false;
             }
         }
         
-        // Host filter (column 8)
+        // Host filter (column 9)
         if (managerTableFilters.host.length > 0) {
-            const hostCell = cells[8]?.textContent.trim();
+            const hostCell = cells[9]?.textContent.trim();
             if (!managerTableFilters.host.includes(hostCell)) {
                 shouldShow = false;
             }
@@ -3725,6 +3786,7 @@ function clearAllManagerFilters() {
     managerTableFilters = {
         name: [],
         user: [],
+        account: [],
         status: [],
         type: [],
         queue: [],

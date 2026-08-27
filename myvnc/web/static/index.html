@@ -380,29 +380,47 @@
             width: 120px;
         }
         
+        /* Manager Mode Account column */
+        #manager-table th:nth-child(4),
+        #manager-table td:nth-child(4) {
+            min-width: 110px;
+            width: 110px;
+            white-space: nowrap;
+        }
+        
         /* Manager Mode Display column - make it narrow */
-        #manager-table th:nth-child(10),
-        #manager-table td:nth-child(10) {
+        #manager-table th:nth-child(11),
+        #manager-table td:nth-child(11) {
             width: 70px;
             max-width: 70px;
             white-space: nowrap;
         }
         
         /* Manager Mode Runtime column - make it narrow to fit data */
-        #manager-table th:nth-child(11),
-        #manager-table td:nth-child(11) {
+        #manager-table th:nth-child(12),
+        #manager-table td:nth-child(12) {
             width: 85px;
             max-width: 85px;
             white-space: nowrap;
         }
         
         /* Manager Mode Actions column - make it narrow */
-        #manager-table th:nth-child(12),
-        #manager-table td:nth-child(12) {
+        #manager-table th:nth-child(13),
+        #manager-table td:nth-child(13) {
             width: 110px;
             max-width: 110px;
             padding: 1rem;
             vertical-align: middle;
+        }
+
+        #manager-table tr.former-employee-row {
+            background-color: rgba(240, 79, 94, 0.08);
+        }
+
+        .entra-lookup-warning {
+            margin-top: 10px;
+            color: #A1422F;
+            font-size: 0.9rem;
         }
         
         /* Actions column spacing and styling */
@@ -897,6 +915,7 @@
                     <button id="clear-all-filters-button" class="button secondary" style="margin-left: 10px;" onclick="clearAllManagerFilters();">
                         <i class="fas fa-times-circle"></i> Clear All Filters
                     </button>
+                    <div id="entra-lookup-warning" class="entra-lookup-warning" style="display: none;"></div>
                 </div>
                 
                 <div class="table-container">
@@ -922,6 +941,21 @@
                                 <th>
                                     <div>USER</div>
                                     <div class="table-filter-dropdown" id="filter-user-dropdown">
+                                        <button class="filter-dropdown-button" type="button">
+                                            <span>All</span>
+                                            <span class="filter-dropdown-arrow">▼</span>
+                                        </button>
+                                        <div class="filter-dropdown-content">
+                                            <div class="filter-dropdown-search">
+                                                <input type="text" placeholder="Search..." />
+                                            </div>
+                                            <div class="filter-dropdown-options"></div>
+                                        </div>
+                                    </div>
+                                </th>
+                                <th>
+                                    <div>ACCOUNT</div>
+                                    <div class="table-filter-dropdown" id="filter-account-dropdown">
                                         <button class="filter-dropdown-button" type="button">
                                             <span>All</span>
                                             <span class="filter-dropdown-arrow">▼</span>
@@ -1017,7 +1051,7 @@
                         </thead>
                         <tbody id="manager-table-body">
                             <tr class="loading-row">
-                                <td colspan="12" class="loading-cell">
+                                <td colspan="13" class="loading-cell">
                                     <div class="loading-spinner">
                                         <i class="fas fa-spinner fa-spin"></i> Loading VNC sessions...
                                     </div>

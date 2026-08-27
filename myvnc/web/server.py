@@ -567,6 +567,9 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.logger.info(f"Serving file: {filename}")    
             self.send_response(200)
             self.send_header('Content-type', 'text/html')
+            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+            self.send_header('Pragma', 'no-cache')
+            self.send_header('Expires', '0')
             self.end_headers()
             
             try:
@@ -2502,6 +2505,28 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
 
         return user_jobs
 
+    def _attach_entra_account_status(self, jobs):
+        """Annotate Manager Mode jobs with Entra accountEnabled when Entra auth is configured."""
+        auth_method = (self.authentication_enabled or "").lower()
+        entra_manager = getattr(self.auth_manager, "entra_manager", None)
+        if auth_method != "entra" or not entra_manager:
+            return
+
+        usernames = sorted({job.get("user") for job in jobs if job.get("user")})
+        try:
+            status_map = entra_manager.get_users_account_enabled(usernames)
+        except Exception as e:
+            self.logger.error(f"Entra account status lookup failed: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            status_map = {}
+
+        lookup_error = getattr(entra_manager, "_last_lookup_error", None)
+        for job in jobs:
+            user = job.get("user")
+            job["entra_account_enabled"] = status_map.get(user) if user else None
+            if lookup_error:
+                job["entra_lookup_error"] = lookup_error
+
     def handle_vnc_manager_mode(self):
         """Handle Manager Mode VNC session listing - lists all users' VNC jobs if requester is in managers list."""
         try:
@@ -2520,6 +2545,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             jobs = self.lsf_manager.get_active_vnc_jobs(authenticated_user=authenticated_user, all_users=True)
 
             processed_jobs = self._process_vnc_jobs(jobs, authenticated_user)
+            self._attach_entra_account_status(processed_jobs)
 
             self.send_json_response(processed_jobs)
         except Exception as e:

@@ -9,8 +9,9 @@ import time
 import json
 import uuid
 import logging
+import base64
 import requests
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from pathlib import Path
 from myvnc.utils.config_loader import load_server_config
 import traceback
@@ -310,4 +311,317 @@ class EntraManager:
             
         except requests.exceptions.RequestException as e:
             logging.error(f"Token refresh failed: {str(e)}")
-            return False, None 
+            return False, None
+
+    # App-only Graph lookups survive per-request EntraManager construction.
+    _graph_app_token = {"access_token": None, "expires_at": 0.0}
+    _account_status_cache = {}
+    _graph_lookup_disabled_until = 0.0
+    _last_lookup_error = None
+    _ACCOUNT_STATUS_TTL = 300
+    _GRAPH_PERMISSION_RETRY = 600
+    _ACCOUNT_READ_ROLES = frozenset({
+        "User.Read.All",
+        "User.ReadWrite.All",
+        "Directory.Read.All",
+        "Directory.ReadWrite.All",
+    })
+
+    def get_users_account_enabled(self, usernames):
+        """Look up Entra accountEnabled for Linux/VNC usernames.
+
+        Uses the client-credentials (app-only) flow so Manager Mode can query
+        users other than the signed-in manager. Requires the Entra app to have
+        Microsoft Graph application permission User.Read.All (admin consent).
+
+        Args:
+            usernames: Iterable of usernames (typically onPremisesSamAccountName
+                / mailNickname / UPN prefix).
+
+        Returns:
+            dict mapping each username to True, False, or None if unknown.
+        """
+        unique_names = []
+        seen = set()
+        for name in usernames or []:
+            if not name:
+                continue
+            if name in seen:
+                continue
+            seen.add(name)
+            unique_names.append(name)
+
+        if not unique_names:
+            EntraManager._last_lookup_error = None
+            return {}
+
+        if not all([self.client_id, self.client_secret, self.tenant_id]):
+            EntraManager._last_lookup_error = "Entra app credentials are not configured"
+            self.logger.warning("Skipping Entra accountEnabled lookup: app credentials are not configured")
+            return {}
+
+        now = time.time()
+        if now < EntraManager._graph_lookup_disabled_until:
+            if not EntraManager._last_lookup_error:
+                EntraManager._last_lookup_error = (
+                    "Microsoft Graph denied the lookup. Grant this app the Microsoft Graph "
+                    "application permission User.Read.All and admin consent."
+                )
+            self.logger.debug("Skipping Entra accountEnabled lookup: previous Graph permission error still in cooldown")
+            return {}
+
+        EntraManager._last_lookup_error = None
+
+        status = {name: None for name in unique_names}
+
+        uncached = []
+        for name in unique_names:
+            cached = EntraManager._account_status_cache.get(name.lower())
+            if cached and cached.get("expires_at", 0) > now:
+                status[name] = cached.get("enabled")
+            else:
+                uncached.append(name)
+
+        if not uncached:
+            return status
+
+        token = self._get_graph_app_token()
+        if not token:
+            EntraManager._last_lookup_error = "Could not acquire a Microsoft Graph app token"
+            return {} if not any(value is not None for value in status.values()) else status
+
+        if not self._token_can_read_accounts(token):
+            self._handle_graph_permission_error("app token has no User.Read.All / Directory.Read.All role")
+            return {} if not any(value is not None for value in status.values()) else status
+
+        try:
+            found = self._query_graph_account_enabled(token, uncached)
+        except Exception as e:
+            EntraManager._last_lookup_error = f"Entra accountEnabled lookup failed: {e}"
+            self.logger.error(f"Entra accountEnabled lookup failed: {str(e)}")
+            self.logger.error(traceback.format_exc())
+            return {} if not any(value is not None for value in status.values()) else status
+
+        if time.time() < EntraManager._graph_lookup_disabled_until:
+            if not any(value is not None for value in status.values()):
+                return {}
+            return status
+
+        expires_at = now + EntraManager._ACCOUNT_STATUS_TTL
+        for name in uncached:
+            enabled = found.get(name.lower())
+            status[name] = enabled
+            EntraManager._account_status_cache[name.lower()] = {
+                "enabled": enabled,
+                "expires_at": expires_at,
+            }
+
+        disabled_count = sum(1 for value in status.values() if value is False)
+        self.logger.info(
+            f"Entra accountEnabled lookup: {len(unique_names)} users, "
+            f"{len(uncached)} queried, {disabled_count} disabled"
+        )
+        return status
+
+    def _get_graph_app_token(self):
+        """Acquire a Microsoft Graph app-only access token via client credentials."""
+        now = time.time()
+        cached = EntraManager._graph_app_token
+        if cached.get("access_token") and cached.get("expires_at", 0) > now + 60:
+            return cached["access_token"]
+
+        token_data = {
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+            "grant_type": "client_credentials",
+            "scope": "https://graph.microsoft.com/.default",
+        }
+
+        try:
+            response = requests.post(self.token_endpoint, data=token_data, timeout=15)
+            if response.status_code != 200:
+                self.logger.error(
+                    f"Entra client-credentials token request failed: "
+                    f"{response.status_code} - {response.text}"
+                )
+                return None
+
+            token_info = response.json()
+            access_token = token_info.get("access_token")
+            if not access_token:
+                self.logger.error("Entra client-credentials response did not include an access_token")
+                return None
+
+            expires_in = int(token_info.get("expires_in", 3600))
+            EntraManager._graph_app_token = {
+                "access_token": access_token,
+                "expires_at": now + expires_in,
+            }
+            return access_token
+        except requests.exceptions.RequestException as e:
+            self.logger.error(f"Entra client-credentials token request failed: {str(e)}")
+            return None
+
+    def _query_graph_account_enabled(self, access_token, usernames):
+        """Query Graph for accountEnabled, keyed by lowercase username."""
+        found = {}
+        remaining = list(usernames)
+
+        # mailNickname / UPN prefix covers most cloud and synced users.
+        batch_requests = []
+        for index, name in enumerate(remaining):
+            escaped = self._odata_escape(name)
+            filter_expr = (
+                f"mailNickname eq '{escaped}' or "
+                f"startswith(userPrincipalName,'{escaped}@')"
+            )
+            batch_requests.append({
+                "id": str(index),
+                "method": "GET",
+                "url": self._graph_users_query_url(filter_expr),
+            })
+
+        self._run_graph_batches(access_token, batch_requests, remaining, found)
+        if time.time() < EntraManager._graph_lookup_disabled_until:
+            return found
+
+        missing = [name for name in remaining if name.lower() not in found]
+        if missing:
+            # Hybrid-synced AD accounts often match onPremisesSamAccountName only.
+            sam_requests = []
+            for index, name in enumerate(missing):
+                escaped = self._odata_escape(name)
+                sam_requests.append({
+                    "id": str(index),
+                    "method": "GET",
+                    "headers": {"ConsistencyLevel": "eventual"},
+                    "url": self._graph_users_query_url(
+                        f"onPremisesSamAccountName eq '{escaped}'",
+                        include_count=True,
+                    ),
+                })
+            self._run_graph_batches(access_token, sam_requests, missing, found)
+
+        return found
+
+    def _run_graph_batches(self, access_token, batch_requests, usernames, found):
+        """Execute Graph JSON batch requests in chunks of 20 and merge matches."""
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        }
+
+        for offset in range(0, len(batch_requests), 20):
+            chunk = batch_requests[offset:offset + 20]
+            try:
+                response = requests.post(
+                    f"{self.graph_endpoint}/$batch",
+                    headers=headers,
+                    json={"requests": chunk},
+                    timeout=30,
+                )
+            except requests.exceptions.RequestException as e:
+                self.logger.error(f"Graph $batch request failed: {str(e)}")
+                continue
+
+            if response.status_code == 403:
+                self._handle_graph_permission_error(response.text)
+                return
+            if response.status_code != 200:
+                self.logger.error(
+                    f"Graph $batch failed: {response.status_code} - {response.text}"
+                )
+                continue
+
+            try:
+                payload = response.json()
+            except ValueError:
+                self.logger.error("Graph $batch returned non-JSON body")
+                continue
+
+            for item in payload.get("responses", []):
+                request_id = item.get("id")
+                try:
+                    username = usernames[int(request_id)]
+                except (TypeError, ValueError, IndexError):
+                    continue
+
+                status_code = item.get("status", 0)
+                body = item.get("body") or {}
+                if status_code == 403:
+                    self._handle_graph_permission_error(json.dumps(body))
+                    return
+                if status_code != 200:
+                    self.logger.debug(
+                        f"Graph user lookup for {username} returned {status_code}: {body}"
+                    )
+                    continue
+
+                match = self._best_graph_user_match(username, body.get("value") or [])
+                if match is not None:
+                    found[username.lower()] = bool(match.get("accountEnabled"))
+
+    def _best_graph_user_match(self, username, users):
+        """Pick the Graph user that best matches a VNC/Linux username."""
+        if not users:
+            return None
+
+        target = username.lower()
+
+        def mail_nickname(user):
+            return (user.get("mailNickname") or "").lower()
+
+        def sam_account(user):
+            return (user.get("onPremisesSamAccountName") or "").lower()
+
+        def upn_prefix(user):
+            upn = user.get("userPrincipalName") or ""
+            return upn.split("@", 1)[0].lower()
+
+        for predicate in (mail_nickname, sam_account, upn_prefix):
+            for user in users:
+                if predicate(user) == target:
+                    return user
+        return users[0]
+
+    def _graph_users_query_url(self, filter_expr, include_count=False):
+        """Build a relative Graph /users query URL with encoded parameters."""
+        params = [
+            ("$filter", filter_expr),
+            ("$select", "accountEnabled,mailNickname,userPrincipalName,onPremisesSamAccountName,displayName"),
+            ("$top", "5"),
+        ]
+        if include_count:
+            params.append(("$count", "true"))
+        return "/users?" + urlencode(params, quote_via=quote)
+
+    def _token_can_read_accounts(self, access_token):
+        """Return True if the app-only token includes a Graph role that can read accountEnabled."""
+        try:
+            payload = access_token.split(".")[1]
+            payload += "=" * ((4 - len(payload) % 4) % 4)
+            claims = json.loads(base64.urlsafe_b64decode(payload))
+            roles = set(claims.get("roles") or [])
+            return bool(roles & EntraManager._ACCOUNT_READ_ROLES)
+        except Exception:
+            # If the token cannot be decoded, try the Graph call and handle 403 there.
+            return True
+
+    def _handle_graph_permission_error(self, details):
+        """Log a warning when the app lacks User.Read.All."""
+        EntraManager._graph_lookup_disabled_until = time.time() + EntraManager._GRAPH_PERMISSION_RETRY
+        EntraManager._last_lookup_error = (
+            "Microsoft Graph denied the lookup. Grant this app the Microsoft Graph "
+            "application permission User.Read.All and admin consent."
+        )
+        self.logger.warning(
+            "Entra accountEnabled lookup was denied by Microsoft Graph. "
+            "Grant the app the Microsoft Graph application permission "
+            "User.Read.All (admin consent required) so Manager Mode can show "
+            f"disabled accounts. Details: {details}"
+        )
+
+    @staticmethod
+    def _odata_escape(value):
+        """Escape a string for use inside an OData single-quoted literal."""
+        return str(value).replace("'", "''") 

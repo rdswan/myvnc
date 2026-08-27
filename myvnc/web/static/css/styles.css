@@ -663,6 +663,31 @@ footer {
   color: #33333D; /* TT Blue Grey */
 }
 
+.account-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.account-active {
+  background-color: rgba(30, 185, 128, 0.15);
+  color: #1EB980;
+}
+
+.account-disabled {
+  background-color: rgba(240, 79, 94, 0.15);
+  color: #F04F5E;
+}
+
+.account-unknown {
+  background-color: rgba(51, 51, 61, 0.12);
+  color: #5e5e6a;
+}
+
 /* Pending reason hover indicator */
 .pending-reason {
   display: inline-flex;
