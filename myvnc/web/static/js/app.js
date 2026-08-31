@@ -164,6 +164,31 @@ document.addEventListener('DOMContentLoaded', function() {
     enableTableSorting('manager-table');
 });
 
+// Tag the browser tab and the header with the site (e.g. "MyVNC (aus2)") so that
+// several myvnc instances open at once can be told apart at a glance.
+async function applySiteLabel() {
+    try {
+        if (!serverConfig || Object.keys(serverConfig).length === 0) {
+            serverConfig = await apiRequest('server/config');
+        }
+
+        const site = serverConfig.site;
+        if (!site) {
+            return;
+        }
+
+        const label = `MyVNC (${site})`;
+        document.title = label;
+
+        const titleElement = document.querySelector('.app-title');
+        if (titleElement) {
+            titleElement.textContent = label;
+        }
+    } catch (error) {
+        console.error('Error applying site label:', error);
+    }
+}
+
 // Initialize Application
 async function initializeApplication() {
     console.log('==== INITIALIZING APPLICATION ====');
@@ -179,6 +204,7 @@ async function initializeApplication() {
             
             // Continue with other initialization in parallel
             await checkDebugMode();
+            applySiteLabel();
             
             // Second redundant check after a short delay
             setTimeout(async () => {
@@ -205,6 +231,7 @@ async function initializeApplication() {
         } else {
             // Standard initialization sequence if the VNC Manager tab is not active
             await checkDebugMode();
+            applySiteLabel();
             
             setTimeout(async () => {
                 console.log('Performing redundant debug mode check...');
@@ -3093,6 +3120,8 @@ async function refreshManagerList() {
             managerNoVNCMessage.style.display = 'block';
             document.querySelector('#manager-mode .table-container').style.display = 'none';
             updateEntraLookupWarning([]);
+            updateManagerSessionCount(0);
+            updateDisabledSessionCount(0);
             return;
         }
 
@@ -3662,6 +3691,7 @@ function applyManagerTableFilters() {
     
     const rows = tbody.querySelectorAll('tr:not(.loading-row)');
     let visibleCount = 0;
+    let visibleDisabledCount = 0;
     
     rows.forEach(row => {
         let shouldShow = true;
@@ -3737,11 +3767,15 @@ function applyManagerTableFilters() {
         row.style.display = shouldShow ? '' : 'none';
         if (shouldShow) {
             visibleCount++;
+            if (row.classList.contains('former-employee-row')) {
+                visibleDisabledCount++;
+            }
         }
     });
     
     // Update the session count display
     updateManagerSessionCount(visibleCount);
+    updateDisabledSessionCount(visibleDisabledCount);
 }
 
 // Update the manager session count display
@@ -3750,6 +3784,34 @@ function updateManagerSessionCount(count) {
     if (countElement) {
         countElement.textContent = count;
     }
+}
+
+function isDisabledAccountFilterActive() {
+    return managerTableFilters.account.length === 1 &&
+        managerTableFilters.account[0] === 'Disabled';
+}
+
+// Update the deactivated-account session count card, including whether it is
+// currently highlighted as the active filter.
+function updateDisabledSessionCount(count) {
+    const countElement = document.getElementById('disabled-session-count');
+    if (countElement) {
+        countElement.textContent = count;
+    }
+
+    const card = document.getElementById('disabled-sessions-card');
+    if (card) {
+        card.classList.toggle('filter-active', isDisabledAccountFilterActive());
+    }
+}
+
+// Clicking the "Deactivated Users" card narrows the table to ACCOUNT=Disabled;
+// clicking it again clears that filter.
+function toggleDisabledAccountFilter() {
+    managerTableFilters.account = isDisabledAccountFilterActive() ? [] : ['Disabled'];
+
+    restoreManagerFilterState();
+    applyManagerTableFilters();
 }
 
 // Restore filter UI state after refresh

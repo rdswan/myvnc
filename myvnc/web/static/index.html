@@ -481,6 +481,7 @@
         .session-summary {
             display: flex;
             justify-content: flex-start;
+            gap: 15px;
             margin-bottom: 1.5rem;
         }
         
@@ -525,6 +526,25 @@
             color: #666;
             font-weight: 500;
             margin-top: 2px;
+        }
+
+        .summary-card.clickable {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .summary-card-alert {
+            border-left-color: #F04F5E;
+        }
+
+        .summary-card-alert i,
+        .summary-card-alert .summary-number {
+            color: #F04F5E;
+        }
+
+        .summary-card-alert.filter-active {
+            background: linear-gradient(135deg, #FDECEE 0%, #F9D9DD 100%);
+            border-color: #F04F5E;
         }
         
         /* Table filter dropdown styling (matching group_audit look & feel) */
@@ -905,6 +925,15 @@
                         <div class="summary-content">
                             <div class="summary-number" id="filtered-session-count">0</div>
                             <div class="summary-label">Total Sessions</div>
+                        </div>
+                    </div>
+                    <div class="summary-card clickable summary-card-alert" id="disabled-sessions-card"
+                         title="Click to filter the table to sessions owned by deactivated accounts"
+                         onclick="toggleDisabledAccountFilter();">
+                        <i class="fas fa-user-slash"></i>
+                        <div class="summary-content">
+                            <div class="summary-number" id="disabled-session-count">0</div>
+                            <div class="summary-label">Deactivated Users</div>
                         </div>
                     </div>
                 </div>

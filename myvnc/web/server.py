@@ -247,6 +247,35 @@ class LoggingHTTPServer(http.server.HTTPServer):
         self.logger.error(traceback.format_exc())
         super().handle_error(request, client_address)
 
+_site_name = None
+
+
+def get_site_name():
+    """Return the site portion of this host's FQDN, e.g. 'aus2' for
+    myvnc-aus.aus2.tenstorrent.com. Returns '' when it can't be determined.
+
+    Cached because the FQDN cannot change while the server is running.
+    """
+    global _site_name
+    if _site_name is not None:
+        return _site_name
+
+    _site_name = ""
+    try:
+        fqdn = subprocess.check_output(
+            ["domainname", "-f"], stderr=subprocess.DEVNULL, timeout=5
+        ).decode().strip()
+        parts = [part for part in fqdn.split(".") if part]
+        # Anything shorter than host.site.domain.tld gives us no site to report
+        # (an unqualified name, or the literal "(none)" when NIS is unset).
+        if len(parts) >= 3:
+            _site_name = parts[1]
+    except Exception as e:
+        get_logger().warning(f"Could not determine site name from 'domainname -f': {e}")
+
+    return _site_name
+
+
 class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
     """Handler for VNC manager CGI requests"""
     
@@ -2150,6 +2179,7 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                 "debug": self.server_config.get("debug", False),
                 "host": self.server_config.get("host", "localhost"),
                 "port": self.server_config.get("port", 9123),
+                "site": get_site_name(),
                 "managers": self.server_config.get("managers", []),
                 "auth_enabled": auth_enabled,
                 "authentication": auth_method
