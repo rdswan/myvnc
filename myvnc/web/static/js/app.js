@@ -256,6 +256,13 @@ async function initializeApplication() {
             await refreshVNCList();
         }
         
+        // A link carrying Create Session presets (see copyCreateSessionUrl)
+        // opens straight to the Create Session tab with those values applied
+        if (applyUrlFormParams()) {
+            console.log('Create Session presets found in URL, opening Create Session tab');
+            changeTab('vnc-creator');
+        }
+
         // Register interval to periodically refresh lists
         console.log('Setting up periodic refresh interval');
         setInterval(() => {
@@ -567,7 +574,46 @@ async function loadVNCConfig() {
             console.warn(`Default window manager "${vncConfig.defaults.window_manager}" not in available options, using first available`);
             vncConfig.defaults.window_manager = availableWindowManagers[0];
         }
-        
+
+        // Settings preset via URL query parameters take priority over the
+        // user's saved settings. Invalid values are ignored.
+        const urlFormParams = getUrlFormParams();
+        const urlVncSettings = {};
+        if (urlFormParams.site) {
+            if (vncConfig.sites.includes(urlFormParams.site)) {
+                urlVncSettings.site = urlFormParams.site;
+            } else {
+                console.warn(`URL site "${urlFormParams.site}" not in available options, ignoring it`);
+            }
+        }
+        if (urlFormParams.resolution) {
+            if (vncConfig.resolutions.includes(urlFormParams.resolution) || isValidResolution(urlFormParams.resolution)) {
+                urlVncSettings.resolution = urlFormParams.resolution;
+            } else {
+                console.warn(`URL resolution "${urlFormParams.resolution}" is not valid, ignoring it`);
+            }
+        }
+        if (urlFormParams.window_manager) {
+            if (availableWindowManagers.includes(urlFormParams.window_manager)) {
+                urlVncSettings.window_manager = urlFormParams.window_manager;
+            } else {
+                console.warn(`URL window manager "${urlFormParams.window_manager}" not in available options, ignoring it`);
+            }
+        }
+        if (Object.keys(urlVncSettings).length > 0) {
+            // Layer defaults < saved user settings < URL so fields missing from
+            // the URL still get the user's/server's default, not the first option
+            const merged = {
+                site: vncConfig.defaults.site,
+                resolution: vncConfig.defaults.resolution,
+                window_manager: vncConfig.defaults.window_manager
+            };
+            Object.entries(userVncSettings || {}).forEach(([key, value]) => {
+                if (value) merged[key] = value;
+            });
+            userVncSettings = { ...merged, ...urlVncSettings };
+        }
+
         // Now set the selected values - prioritize user settings if available
         if (userVncSettings && (userVncSettings.site || userVncSettings.resolution || userVncSettings.window_manager)) {
             console.log('Setting dropdown values from user settings');
@@ -881,6 +927,123 @@ function handleSessionTypeChange() {
     }
 }
 
+// Create Session form fields that can be preset from URL query parameters,
+// e.g. /?queue=arch_vnc&num_cores=4. Keys match the form field names.
+const URL_FORM_PARAM_KEYS = [
+    'session_type', 'name', 'site', 'os', 'resolution', 'window_manager',
+    'queue', 'num_cores', 'memory_gb', 'host_filter'
+];
+
+// Read Create Session presets from the page URL. 'lsf_queue' is accepted as
+// an alias for 'queue'.
+function getUrlFormParams() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const params = {};
+    URL_FORM_PARAM_KEYS.forEach(key => {
+        const value = urlParams.get(key);
+        if (value !== null && value.trim() !== '') {
+            params[key] = value.trim();
+        }
+    });
+    const queueAlias = urlParams.get('lsf_queue');
+    if (!params.queue && queueAlias && queueAlias.trim() !== '') {
+        params.queue = queueAlias.trim();
+    }
+    return params;
+}
+
+// Apply the URL presets that loadVNCConfig/loadLSFConfig do not handle
+// (session type and free-text fields). Returns true if any preset was given.
+function applyUrlFormParams() {
+    const params = getUrlFormParams();
+
+    if (params.session_type === 'vnc' || params.session_type === 'tmux') {
+        const radio = document.getElementById(`session-type-${params.session_type}`);
+        if (radio) {
+            radio.checked = true;
+            handleSessionTypeChange();
+        }
+    }
+
+    const nameInput = document.getElementById('vnc-name');
+    if (nameInput && params.name) {
+        nameInput.value = params.name;
+    }
+
+    const hostFilterInput = document.getElementById('lsf-host-filter');
+    if (hostFilterInput && params.host_filter) {
+        hostFilterInput.value = params.host_filter;
+    }
+
+    return Object.keys(params).length > 0;
+}
+
+// Build a link to this page that presets the Create Session form to the
+// values currently selected in it.
+function buildCreateSessionUrl() {
+    const isTmux = document.getElementById('session-type-tmux')?.checked;
+    const params = new URLSearchParams();
+    const setIfPresent = (key, value) => {
+        if (value !== undefined && value !== null && String(value).trim() !== '') {
+            params.set(key, String(value).trim());
+        }
+    };
+
+    params.set('session_type', isTmux ? 'tmux' : 'vnc');
+    setIfPresent('name', document.getElementById('vnc-name')?.value);
+    setIfPresent('site', document.getElementById('vnc-site')?.value);
+    setIfPresent('os', document.getElementById('lsf-os')?.value);
+
+    if (!isTmux) {
+        const resolution = getEffectiveResolution('vnc-resolution');
+        if (resolution && isValidResolution(resolution)) {
+            params.set('resolution', resolution);
+        }
+        setIfPresent('window_manager', document.getElementById('vnc-window-manager')?.value);
+    }
+
+    setIfPresent('queue', document.getElementById('lsf-queue')?.value);
+    setIfPresent('num_cores', document.getElementById('lsf-cores')?.value);
+    // The slider holds an index; the displayed value is the actual GB amount
+    setIfPresent('memory_gb', document.getElementById('memory-value')?.textContent);
+    setIfPresent('host_filter', document.getElementById('lsf-host-filter')?.value);
+
+    return `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+}
+
+// Copy a link presetting the Create Session form to its current values, and
+// show it so it can be copied by hand if the clipboard is unavailable.
+async function copyCreateSessionUrl() {
+    const url = buildCreateSessionUrl();
+    let copied = false;
+
+    try {
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(url);
+            copied = true;
+        } else {
+            // Fallback for non-HTTPS deployments where the Clipboard API is unavailable
+            const textArea = document.createElement('textarea');
+            textArea.value = url;
+            textArea.style.position = 'fixed';
+            textArea.style.opacity = '0';
+            document.body.appendChild(textArea);
+            textArea.select();
+            copied = document.execCommand('copy');
+            document.body.removeChild(textArea);
+        }
+    } catch (error) {
+        console.warn('Could not copy settings link to clipboard:', error);
+    }
+
+    const heading = copied ? 'Link to these settings copied to clipboard:' : 'Copy this link to share these settings:';
+    showMessage(
+        `${heading}<br><input type="text" readonly value="${escapeHtmlAttr(url)}" ` +
+        `onclick="this.select()" style="width: 100%; margin-top: 0.5rem; font-family: monospace;">`,
+        'info'
+    );
+}
+
 // Change Manager Mode sub-tab
 function changeManagerSubtab(subtabId) {
     console.log('Switching to manager sub-tab:', subtabId);
@@ -1049,9 +1212,23 @@ async function loadLSFConfig() {
         // Determine the available queues (respecting manager overrides)
         const availableQueues = lsfConfig.enabled_queues || lsfConfig.queues;
 
-        // Use the user setting if available, otherwise the global default queue.
-        // Validate against the available list (important for manager overrides).
-        let defaultQueue = userLsfSettings?.queue || lsfConfig.defaults.queue;
+        // Settings preset via URL query parameters take priority over the
+        // user's saved settings (see getUrlFormParams). Invalid values are
+        // ignored so the user/global defaults still apply.
+        const urlFormParams = getUrlFormParams();
+        if (urlFormParams.queue && availableQueues && !availableQueues.includes(urlFormParams.queue)) {
+            console.warn(`URL queue "${urlFormParams.queue}" not in available queues, ignoring it`);
+            delete urlFormParams.queue;
+        }
+        const urlLsfSettings = {
+            num_cores: urlFormParams.num_cores ? Number(urlFormParams.num_cores) : undefined,
+            memory_gb: urlFormParams.memory_gb ? Number(urlFormParams.memory_gb) : undefined,
+            os: urlFormParams.os
+        };
+
+        // Use the URL or user setting if available, otherwise the global default
+        // queue. Validate against the available list (important for manager overrides).
+        let defaultQueue = urlFormParams.queue || userLsfSettings?.queue || lsfConfig.defaults.queue;
         if (availableQueues && !availableQueues.includes(defaultQueue)) {
             console.warn(`Default queue "${defaultQueue}" not in available queues, using first available: ${availableQueues[0]}`);
             defaultQueue = availableQueues[0];
@@ -1066,7 +1243,13 @@ async function loadLSFConfig() {
         // selected queue. These may be overridden per-queue via
         // lsfConfig.queue_settings; when that is absent this falls back to the
         // global enabled options (fully backward compatible).
-        applyQueueSettings(defaultQueue, userLsfSettings);
+        // The user's saved cores/memory/OS were chosen for their saved queue,
+        // so when a URL selects a different queue use that queue's defaults
+        // instead (as when the user changes the queue by hand).
+        if (urlFormParams.queue && urlFormParams.queue !== userLsfSettings?.queue) {
+            userLsfSettings = null;
+        }
+        applyQueueSettings(defaultQueue, userLsfSettings, urlLsfSettings);
 
         // Re-apply the option sets whenever the user changes the queue so that
         // per-queue cores/memory/OS options and defaults take effect live.
@@ -1092,7 +1275,11 @@ async function loadLSFConfig() {
 // userLsfSettings (the user's saved preferences) takes precedence for default
 // selection on initial load; pass null when reacting to a queue change so the
 // per-queue default is applied.
-function applyQueueSettings(queue, userLsfSettings) {
+//
+// urlLsfSettings (optional) holds presets from URL query parameters; each is
+// used only if it is one of the queue's available options, and otherwise
+// falls back to the user/queue/global default.
+function applyQueueSettings(queue, userLsfSettings, urlLsfSettings = null) {
     if (!lsfConfig) {
         return;
     }
@@ -1106,7 +1293,9 @@ function applyQueueSettings(queue, userLsfSettings) {
         lsfConfig.enabled_cores,
         lsfConfig.core_options
     );
-    let defaultCores = userLsfSettings?.num_cores
+    const urlCores = availableCores.includes(urlLsfSettings?.num_cores) ? urlLsfSettings.num_cores : null;
+    let defaultCores = urlCores
+        || userLsfSettings?.num_cores
         || queueDefaults.num_cores
         || lsfConfig.defaults.num_cores;
     if (availableCores.length && !availableCores.includes(defaultCores)) {
@@ -1128,7 +1317,8 @@ function applyQueueSettings(queue, userLsfSettings) {
         lsfConfig.enabled_os_options,
         lsfConfig.os_options
     );
-    const defaultOs = userLsfSettings?.os || queueDefaults.os || lsfConfig.defaults.os || "Any";
+    const urlOs = availableOsOptions.some(os => os.name === urlLsfSettings?.os) ? urlLsfSettings.os : null;
+    const defaultOs = urlOs || userLsfSettings?.os || queueDefaults.os || lsfConfig.defaults.os || "Any";
     populateOsSelect(availableOsOptions, defaultOs);
 
     // --- Memory ---
@@ -1138,7 +1328,9 @@ function applyQueueSettings(queue, userLsfSettings) {
         lsfConfig.memory_options_gb,
         lsfConfig.memory_options
     );
-    const defaultMemoryGB = userLsfSettings?.memory_gb
+    const urlMemory = memoryOptionsData.includes(urlLsfSettings?.memory_gb) ? urlLsfSettings.memory_gb : null;
+    const defaultMemoryGB = urlMemory
+        || userLsfSettings?.memory_gb
         || queueDefaults.memory_gb
         || lsfConfig.defaults.memory_gb;
     setupMemorySlider(memoryOptionsData, defaultMemoryGB);

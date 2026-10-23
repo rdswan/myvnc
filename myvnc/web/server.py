@@ -414,18 +414,33 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
                     self.send_response(302)
                     # Use not_authenticated error instead of session_expired for initial load
                     self.send_header("Location", "/login?error=not_authenticated")
+                    self.send_return_query_cookie(path, parsed_path.query)
                     self.end_headers()
                     return
-                
+
                 success, message, session = self.auth_manager.validate_session(session_id)
                 if not success:
                     self.logger.warning(f"Invalid session for request to {path}: {message}, redirecting to login")
                     self.send_response(302)
                     self.send_header("Location", "/login?error=session_expired")
+                    self.send_return_query_cookie(path, parsed_path.query)
                     self.end_headers()
                     return
-                
+
                 self.logger.info(f"Authenticated request from {session.get('username', 'unknown')} to {path}")
+
+                # If the user was bounced to login from a link carrying
+                # parameters (e.g. a shared Create Session URL), send them
+                # back to that link now that they are authenticated.
+                if path == "/" and not parsed_path.query:
+                    return_query = self.get_return_query_cookie()
+                    if return_query:
+                        self.logger.info(f"Restoring pre-login query parameters: {return_query}")
+                        self.send_response(302)
+                        self.send_header("Location", f"/?{return_query}")
+                        self.send_header("Set-Cookie", f"{self.RETURN_QUERY_COOKIE}=; Path=/; Max-Age=0")
+                        self.end_headers()
+                        return
             else:
                 self.logger.debug(f"Skipping authentication check for {path} (public path)")
         
@@ -640,6 +655,37 @@ class VNCRequestHandler(http.server.CGIHTTPRequestHandler):
             self.logger.error(f"Error serving file {filename}: {str(e)}")
             self.send_error(500)
     
+    # Cookie that carries the query string of the page a user requested before
+    # being redirected to login, so it survives the LDAP and Entra login flows.
+    RETURN_QUERY_COOKIE = "myvnc_return_query"
+    RETURN_QUERY_MAX_AGE = 900
+
+    def send_return_query_cookie(self, path, query):
+        """Remember the query string of a main-page request across a login redirect"""
+        if path != "/" or not query:
+            return
+        # Never carry a session ID through the cookie
+        params = [(k, v) for k, v in urllib.parse.parse_qsl(query) if k != "sid"]
+        if not params:
+            return
+        value = quote(urllib.parse.urlencode(params), safe="")
+        self.send_header("Set-Cookie", f"{self.RETURN_QUERY_COOKIE}={value}; Path=/; Max-Age={self.RETURN_QUERY_MAX_AGE}; SameSite=Lax")
+
+    def get_return_query_cookie(self):
+        """Return the saved pre-login query string (re-encoded), or None"""
+        cookie_header = self.headers.get("Cookie")
+        if not cookie_header:
+            return None
+        import re
+        match = re.search(rf'(?:^|;)\s*{self.RETURN_QUERY_COOKIE}=([^;]+)', cookie_header)
+        if not match:
+            return None
+        # Re-encode from parsed pairs so the Location header can only ever
+        # contain a well-formed query string for this site's main page
+        params = urllib.parse.parse_qsl(urllib.parse.unquote(match.group(1)))
+        params = [(k, v) for k, v in params if k != "sid"]
+        return urllib.parse.urlencode(params) or None
+
     def get_session_cookie(self):
         """Get session cookie from request"""
         cookies = {}
