@@ -26,6 +26,14 @@ unset DBUS_SESSION_BUS_ADDRESS
 exec >> "$HOME/.vnc/xstartup.${HOSTNAME}${DISPLAY}.log" 2>&1
 echo "Starting VNC session at $(date)"
 
+# xfce4-session and other desktop components write sockets/auth files into
+# $TMPDIR without creating it, so a user-overridden TMPDIR that doesn't exist
+# on this host leaves the desktop as a blank grey screen.
+if [ -n "$TMPDIR" ] && ! { mkdir -p "$TMPDIR" 2>/dev/null && [ -w "$TMPDIR" ]; }; then
+    echo "WARNING: TMPDIR=$TMPDIR is not usable on ${HOSTNAME}, falling back to /tmp"
+    export TMPDIR=/tmp
+fi
+
 # Per-cgroup early-OOM watcher: kills the largest non-protected child before
 # LSF's OOM killer takes down the whole job (and Xvnc with it).
 # Controlled by the "cgroup_earlyoom" block in server_config.json:
